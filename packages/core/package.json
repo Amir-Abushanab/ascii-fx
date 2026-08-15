@@ -1,0 +1,30 @@
+{
+  "name": "@ascii-fx/core",
+  "version": "0.1.0",
+  "description": "High-fidelity structural ASCII rendering \u2014 core types, exact CPU matcher, profile/frame codecs.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./canvas2d": {
+      "types": "./dist/canvas2d.d.ts",
+      "default": "./dist/canvas2d.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.71",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.0"
+  }
+}
