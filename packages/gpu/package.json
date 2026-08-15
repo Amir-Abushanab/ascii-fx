@@ -1,0 +1,29 @@
+{
+  "name": "@ascii-fx/gpu",
+  "version": "0.1.0",
+  "description": "WebGPU renderer for ASCII FX: exact structural-v1 compute matching and one-draw atlas compositing, with a CPU fallback.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ascii-fx/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.71",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.0"
+  }
+}
