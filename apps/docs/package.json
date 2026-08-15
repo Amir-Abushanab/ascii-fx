@@ -1,0 +1,20 @@
+{
+  "name": "@ascii-fx-internal/docs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build && node embed-playground.mjs",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@ascii-fx/core": "workspace:*",
+    "@ascii-fx/gpu": "workspace:*"
+  },
+  "devDependencies": {
+    "@ascii-fx/vite": "workspace:*",
+    "astro": "^7.1.6",
+    "typescript": "^6.0.0"
+  }
+}

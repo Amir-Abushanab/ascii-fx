@@ -1,0 +1,122 @@
+---
+import Base from '../layouts/Base.astro'
+---
+
+<Base title="ASCII FX — structural ASCII rendering for the web" active="demo">
+  <h1>Shape, not brightness.</h1>
+  <p class="lead">
+    ASCII FX reconstructs images structurally: every cell's 8×8 samples become a binary mask, a Hamming prefilter
+    shortlists eight glyph candidates, and an exact RGB-reconstruction rerank picks the winner with fitted colors.
+    The whole pipeline runs as WebGPU compute — with a bit-identical CPU reference underneath, so machines without
+    a GPU get the same output, just slower.
+  </p>
+
+  <canvas class="demo" data-hero aria-label="Live ASCII rendering demo"></canvas>
+  <div class="chips" role="group" aria-label="Interaction presets">
+    <button data-interaction="reveal" data-active>reveal</button>
+    <button data-interaction="push">push</button>
+    <button data-interaction="wave">wave</button>
+    <button data-interaction="displace">displace</button>
+    <button data-interaction="resolution">magnify</button>
+    <button data-interaction="glyph-rotate">glyph-rotate</button>
+    <button data-interaction="color">color</button>
+    <button data-interaction="original-mix">original-mix</button>
+    <button data-interaction="none">none</button>
+  </div>
+  <p data-hero-status class="lead">starting demo…</p>
+  <p class="note">
+    Move your pointer over the canvas. Interactions run entirely in the composite stage — the matcher never
+    re-runs for pointer or time changes, which is why they cost ~nothing. This hero renders in
+    <code>foreground</code> mode (fitted glyph colors, page background showing through) at 96 columns — cells big
+    enough to read. <code>full</code> mode also fits a background per cell: maximum reconstruction fidelity, but at
+    small cell sizes it deliberately reads like the image itself rather than "ASCII art". Pick per use.
+  </p>
+
+  <h2>Why it looks different</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>Exact structural matching</h3>
+      <p>
+        Brightness ramps map luminance to density and lose edges. ASCII FX picks the glyph whose ink layout best
+        reconstructs the source cell — measured, not vibes: minimum squared-RGB reconstruction error over all 64
+        samples with per-cell fitted colors.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Bit-exact, GPU or CPU</h3>
+      <p>
+        The matcher is all-integer arithmetic, so the WebGPU compute path agrees with the CPU reference
+        bit-for-bit — glyphs, colors, flags — enforced by a browser conformance suite. <code>backend: 'auto'</code>
+        never trades quality, only speed.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Fonts compiled ahead of time</h3>
+      <p>
+        A deterministic compiler turns a font into a <code>.asciip</code> profile: glyph masks, coverage, and the
+        display atlas — byte-identical on every machine. The same data both matches and renders, so there is no
+        browser font drift. Zero runtime rasterization.
+      </p>
+    </div>
+  </div>
+
+  <h2>Matcher comparison, live</h2>
+  <p class="lead">
+    Rendered in your browser just now by the exact CPU reference — 40 columns, mono, so the glyph choices are
+    actually legible. <code>structural</code> is the default; <code>shape6</code> (a Harri-inspired 6D
+    descriptor) and <code>ramp</code> are explicit opt-ins — faster, measurably worse, and never chosen silently.
+  </p>
+  <div class="compare" data-compare>
+    <figure>
+      <canvas class="demo" data-variant="original"></canvas>
+      <figcaption><b>original</b> · procedural source</figcaption>
+    </figure>
+    <figure>
+      <canvas class="demo" data-variant="structural"></canvas>
+      <figcaption><b>structural</b> (exact default) · <span data-ms="structural">…</span></figcaption>
+    </figure>
+    <figure>
+      <canvas class="demo" data-variant="shape6"></canvas>
+      <figcaption><b>shape6</b> (approximate) · <span data-ms="shape6">…</span></figcaption>
+    </figure>
+    <figure>
+      <canvas class="demo" data-variant="ramp"></canvas>
+      <figcaption><b>ramp</b> (brightness only) · <span data-ms="ramp">…</span></figcaption>
+    </figure>
+  </div>
+
+  <h2>Quick start</h2>
+  <h3>React — zero config</h3>
+  <pre><code>import &#123; AsciiImage &#125; from '@ascii-fx/react'
+
+&lt;AsciiImage src="/cat.jpg" alt="Cat" /&gt;</code></pre>
+  <h3>Vanilla — GPU renderer</h3>
+  <pre><code>import &#123; createAsciiRenderer &#125; from '@ascii-fx/gpu'
+import &#123; loadProfile &#125; from '@ascii-fx/core'
+
+const ascii = await createAsciiRenderer(&#123;
+  canvas,
+  profile: await loadProfile('/default.asciip'),
+  columns: 160,
+  color: 'full',
+&#125;)
+ascii.setSource(video)
+ascii.start()</code></pre>
+  <h3>Build-time profiles — Vite</h3>
+  <pre><code>// vite.config.ts
+import &#123; ascii &#125; from '@ascii-fx/vite'
+export default defineConfig(&#123; plugins: [ascii()] &#125;)
+
+// anywhere
+import profileRef from 'virtual:ascii-profile/default'
+&lt;AsciiImage src="/hero.jpg" alt="…" profile=&#123;profileRef&#125; /&gt;</code></pre>
+  <p class="note">
+    This site is built with Astro and uses that exact Vite plugin for its own profile — the demo above loaded a
+    build-time-compiled Geist Mono <code>.asciip</code> (~13KB over the wire).
+  </p>
+</Base>
+
+<script>
+  import '../scripts/hero'
+  import '../scripts/compare'
+</script>
