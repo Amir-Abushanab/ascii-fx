@@ -1,0 +1,22 @@
+{
+  "name": "@ascii-fx-internal/benchmarks",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "bench": "node bench.mjs",
+    "quality": "node quality.mjs",
+    "compare": "node compare.mjs"
+  },
+  "dependencies": {
+    "@ascii-fx/compiler": "workspace:*",
+    "@ascii-fx/core": "workspace:*"
+  },
+  "devDependencies": {
+    "aalib.js": "^2.0.0",
+    "chafa-wasm": "^0.3.3",
+    "p5": "^2.3.2",
+    "p5.asciify": "^0.10.3",
+    "three": "0.185.1"
+  }
+}

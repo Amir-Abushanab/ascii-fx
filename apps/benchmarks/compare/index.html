@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ascii-fx cross-library bench</title>
+    <style>
+      body { margin: 0; background: #0b0b0f; color: #ddd; font: 13px monospace; }
+      #stage canvas, #stage div, #stage pre { display: block; }
+      #chafaOut { font: 8px/1 monospace; white-space: pre; }
+      #status { padding: 8px; }
+    </style>
+    <script src="/aalib.js"></script>
+    <script src="/p5.min.js"></script>
+    <script src="/p5.asciify.umd.js"></script>
+  </head>
+  <body>
+    <div id="status">booting…</div>
+    <div id="stage"></div>
+    <script type="importmap">
+      {
+        "imports": {
+          "@ascii-fx/core": "/packages/core/dist/index.js",
+          "@ascii-fx/gpu": "/packages/gpu/dist/index.js",
+          "three": "/three.module.js",
+          "three/addons/effects/AsciiEffect.js": "/AsciiEffect.js"
+        }
+      }
+    </script>
+    <script type="module">
+      import { compositeFrame, loadProfile, matchFrame } from '@ascii-fx/core'
+      import { createAsciiRenderer } from '@ascii-fx/gpu'
+      import * as THREE from 'three'
+      import { AsciiEffect } from 'three/addons/effects/AsciiEffect.js'
+      import ChafaFactory from '/chafa.js'
+
+      const W = 1280
+      const H = 720
+      const COLS = 160
+      const ROWS = 42 // grid-v1 for 1280×720 with the Geist 30×64 cell
+      const RAMP = ' .:-=+*#%@'
+
+      const status = document.getElementById('status')
+      const stage = document.getElementById('stage')
+      const gridNotes = {}
+
+      // ——— shared deterministic scene (orbs), same pixels for every contender ———
+      const scene = document.createElement('canvas')
+      scene.width = W
+      scene.height = H
+      const sctx = scene.getContext('2d', { willReadFrequently: true })
+      function drawScene(t) {
+        const g = sctx.createLinearGradient(0, 0, W, H)
+        g.addColorStop(0, '#101024')
+        g.addColorStop(1, '#241028')
+        sctx.fillStyle = g
+        sctx.fillRect(0, 0, W, H)
+        for (let i = 0; i < 6; i++) {
+          const a = t * (0.4 + i * 0.13) + (i * Math.PI) / 3
+          const x = W / 2 + Math.cos(a) * (200 + 60 * i)
+          const y = H / 2 + Math.sin(a * 1.3) * (120 + 40 * i)
+          const r = 90 - i * 9
+          const orb = sctx.createRadialGradient(x, y, 0, x, y, r)
+          orb.addColorStop(0, ['#ff8a5c', '#7cf29c', '#7c9cff', '#f2e37c', '#e37cf2', '#7ce3f2'][i])
+          orb.addColorStop(1, 'transparent')
+          sctx.fillStyle = orb
+          sctx.beginPath()
+          sctx.arc(x, y, r, 0, Math.PI * 2)
+          sctx.fill()
+        }
+      }
+
+      // ——— contenders: setup() → render() (may return a promise) → teardown() ———
+      const CONTENDERS = {
+        // Loop floor: draw the scene and present it with zero ascii work.
+        // Every other row includes this cost. (It must blit to a visible
+        // canvas: with no compositor damage, Chromium idles RAF at ~56fps
+        // and the row would measure the scheduler, not the work.)
+        'baseline (no ascii)': async () => {
+          const out = document.createElement('canvas')
+          out.width = W
+          out.height = H
+          stage.append(out)
+          const ctx = out.getContext('2d')
+          gridNotes['baseline (no ascii)'] = '—'
+          return { render: () => ctx.drawImage(scene, 0, 0), teardown: () => out.remove() }
+        },
+        'ascii-fx webgpu': async () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = W
+          canvas.height = H
+          stage.append(canvas)
+          const profile = await loadProfile('/default.asciip')
+          const r = await createAsciiRenderer({ canvas, profile, backend: 'webgpu', columns: COLS, color: 'foreground' })
+          r.setSource(scene)
+          gridNotes['ascii-fx webgpu'] = `${COLS}×${ROWS}`
+          return { render: () => r.render(), teardown: () => (r.destroy(), canvas.remove()) }
+        },
+        'ascii-fx cpu': async () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = W
+          canvas.height = H
+          stage.append(canvas)
+          const profile = await loadProfile('/default.asciip')
+          const r = await createAsciiRenderer({ canvas, profile, backend: 'cpu', columns: COLS, color: 'foreground' })
+          r.setSource(scene)
+          gridNotes['ascii-fx cpu'] = `${COLS}×${ROWS}`
+          return { render: () => r.render(), teardown: () => (r.destroy(), canvas.remove()) }
+        },
+        // The two approximate matchers our spec credits as influences, run
+        // through the real core code path (matchFrame with matcher option →
+        // compositeFrame). shape6 is the in-repo implementation of Alex
+        // Harri's shape-vector approach, accelerated by its 3-bit LUT.
+        'ascii-fx shape6-lut': async () => coreMatcherContender('shape6'),
+        'ascii-fx ramp matcher': async () => coreMatcherContender('ramp'),
+        // aalib.js 2.0 (the classic): its own reader → aa() → canvas renderer,
+        // called directly (no Rx plumbing between frames beyond its reader).
+        'aalib.js mono': async () => aalibContender(false),
+        'aalib.js colored': async () => aalibContender(true),
+        // p5.asciify (WebGL textmode add-on for p5): instance-mode sketch, the
+        // shared scene copied into a p5.Graphics each frame, redraw() driven.
+        'p5.asciify': async () => {
+          let inst
+          let g
+          const holder = document.createElement('div')
+          stage.append(holder)
+          await new Promise((resolve) => {
+            inst = new window.p5((p) => {
+              p.setup = () => {
+                p.createCanvas(W, H, p.WEBGL)
+                p.noLoop()
+                g = p.createGraphics(W, H)
+                resolve()
+              }
+              p.draw = () => {
+                p.clear()
+                p.image(g, -W / 2, -H / 2)
+              }
+            }, holder)
+          })
+          // Aim the textmode grid at our cell count. fontSize() is ignored
+          // until the add-on's async font setup finishes, so wait for it.
+          try {
+            const mgr = window.p5.asciify.p5asciify
+            const a = mgr.asciifier(0) ?? mgr.asciifiers?.[0]
+            for (let i = 0; i < 200 && !a?._setupDone; i++) await new Promise((r) => requestAnimationFrame(r))
+            a.fontSize(12)
+            inst.redraw()
+            const grid = a?.grid ?? a?._grid
+            gridNotes['p5.asciify'] = grid ? `${grid.cols}×${grid.rows}` : 'default grid'
+          } catch (err) {
+            gridNotes['p5.asciify'] = `default grid (${err.message})`
+          }
+          return {
+            render: () => {
+              g.drawingContext.drawImage(scene, 0, 0)
+              inst.redraw()
+            },
+            teardown: () => {
+              inst.remove()
+              holder.remove()
+            },
+          }
+        },
+        // chafa (the modern terminal converter, wasm build): raw ImageData in,
+        // HTML out into a <pre>, its default shape-aware symbol selection.
+        'chafa-wasm': async () => {
+          const chafa = await ChafaFactory()
+          const out = document.createElement('pre')
+          out.id = 'chafaOut'
+          stage.append(out)
+          const config = {
+            height: ROWS,
+            fontRatio: (W / COLS / (H / ROWS)), // square-ish our cells: 8/17.1
+            fg: 0xffffff,
+            bg: 0x000000,
+          }
+          let echoed = null
+          const render = () =>
+            new Promise((resolve, reject) => {
+              const id = sctx.getImageData(0, 0, W, H)
+              chafa.imageToHtml(id, config, (err, res) => {
+                if (err) return reject(err)
+                echoed ??= res.config
+                out.innerHTML = res.html
+                resolve()
+              })
+            })
+          await render()
+          gridNotes['chafa-wasm'] = echoed ? `${echoed.width}×${echoed.height}` : 'unknown'
+          return { render, teardown: () => out.remove() }
+        },
+        // Reference implementations, not libraries: the standard brightness
+        // ramp hand-optimized with zero library overhead. They mark the
+        // technique's floor — what any ramp lib could cost at best.
+        'ramp reference mono': async () => rampContender(false),
+        'ramp reference color': async () => rampContender(true),
+        // The real three.js AsciiEffect (examples/jsm), fed the same scene via
+        // a CanvasTexture quad. 1280×336 at resolution 0.125 gives the same
+        // 160×42 glyph grid; output is its usual DOM path.
+        'three.js AsciiEffect': async () => {
+          const renderer = new THREE.WebGLRenderer({ antialias: false })
+          renderer.setSize(1280, 336)
+          const effect = new AsciiEffect(renderer, RAMP.trim(), { resolution: 0.125 })
+          effect.setSize(1280, 336)
+          effect.domElement.style.color = '#fff'
+          effect.domElement.style.backgroundColor = '#000'
+          stage.append(effect.domElement)
+          const tScene = new THREE.Scene()
+          const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+          const tex = new THREE.CanvasTexture(scene)
+          tScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: tex })))
+          gridNotes['three.js AsciiEffect'] = '160×42'
+          return {
+            render: () => {
+              tex.needsUpdate = true
+              effect.render(tScene, cam)
+            },
+            teardown: () => {
+              renderer.dispose()
+              effect.domElement.remove()
+            },
+          }
+        },
+      }
+
+      async function coreMatcherContender(matcher) {
+        const profile = await loadProfile('/shape6.asciip')
+        const out = document.createElement('canvas')
+        stage.append(out)
+        const ctx = out.getContext('2d')
+        const name = matcher === 'shape6' ? 'ascii-fx shape6-lut' : 'ascii-fx ramp matcher'
+        gridNotes[name] = `${COLS}×${ROWS}`
+        let composited
+        const matchMs = []
+        return {
+          render: () => {
+            const id = sctx.getImageData(0, 0, W, H)
+            const t0 = performance.now()
+            const frame = matchFrame({ width: W, height: H, data: id.data }, { profile, columns: COLS, rows: ROWS, color: 'foreground', matcher })
+            matchMs.push(performance.now() - t0)
+            composited = compositeFrame(frame, {}, composited)
+            if (out.width !== composited.width) {
+              out.width = composited.width
+              out.height = composited.height
+            }
+            const data = new Uint8ClampedArray(composited.data.buffer, composited.data.byteOffset, composited.data.length)
+            ctx.putImageData(new ImageData(data, composited.width, composited.height), 0, 0)
+          },
+          // CPU rows are composite-bound at this glyph size; report the
+          // matcher-only cost so the matcher difference stays visible.
+          extraNote: () => {
+            matchMs.sort((a, b) => a - b)
+            return `match ${matchMs[Math.floor(matchMs.length / 2)].toFixed(1)}ms`
+          },
+          teardown: () => out.remove(),
+        }
+      }
+
+      function rampContender(colored) {
+        const small = document.createElement('canvas')
+        small.width = COLS
+        small.height = ROWS
+        const sm = small.getContext('2d', { willReadFrequently: true })
+        const out = document.createElement('canvas')
+        out.width = W
+        out.height = H
+        stage.append(out)
+        const ctx = out.getContext('2d')
+        const cellW = W / COLS
+        const cellH = H / ROWS
+        ctx.font = `${cellH}px monospace`
+        ctx.textBaseline = 'top'
+        const lumaOf = (d, o) => (77 * d[o] + 150 * d[o + 1] + 29 * d[o + 2] + 128) >> 8
+        gridNotes[`ramp reference ${colored ? 'color' : 'mono'}`] = `${COLS}×${ROWS}`
+        return {
+          render: () => {
+            sm.drawImage(scene, 0, 0, COLS, ROWS)
+            const d = sm.getImageData(0, 0, COLS, ROWS).data
+            ctx.fillStyle = '#000'
+            ctx.fillRect(0, 0, W, H)
+            if (!colored) {
+              // Mono's fastest formulation: one fillText per row string.
+              ctx.fillStyle = '#fff'
+              for (let y = 0; y < ROWS; y++) {
+                let row = ''
+                for (let x = 0; x < COLS; x++) {
+                  row += RAMP[(lumaOf(d, (y * COLS + x) * 4) * (RAMP.length - 1) + 127) >> 8]
+                }
+                ctx.fillText(row, 0, y * cellH)
+              }
+            } else {
+              for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                  const o = (y * COLS + x) * 4
+                  const ch = RAMP[(lumaOf(d, o) * (RAMP.length - 1) + 127) >> 8]
+                  if (ch === ' ') continue
+                  ctx.fillStyle = `rgb(${d[o]},${d[o + 1]},${d[o + 2]})`
+                  ctx.fillText(ch, x * cellW, y * cellH)
+                }
+              }
+            }
+          },
+          teardown: () => out.remove(),
+        }
+      }
+
+      function aalibContender(colored) {
+        const aalib = window.aalib.default ?? window.aalib
+        const el = document.createElement('canvas')
+        stage.append(el)
+        const toAA = aalib.aa({ width: COLS, height: ROWS, colored })
+        const draw = aalib.render.canvas({
+          el,
+          width: W,
+          height: H,
+          charWidth: W / COLS,
+          lineHeight: H / ROWS,
+          fontSize: Math.round(H / ROWS) - 1,
+          background: '#000',
+          color: '#fff',
+          charset: aalib.charset.ASCII_CHARSET,
+        })
+        gridNotes[`aalib.js ${colored ? 'colored' : 'mono'}`] = `${COLS}×${ROWS}`
+        return {
+          render: () => {
+            // Their documented pipeline, subscribed synchronously per frame.
+            aalib.read.imageData.fromCanvas(scene).subscribe((img) => draw(toAA(img)))
+          },
+          teardown: () => el.remove(),
+        }
+      }
+
+      const raf = () => new Promise((r) => requestAnimationFrame(r))
+
+      window.runBench = async (name, { warmup = 40, frames = 200 } = {}) => {
+        const contender = await CONTENDERS[name]()
+        status.textContent = `running: ${name}`
+        let f = 0
+        for (let i = 0; i < warmup; i++) {
+          drawScene(f++ / 60)
+          await contender.render()
+          await raf()
+        }
+        const deltas = []
+        let prev = performance.now()
+        for (let i = 0; i < frames; i++) {
+          drawScene(f++ / 60)
+          await contender.render()
+          await raf()
+          const now = performance.now()
+          deltas.push(now - prev)
+          prev = now
+        }
+        const extra = contender.extraNote?.()
+        contender.teardown()
+        deltas.sort((a, b) => a - b)
+        const q = (p) => deltas[Math.min(deltas.length - 1, Math.floor(p * deltas.length))]
+        const mean = deltas.reduce((s, v) => s + v, 0) / deltas.length
+        status.textContent = `done: ${name}`
+        const grid = (gridNotes[name] ?? '?') + (extra ? ` · ${extra}` : '')
+        return { name, p50: q(0.5), p95: q(0.95), mean, fps: 1000 / q(0.5), frames, grid }
+      }
+      window.benchNames = Object.keys(CONTENDERS)
+      status.textContent = 'ready'
+    </script>
+  </body>
+</html>
