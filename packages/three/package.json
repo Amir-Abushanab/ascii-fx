@@ -1,0 +1,35 @@
+{
+  "name": "@ascii-fx/three",
+  "version": "0.1.0",
+  "description": "Three.js adapter for ASCII FX: AsciiPass postprocessing for WebGPURenderer and an instanced AsciiGlyphs renderer.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "three": ">=0.170.0"
+  },
+  "dependencies": {
+    "@ascii-fx/core": "workspace:*",
+    "@ascii-fx/gpu": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.4",
+    "@webgpu/types": "^0.1.71",
+    "three": "0.185.1",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.0"
+  }
+}

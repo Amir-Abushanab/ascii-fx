@@ -1,0 +1,36 @@
+{
+  "name": "@ascii-fx/react",
+  "version": "0.1.0",
+  "description": "React components and hooks for ASCII FX: <AsciiImage>, <AsciiVideo>, <AsciiCanvas> with SSR-safe fallbacks.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "@ascii-fx/core": "workspace:*",
+    "@ascii-fx/gpu": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.0"
+  }
+}

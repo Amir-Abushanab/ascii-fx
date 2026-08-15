@@ -1,0 +1,108 @@
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { Buffer } from 'node:buffer'
+import { describe, expect, it } from 'vitest'
+import { PNG } from 'pngjs'
+import { decodeFrame, decodeProfile } from '@ascii-fx/core'
+import { ascii } from '../src/index.js'
+
+const FONT_PATH = fileURLToPath(new URL('../../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url))
+
+const makePng = (): Uint8Array => {
+  const png = new PNG({ width: 64, height: 32 })
+  for (let y = 0; y < 32; y++) {
+    for (let x = 0; x < 64; x++) {
+      const p = (y * 64 + x) * 4
+      const v = x < 32 ? 30 : 220
+      png.data[p] = v
+      png.data[p + 1] = v
+      png.data[p + 2] = 255 - v
+      png.data[p + 3] = 255
+    }
+  }
+  return new Uint8Array(PNG.sync.write(png))
+}
+
+interface LoadCtx {
+  addWatchFile(file: string): void
+}
+
+const runHooks = async (
+  plugin: ReturnType<typeof ascii>,
+  id: string,
+  watched: string[],
+): Promise<string> => {
+  const resolveId = plugin.resolveId as (id: string) => string | null
+  const load = plugin.load as (this: LoadCtx, id: string) => Promise<string | null>
+  const resolved = resolveId.call(plugin, id)
+  expect(resolved).toBe(`\0${id}`)
+  const code = await load.call({ addWatchFile: (f: string) => watched.push(f) }, resolved!)
+  expect(code).toBeTruthy()
+  return code!
+}
+
+const assetPathOf = (code: string): string => {
+  const match = /import url from "(.*)\?url"/.exec(code.replaceAll("'", '"'))
+  expect(match, `no ?url import in:\n${code}`).toBeTruthy()
+  return match![1]
+}
+
+describe('@ascii-fx/vite plugin', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'ascii-fx-vite-'))
+  const pngPath = join(tmp, 'hero.png')
+  writeFileSync(pngPath, Buffer.from(makePng()))
+
+  const plugin = ascii({
+    config: {
+      profiles: { default: { font: FONT_PATH } },
+      frames: { hero: { image: pngPath, columns: 16, color: 'full' } },
+    },
+    cacheDir: join(tmp, 'cache'),
+  })
+  ;(plugin.configResolved as (c: { root: string }) => void)({ root: tmp })
+
+  it('compiles a profile into the cache and emits a ?url virtual module', async () => {
+    const watched: string[] = []
+    const code = await runHooks(plugin, 'virtual:ascii-profile/default', watched)
+    expect(code).toContain(`id: "default"`)
+    expect(watched).toContain(FONT_PATH)
+    const cachePath = assetPathOf(code)
+    const profile = decodeProfile(new Uint8Array(readFileSync(cachePath)))
+    expect(profile.glyphCount).toBe(95)
+    expect(profile.id).toBe('default')
+  })
+
+  it('reuses the cached profile on subsequent loads', async () => {
+    const first = assetPathOf(await runHooks(plugin, 'virtual:ascii-profile/default', []))
+    const mtime = statSync(first).mtimeMs
+    const second = assetPathOf(await runHooks(plugin, 'virtual:ascii-profile/default', []))
+    expect(second).toBe(first)
+    expect(statSync(second).mtimeMs).toBe(mtime)
+  })
+
+  it('builds static frames bound to their profile', async () => {
+    const watched: string[] = []
+    const code = await runHooks(plugin, 'virtual:ascii-frame/hero', watched)
+    expect(code).toContain(`profile: "default"`)
+    expect(watched).toContain(pngPath)
+    const framePath = assetPathOf(code)
+    const profilePath = assetPathOf(await runHooks(plugin, 'virtual:ascii-profile/default', []))
+    const profile = decodeProfile(new Uint8Array(readFileSync(profilePath)))
+    const frame = decodeFrame(new Uint8Array(readFileSync(framePath)), profile)
+    expect(frame.columns).toBe(16)
+    expect(frame.colorMode).toBe('full')
+    expect(frame.toText().length).toBeGreaterThan(0)
+  })
+
+  it('unknown names fail with the available list', async () => {
+    await expect(runHooks(plugin, 'virtual:ascii-profile/nope', [])).rejects.toThrow(/available: default/)
+    await expect(runHooks(plugin, 'virtual:ascii-frame/nope', [])).rejects.toThrow(/available: hero/)
+  })
+
+  it('ignores unrelated ids', () => {
+    const resolveId = plugin.resolveId as (id: string) => string | null
+    expect(resolveId.call(plugin, './regular-module.ts')).toBeNull()
+  })
+})
