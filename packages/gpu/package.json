@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "WebGPU renderer for ASCII FX: exact structural-v1 compute matching and one-draw atlas compositing, with a CPU fallback.",
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {

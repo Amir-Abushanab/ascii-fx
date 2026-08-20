@@ -27,6 +27,9 @@ import {
 import { SCENES, type SceneKind } from './scenes'
 import { ExportComponentDialog } from './exportDialog'
 import { refreshExplainer } from './explainer'
+import { renderMath } from './math'
+import { mountSectionIcons } from './sectionIcons'
+import { pointerUV } from './pointer'
 import type { ExportState } from './exportSnippets'
 
 createIcons({
@@ -67,6 +70,10 @@ const els = {
   fxIntensity: $<HTMLInputElement>('fxIntensity'),
   fxIntensityOut: $<HTMLOutputElement>('fxIntensityOut'),
 }
+
+const reducedMotionQuery = matchMedia('(prefers-reduced-motion: reduce)')
+let animatePreferenceTouched = false
+els.animate.checked = !reducedMotionQuery.matches
 
 const hexToRgb = (hex: string): RGB => [
   parseInt(hex.slice(1, 3), 16),
@@ -176,6 +183,7 @@ let sceneRaf = 0
 let frames = 0
 let fpsWindowStart = performance.now()
 let fps = 0
+let outputVisible = true
 
 function matchOptions(): AsciiRendererRuntimeOptions {
   return {
@@ -186,8 +194,8 @@ function matchOptions(): AsciiRendererRuntimeOptions {
     foreground: hexToRgb(els.fg.value),
     background: hexToRgb(els.bg.value),
     fit: els.fit.value as FitMode,
-    temporal: els.temporal.checked,
-    adaptiveResolution: els.adaptive.checked,
+    temporal: els.temporal.checked && !els.temporal.disabled,
+    adaptiveResolution: els.adaptive.checked && !els.adaptive.disabled,
   }
 }
 
@@ -254,13 +262,41 @@ function updateStats(): void {
 
 function renderLoopPolicy(): void {
   if (!renderer || !active) return
-  const continuous = active.live && (active.tick ? els.animate.checked : true)
+  const pageVisible = document.visibilityState !== 'hidden'
+  const continuous = active.live && els.animate.checked && outputVisible && pageVisible
+  if (active.source instanceof HTMLVideoElement) {
+    if (continuous) void active.source.play().catch(() => {})
+    else active.source.pause()
+  }
   if (continuous) renderer.start()
   else {
     renderer.stop()
-    renderer.render()
+    if (outputVisible && pageVisible) renderer.render()
   }
+  if (!continuous) fps = 0
 }
+
+function syncMotionPolicy(): void {
+  renderLoopPolicy()
+  if (active?.tick && els.animate.checked && outputVisible && document.visibilityState !== 'hidden') {
+    animationLoop()
+  } else if (sceneRaf) {
+    cancelAnimationFrame(sceneRaf)
+    sceneRaf = 0
+  }
+  updateStats()
+}
+
+const outputObserver = new IntersectionObserver(([entry]) => {
+  outputVisible = entry?.isIntersecting ?? true
+  syncMotionPolicy()
+})
+outputObserver.observe(out)
+document.addEventListener('visibilitychange', syncMotionPolicy)
+reducedMotionQuery.addEventListener('change', () => {
+  if (!animatePreferenceTouched) els.animate.checked = !reducedMotionQuery.matches
+  syncMotionPolicy()
+})
 
 const resizeObserver = new ResizeObserver(() => {
   syncCanvasSize()
@@ -275,11 +311,12 @@ async function rebuild(): Promise<void> {
   const fresh = out.cloneNode(false) as HTMLCanvasElement
   out.replaceWith(fresh)
   out = fresh
+  outputObserver.disconnect()
+  outputObserver.observe(out)
   resizeObserver.disconnect()
   resizeObserver.observe(out)
   out.addEventListener('pointermove', (e) => {
-    const rect = out.getBoundingClientRect()
-    renderer?.pointer.set((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height)
+    renderer?.pointer.set(...pointerUV(e, out))
   })
   let profile: AsciiProfile
   try {
@@ -303,10 +340,12 @@ async function rebuild(): Promise<void> {
   if (active) renderer.setSource(active.source)
   applyInteraction()
   syncInteractionAvailability()
-  renderLoopPolicy()
+  syncMotionPolicy()
   updateStats()
   // Explainer widgets run the real matcher against whatever font is loaded.
   refreshExplainer(profile)
+  // So do the heading icons — swap the font and they change with it.
+  void mountSectionIcons(profile)
 }
 
 async function switchSource(kind: string): Promise<void> {
@@ -315,7 +354,7 @@ async function switchSource(kind: string): Promise<void> {
     active?.cleanup?.()
     active = next
     renderer?.setSource(next.source)
-    renderLoopPolicy()
+    syncMotionPolicy()
     updateStats()
   } catch (err) {
     stats.textContent = `source failed: ${err instanceof Error ? err.message : String(err)}`
@@ -385,7 +424,7 @@ for (const input of optionInputs) {
     els.columnsOut.value = els.columns.value
     els.flatOut.value = els.flat.value
     renderer?.setOptions(matchOptions())
-    if (renderer && active && !(active.live && (active.tick ? els.animate.checked : true))) renderer.render()
+    if (renderer && active && !(active.live && els.animate.checked && outputVisible)) renderer.render()
     syncPanel()
     updateStats()
   })
@@ -401,7 +440,10 @@ for (const input of fxInputs) {
   })
 }
 
-els.animate.addEventListener('change', renderLoopPolicy)
+els.animate.addEventListener('change', () => {
+  animatePreferenceTouched = true
+  syncMotionPolicy()
+})
 
 /** Current dials as a minimal diff from the library defaults (what a snippet needs). */
 function getExportState(): ExportState {
@@ -417,8 +459,8 @@ function getExportState(): ExportState {
   if (fg.join() !== '255,255,255') options.foreground = fg
   if (bg.join() !== '0,0,0') options.background = bg
   if (els.fit.value !== 'contain') options.fit = els.fit.value
-  if (els.temporal.checked) options.temporal = true
-  if (els.adaptive.checked) options.adaptiveResolution = true
+  if (els.temporal.checked && !els.temporal.disabled) options.temporal = true
+  if (els.adaptive.checked && !els.adaptive.disabled) options.adaptiveResolution = true
 
   let interaction: Record<string, unknown> | null = null
   if (els.interaction.value !== 'none') {
@@ -502,15 +544,23 @@ savePngBtn.addEventListener('click', () => {
   })
 })
 window.addEventListener('beforeunload', () => {
+  outputObserver.disconnect()
+  if (sceneRaf) cancelAnimationFrame(sceneRaf)
   renderer?.destroy()
   active?.cleanup?.()
 })
 
 // scene animation + fps meter
 function animationLoop(): void {
-  cancelAnimationFrame(sceneRaf)
+  if (sceneRaf || !active?.tick || !els.animate.checked || !outputVisible || document.visibilityState === 'hidden') {
+    return
+  }
   const tick = (): void => {
-    if (active?.tick && els.animate.checked) active.tick(performance.now() / 1000)
+    if (!active?.tick || !els.animate.checked || !outputVisible || document.visibilityState === 'hidden') {
+      sceneRaf = 0
+      return
+    }
+    active.tick(performance.now() / 1000)
     frames++
     const now = performance.now()
     if (now - fpsWindowStart > 500) {
@@ -526,6 +576,10 @@ function animationLoop(): void {
   sceneRaf = requestAnimationFrame(tick)
 }
 
+// The explainer's formulas are static markup, so they typeset once rather than
+// on every profile refresh.
+renderMath()
+
 active = await createSource('orbs')
 await rebuild()
-animationLoop()
+syncMotionPolicy()

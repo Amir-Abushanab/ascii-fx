@@ -6,7 +6,8 @@
   "scripts": {
     "bench": "node bench.mjs",
     "quality": "node quality.mjs",
-    "compare": "node compare.mjs"
+    "compare": "node compare.mjs",
+    "prep:web": "node prepWeb.mjs"
   },
   "dependencies": {
     "@ascii-fx/compiler": "workspace:*",

@@ -300,6 +300,98 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
     }
   })
 
+  it('does not treat a paused loop as a slow frame', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+      columns: 16,
+      adaptiveResolution: true,
+    })
+    try {
+      renderer.setSource(randomImage(128, 72, 63))
+      renderer.render()
+      const internals = renderer as unknown as {
+        adaptiveScale: number
+        lastTickAt: number
+        paceAdaptive(): void
+      }
+
+      // A stale timestamp is what a stopped loop leaves behind: pacing would
+      // otherwise measure the entire pause as one catastrophic frame.
+      internals.lastTickAt = performance.now() - 10_000
+      expect(internals.adaptiveScale).toBe(1)
+
+      renderer.stop()
+      expect(internals.lastTickAt).toBe(0)
+
+      // Resuming must not step the resolution down on the strength of the gap.
+      renderer.start()
+      internals.paceAdaptive()
+      internals.paceAdaptive()
+      expect(internals.adaptiveScale).toBe(1)
+      renderer.stop()
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  it('still steps adaptive resolution down for a genuinely slow frame', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+      columns: 16,
+      adaptiveResolution: true,
+    })
+    try {
+      renderer.setSource(randomImage(128, 72, 64))
+      renderer.render()
+      const internals = renderer as unknown as {
+        adaptiveScale: number
+        adaptiveEma: number
+        lastTickAt: number
+        paceAdaptive(): void
+      }
+      // The EMA needs several slow frames to cross the step-down threshold;
+      // this is the counterpart to the paused-loop test, proving that guard
+      // suppresses only the pause and not real frame pressure.
+      internals.adaptiveEma = 1000 / 60
+      for (let i = 0; i < 12; i++) {
+        internals.lastTickAt = performance.now() - 100
+        internals.paceAdaptive()
+      }
+      expect(internals.adaptiveScale).toBeLessThan(1)
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  it('resets removed options and restores the baseline when adaptive resolution is disabled', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+      columns: 16,
+      adaptiveResolution: true,
+    })
+    try {
+      renderer.setSource(randomImage(128, 72, 62))
+      renderer.render()
+      const internals = renderer as unknown as { adaptiveScale: number }
+      internals.adaptiveScale = 0.5
+      renderer.setOptions({ columns: undefined, adaptiveResolution: false })
+      renderer.render()
+      expect(renderer.grid()?.columns).toBe(120)
+      expect(internals.adaptiveScale).toBe(1)
+    } finally {
+      renderer.destroy()
+    }
+  })
+
   it('runtime canvas profiles power zero-config rendering (spec §14/§41)', async () => {
     const { createAsciiProfile } = await import('@ascii-fx/core')
     const profile = await createAsciiProfile({ fontFamily: 'monospace' })

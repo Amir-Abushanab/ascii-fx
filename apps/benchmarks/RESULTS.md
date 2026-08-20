@@ -60,21 +60,41 @@ visually reasonable while differing from the exact winner; the error deltas abov
 
 ## Cross-library render loop
 
-Generated 2026-08-15T00:53:26.921Z · headless Chromium, vsync disabled · identical 1280×720 animated source, 200 timed frames after 40 warmup, each library at (or as near as it allows) the same 160×42 glyph grid. Each row runs in a fresh page (no cross-library GC/GPU contamination); best of 2 passes. Times are main-thread wall clock per frame and include drawing the source scene — the baseline row is that shared floor.
+Generated 2026-08-20T01:34:52.819Z · headless Chromium, vsync disabled · identical 1280×720 animated source, 200 timed frames after 40 warmup, each library at (or as near as it allows) the same 160×42 glyph grid. Each row runs in a fresh page (no cross-library GC/GPU contamination); best of 2 passes. Times are main-thread wall clock per frame and include drawing the source scene — the baseline row is that shared floor.
 
 | library | glyph grid | p50 ms/frame | p95 ms/frame | ~fps |
 | --- | --- | ---: | ---: | ---: |
-| baseline (no ascii) | — | 2.60 | 3.00 | 385 |
-| ascii-fx webgpu | 160×42 | 2.70 | 3.20 | 370 |
-| ascii-fx cpu | 160×42 | 38.80 | 40.80 | 26 |
-| ascii-fx shape6-lut | 160×42 · match 9.7ms | 37.70 | 39.90 | 27 |
-| ascii-fx ramp matcher | 160×42 · match 9.4ms | 36.60 | 39.70 | 27 |
-| aalib.js mono | 160×42 | 9.50 | 19.00 | 105 |
-| aalib.js colored | 160×42 | 15.00 | 34.30 | 67 |
-| p5.asciify | 106×60 | 3.00 | 3.30 | 333 |
-| chafa-wasm | 160×42 | 45.30 | 50.20 | 22 |
-| ramp reference mono | 160×42 | 2.80 | 3.10 | 357 |
-| ramp reference color | 160×42 | 8.00 | 8.50 | 125 |
-| three.js AsciiEffect | 160×42 | 5.90 | 6.40 | 169 |
+| baseline (no ascii) | — | 2.50 | 2.70 | 400 |
+| ascii-fx webgpu | 160×42 | 2.60 | 2.90 | 385 |
+| ascii-fx cpu | 160×42 | 39.00 | 41.40 | 26 |
+| ascii-fx shape6-lut | 160×42 · match 9.8ms | 38.40 | 40.00 | 26 |
+| ascii-fx ramp matcher | 160×42 · match 9.8ms | 38.10 | 40.50 | 26 |
+| aalib.js mono | 160×42 | 10.00 | 22.10 | 100 |
+| aalib.js colored | 160×42 | 16.20 | 32.30 | 62 |
+| p5.asciify | 106×60 | 3.30 | 4.50 | 303 |
+| chafa-wasm | 160×42 | 47.20 | 51.70 | 21 |
+| ramp reference mono | 160×42 | 2.70 | 2.90 | 370 |
+| ramp reference color | 160×42 | 8.20 | 8.60 | 122 |
+| three.js AsciiEffect | 160×42 | 6.10 | 6.70 | 164 |
 
 Method notes: library rows are the real published packages — aalib.js 2.0 (reader → aa() → its canvas renderer), p5.asciify 0.10 on p5 2.x (WebGL textmode add-on, instance mode, redraw-driven), chafa-wasm 0.3 (raw ImageData → imageToHtml, default shape-aware symbol set), three.js AsciiEffect from three 0.185 (CanvasTexture quad, its DOM output). ascii-fx webgpu/cpu rows run the exact structural matcher with per-cell color fitting ('foreground'). The shape6-lut row is the in-repo implementation of Alex Harri's shape-vector approach (a spec-credited influence, published as writing rather than a package) with its 3-bit LUT, and the ramp-matcher row is our cheapest opt-in — both through the real core path (matchFrame → compositeFrame) on the main thread. The "ramp reference" rows are not libraries: the standard brightness-ramp technique hand-optimized with zero library overhead, the technique's floor. What each computes differs: aalib and AsciiEffect map brightness to a ramp (aalib's colored mode adds per-cell color), p5.asciify maps brightness to a colored textmode grid, chafa does shape-aware block/border selection with fg+bg colors — with Harri's descriptor, the two shape-aware influences this project credits. The spec's structural-reconstruction credit ("Ditherlab / chafa-style") is represented here by chafa-wasm: the credited 8×8 mask → Hamming prefilter → exact-rerank pipeline is chafa's documented algorithm, and no separately runnable Ditherlab artifact could be located to bench. Equal speed is not equal output.
+
+## CPU reference (single-threaded)
+
+Generated 2026-08-19T14:56:11.740Z · Node v24.19.0 · 1280×720 procedural source (gradient + rings + deterministic noise) · exact `structural-v1` matcher · 95 glyphs · p50/p95 of 15 runs after 3 warmup.
+
+| grid | color | cells | p50 ms | p95 ms | cells/ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 80×21 | mono | 1680 | 8.60 | 12.47 | 195 |
+| 80×21 | full | 1680 | 10.26 | 17.81 | 164 |
+| 120×32 | mono | 3840 | 16.66 | 17.49 | 230 |
+| 120×32 | full | 3840 | 20.23 | 21.34 | 190 |
+| 160×42 | mono | 6720 | 27.01 | 30.63 | 249 |
+| 160×42 | full | 6720 | 34.52 | 37.55 | 195 |
+| 240×63 | mono | 15120 | 57.27 | 60.57 | 264 |
+| 240×63 | full | 15120 | 72.81 | 83.48 | 208 |
+| 320×84 | mono | 26880 | 92.41 | 101.45 | 291 |
+| 320×84 | full | 26880 | 119.81 | 121.27 | 224 |
+
+This is the fallback path for machines without WebGPU. It is the exact reference implementation the GPU
+compute path is verified against bit-for-bit, so the fallback costs speed and never quality.

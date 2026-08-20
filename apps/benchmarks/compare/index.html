@@ -9,9 +9,9 @@
       #chafaOut { font: 8px/1 monospace; white-space: pre; }
       #status { padding: 8px; }
     </style>
-    <script src="/aalib.js"></script>
-    <script src="/p5.min.js"></script>
-    <script src="/p5.asciify.umd.js"></script>
+    <script src="./aalib.js"></script>
+    <script src="./p5.min.js"></script>
+    <script src="./p5.asciify.umd.js"></script>
   </head>
   <body>
     <div id="status">booting…</div>
@@ -19,10 +19,10 @@
     <script type="importmap">
       {
         "imports": {
-          "@ascii-fx/core": "/packages/core/dist/index.js",
-          "@ascii-fx/gpu": "/packages/gpu/dist/index.js",
-          "three": "/three.module.js",
-          "three/addons/effects/AsciiEffect.js": "/AsciiEffect.js"
+          "@ascii-fx/core": "./packages/core/dist/index.js",
+          "@ascii-fx/gpu": "./packages/gpu/dist/index.js",
+          "three": "./three.module.js",
+          "three/addons/effects/AsciiEffect.js": "./AsciiEffect.js"
         }
       }
     </script>
@@ -31,7 +31,7 @@
       import { createAsciiRenderer } from '@ascii-fx/gpu'
       import * as THREE from 'three'
       import { AsciiEffect } from 'three/addons/effects/AsciiEffect.js'
-      import ChafaFactory from '/chafa.js'
+      import ChafaFactory from './chafa.js'
 
       const W = 1280
       const H = 720
@@ -89,7 +89,7 @@
           canvas.width = W
           canvas.height = H
           stage.append(canvas)
-          const profile = await loadProfile('/default.asciip')
+          const profile = await loadProfile('./default.asciip')
           const r = await createAsciiRenderer({ canvas, profile, backend: 'webgpu', columns: COLS, color: 'foreground' })
           r.setSource(scene)
           gridNotes['ascii-fx webgpu'] = `${COLS}×${ROWS}`
@@ -100,7 +100,7 @@
           canvas.width = W
           canvas.height = H
           stage.append(canvas)
-          const profile = await loadProfile('/default.asciip')
+          const profile = await loadProfile('./default.asciip')
           const r = await createAsciiRenderer({ canvas, profile, backend: 'cpu', columns: COLS, color: 'foreground' })
           r.setSource(scene)
           gridNotes['ascii-fx cpu'] = `${COLS}×${ROWS}`
@@ -224,7 +224,7 @@
       }
 
       async function coreMatcherContender(matcher) {
-        const profile = await loadProfile('/shape6.asciip')
+        const profile = await loadProfile('./shape6.asciip')
         const out = document.createElement('canvas')
         stage.append(out)
         const ctx = out.getContext('2d')

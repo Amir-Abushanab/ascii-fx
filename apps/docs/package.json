@@ -4,13 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build && node embed-playground.mjs",
+    "dev": "node prep.mjs && pnpm --filter @ascii-fx-internal/benchmarks run prep:web && astro dev",
+    "build": "node prep.mjs && pnpm --filter @ascii-fx-internal/benchmarks run prep:web && astro build",
     "preview": "astro preview"
   },
   "dependencies": {
     "@ascii-fx/core": "workspace:*",
-    "@ascii-fx/gpu": "workspace:*"
+    "@ascii-fx/gpu": "workspace:*",
+    "katex": "^0.18.4",
+    "lucide": "^1.31.0",
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@ascii-fx/vite": "workspace:*",

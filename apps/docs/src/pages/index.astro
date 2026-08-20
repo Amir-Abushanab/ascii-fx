@@ -1,122 +1,1326 @@
 ---
-import Base from '../layouts/Base.astro'
+// The playground: the interactive control room plus the pipeline explainer.
+// It lives here rather than in its own Vite app so the site is one build and
+// one dev server; `import.meta.env.BASE_URL` covers what PG_BASE used to.
+import { Code } from 'astro:components'
+import BenchChart from '../components/BenchChart.astro'
+import BenchRunner from '../components/BenchRunner.astro'
+import { baseline, cpuReference, crossLibrary, crossLibraryGeneratedAt, lib, matcher, worstRecall } from '../lib/results'
+
+const base = import.meta.env.BASE_URL
+
+// The page speaks the same font the default profile was compiled from. The URL
+// has to carry the site base, so this rule is built here rather than sitting in
+// the static stylesheet below.
+const fontFace = `@font-face {
+  font-family: 'Geist Mono';
+  src: url('${base}GeistMono-Regular.ttf') format('truetype');
+  font-display: swap;
+}`
+// Presentation only. Every number below comes from apps/benchmarks/RESULTS.md;
+// a contender the harness starts emitting without an entry here fails the build
+// rather than silently vanishing from the published table.
+interface RowMeta {
+  label: string
+  picks: string
+  /** How the glyph is chosen — drives the tag colour, since that is the axis
+      the table exists to compare. */
+  kind: 'exact' | 'shape' | 'brightness' | 'none'
+  /** Family colour, shared with the chart above so rows read across both. */
+  color: string
+  /** Ours: tinted so the reader can find us without hunting. */
+  us?: boolean
+  /** Bold the row: this is us, at the setting we recommend. */
+  emphasis?: boolean
+  /** Footnote marker explained under the table. */
+  marker?: string
+}
+
+const TABLE_META: Record<string, RowMeta> = {
+  'baseline (no ascii)': { label: 'baseline · scene only, no ascii', picks: '—', kind: 'none', color: '#565668' },
+  'ascii-fx webgpu': { label: 'ascii-fx · WebGPU', picks: 'shape, exact', kind: 'exact', color: '#7c9cff', us: true, emphasis: true },
+  'ramp reference mono': { label: 'ramp reference · mono', picks: 'brightness', kind: 'brightness', color: '#565668', marker: '*' },
+  'p5.asciify': { label: 'p5.asciify 0.10 (WebGL)', picks: 'brightness + color', kind: 'brightness', color: '#ed225d' },
+  'three.js AsciiEffect': { label: 'three.js AsciiEffect (0.185)', picks: 'brightness', kind: 'brightness', color: '#049ef4' },
+  'ramp reference color': { label: 'ramp reference · color', picks: 'brightness + color', kind: 'brightness', color: '#565668', marker: '*' },
+  'aalib.js mono': { label: 'aalib.js 2.0 · mono', picks: 'brightness', kind: 'brightness', color: '#8a8a99' },
+  'aalib.js colored': { label: 'aalib.js 2.0 · colored', picks: 'brightness + color', kind: 'brightness', color: '#8a8a99' },
+  'ascii-fx ramp matcher': { label: 'ascii-fx ramp matcher', picks: 'brightness', kind: 'brightness', color: '#54608a', us: true, marker: '†' },
+  'ascii-fx shape6-lut': { label: 'ascii-fx shape6-lut (Harri-style)', picks: '6-D shape vector', kind: 'shape', color: '#54608a', us: true, marker: '†' },
+  'ascii-fx cpu': { label: 'ascii-fx · CPU fallback', picks: 'shape, exact', kind: 'exact', color: '#54608a', us: true, marker: '†' },
+  'chafa-wasm': { label: 'chafa-wasm 0.3', picks: 'shape-aware blocks', kind: 'shape', color: '#654ff0' },
+}
+
+const rows = crossLibrary
+  .map((r) => {
+    const meta = TABLE_META[r.name]
+    if (!meta) {
+      throw new Error(
+        `index.astro has no presentation entry for the benchmark row "${r.name}". ` +
+          `Add it to TABLE_META (or drop the row from the harness).`,
+      )
+    }
+    // The harness appends notes like "160×42 · match 9.9ms"; the table shows the
+    // grid, the footnote carries the matcher cost.
+    const [grid] = r.grid.split(' · ')
+    return { ...r, ...meta, grid, overFloor: r.p50 - baseline.p50 }
+  })
+  .sort((a, b) => a.p50 - b.p50)
+
+// "over floor" is the column that carries the argument, so it gets drawn as a
+// bar as well as a number; every bar is scaled against the slowest row.
+const worstOverFloor = Math.max(...rows.map((r) => r.overFloor))
+
+/** Matcher-only cost the harness recorded alongside a row's grid, in ms. */
+const matchMs = (name: string): string => {
+  const note = lib(name).grid.match(/match ([\d.]+)ms/)
+  if (!note) throw new Error(`RESULTS.md row "${name}" no longer carries a "match <n>ms" note.`)
+  return note[1]
+}
+
+const exactMs = matcher('structural (exact)').ms
+const cpuFull = cpuReference.filter((r) => r.color === 'full')
+const cpu160 = cpuFull.find((r) => r.grid === '160×42')
+const webgpu = lib('ascii-fx webgpu')
+
+const APPROX = [
+  { results: 'shape6 + LUT', quality: `small error deltas in full color; structural recall collapses on dense texture (worst corpus case ${worstRecall('shape6-lut').recall}%)` },
+  { results: 'shape6 brute', quality: 'similar; no 512KiB LUT payload' },
+  { results: 'ramp', quality: 'brightness only — an effect, not a fidelity mode' },
+].map((a) => ({ ...a, ...matcher(a.results) }))
+
+const measuredOn = new Date(crossLibraryGeneratedAt).toISOString().slice(0, 10)
+
+// Shown on the page, highlighted at build time by Astro's shiki integration —
+// same theme the export dialog uses, so code looks the same everywhere.
+const reactSample = `import { AsciiImage, AsciiVideo } from '@ascii-fx/react'
+
+<AsciiImage src="/hero.jpg" alt="Portrait" columns={160} color="full"
+  interaction={{ type: 'reveal', radius: 0.18 }} />
+
+<AsciiVideo src="/clip.mp4" profile={profileRef} />`
+
+const vanillaSample = `const ascii = await createAsciiRenderer({ canvas, profile, backend: 'auto' })
+
+ascii.setSource(imageOrVideoOrCanvas)
+ascii.start()                          // rVFC for video, rAF otherwise
+ascii.setOptions({ columns: 200, color: 'mono' })
+ascii.setInteraction({ type: 'push' })
+
+const frame = await ascii.captureFrame()`
+
+const threeSample = `const pass = new AsciiPass({ profile, renderer, columns: 160, color: 'full' })
+await pass.init()
+
+pass.render(scene, camera)             // per frame, instead of renderer.render()
+
+// or in React Three Fiber
+<AsciiEffect profile={profileRef} columns={180} interaction="reveal" />`
+
+const configSample = `export default defineAsciiConfig({
+  profiles: { default: { font: './fonts/GeistMono.woff2', charset: 'ascii' } },
+  frames:   { hero: { image: './src/hero.png', columns: 140, color: 'full' } },
+})
+
+import profileRef from 'virtual:ascii-profile/default'`
+
+const charsetSample = `// at build time
+profiles: { rain: { font: './fonts/GeistMono.woff2', characters: '01 ' } }
+
+// or narrow a built profile at runtime
+const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
+
 ---
 
-<Base title="ASCII FX — structural ASCII rendering for the web" active="demo">
-  <h1>Shape, not brightness.</h1>
-  <p class="lead">
-    ASCII FX reconstructs images structurally: every cell's 8×8 samples become a binary mask, a Hamming prefilter
-    shortlists eight glyph candidates, and an exact RGB-reconstruction rerank picks the winner with fitted colors.
-    The whole pipeline runs as WebGPU compute — with a bit-identical CPU reference underneath, so machines without
-    a GPU get the same output, just slower.
-  </p>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ASCII FX — structural ASCII rendering for the web</title>
+    <meta name="description" content="High-fidelity structural ASCII rendering for the web." />
+    <link rel="icon" href={base + 'favicon.svg'} type="image/svg+xml" />
+    <style is:global set:html={fontFace}></style>
+    <style is:global>
+      :root {
+        color-scheme: dark;
+        /* The palette the benchmark chart, tables and notes below are written
+           against; the controls above use the same values literally. */
+        --bg: #0b0b0f;
+        --panel: #12121a;
+        --border: #23232f;
+        --text: #d6d6de;
+        --muted: #8a8a99;
+        --accent: #7c9cff;
+        --accent2: #2fa869;
+        --code-bg: #14141d;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #0b0b0f;
+        color: #d6d6de;
+        font: 13.5px/1.5 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+      h1 {
+        font-size: 1.3rem;
+        margin: 0;
+      }
+      #panel {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+        width: 100%;
+        max-width: 1080px;
+        /* Hint tooltips stay laid out while hidden, so ones near the right
+           edge used to widen the whole page. `clip` trims them horizontally
+           while leaving the vertical overflow they actually need visible. */
+        overflow-x: clip;
+      }
+      fieldset {
+        border: 1px solid #23232f;
+        border-radius: 10px;
+        padding: 8px 12px 10px;
+        margin: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        align-items: center;
+        background: #101018;
+        /* Flex items (and fieldsets especially) default to min-content width,
+           which is wider than a phone viewport. Let them shrink so their own
+           controls wrap instead of pushing the page sideways. */
+        min-width: 0;
+        max-width: 100%;
+      }
+      legend {
+        color: #7c9cff;
+        padding: 0 6px;
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        white-space: nowrap;
+      }
+      .hint {
+        position: relative;
+        text-decoration: underline dotted #565668;
+        text-underline-offset: 3px;
+        cursor: help;
+        outline: none;
+      }
+      .hint::after {
+        content: attr(data-hint);
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 9px);
+        transform: translateX(-50%) translateY(3px);
+        width: max-content;
+        max-width: min(270px, calc(100vw - 24px));
+        white-space: normal;
+        background: #1b1c24;
+        color: #d6d6de;
+        border: 1px solid #2c2c3a;
+        border-radius: 8px;
+        padding: 7px 10px;
+        font-size: 12px;
+        line-height: 1.45;
+        text-align: left;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.12s ease, transform 0.12s ease;
+        z-index: 30;
+      }
+      .hint::before {
+        content: '';
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 4px);
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-top-color: #2c2c3a;
+        opacity: 0;
+        transition: opacity 0.12s ease;
+        z-index: 30;
+      }
+      .hint:hover::after,
+      .hint:focus-visible::after,
+      .hint:hover::before,
+      .hint:focus-visible::before {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      .hint::before {
+        transform: translateX(-50%);
+      }
+      svg.lucide {
+        width: 14px;
+        height: 14px;
+        vertical-align: -2px;
+        flex: 0 0 auto;
+      }
+      legend svg.lucide {
+        vertical-align: -2.5px;
+        margin-right: 2px;
+      }
+      select,
+      input,
+      button {
+        max-width: 100%;
+        font: inherit;
+        background: #17171f;
+        color: inherit;
+        border: 1px solid #2c2c3a;
+        border-radius: 6px;
+        padding: 3px 7px;
+      }
+      input[type='range'] {
+        width: 90px;
+        max-width: 100%;
+        padding: 0;
+      }
+      input[type='color'] {
+        width: 34px;
+        height: 24px;
+        padding: 1px;
+      }
+      input[type='checkbox'] {
+        accent-color: #7c9cff;
+      }
+      input:disabled,
+      select:disabled {
+        opacity: 0.45;
+      }
+      /* Dim disabled rows via color, not opacity: the .hint tooltip inside
+         sets its own colors and must stay readable on hover. */
+      label:has(:disabled) {
+        color: #60606c;
+      }
+      label[hidden],
+      .warn[hidden] {
+        display: none;
+      }
+      .warn {
+        color: #facc15;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      button {
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      button:hover {
+        border-color: #7c9cff;
+      }
+      button.flash-ok {
+        border-color: #4ade80 !important;
+        color: #4ade80;
+        animation: pop 0.3s ease;
+      }
+      button.flash-err {
+        border-color: #f87171 !important;
+        color: #f87171;
+        animation: pop 0.3s ease;
+      }
+      @keyframes pop {
+        40% {
+          transform: scale(1.07);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none;
+          transition: none;
+        }
+      }
+      button.primary {
+        background: #7c9cff;
+        border-color: #7c9cff;
+        color: #0b0b0f;
+        font-weight: 600;
+      }
+      output {
+        color: #8a8a99;
+        min-width: 2.4em;
+        text-align: right;
+      }
+      .file-input {
+        position: fixed;
+        left: -9999px;
+        top: 0;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+      }
+      #out {
+        width: min(1024px, 100%);
+        aspect-ratio: 16 / 9;
+        border: 1px solid #1d1d28;
+        border-radius: 8px;
+        touch-action: none;
+      }
+      #stats {
+        color: #8a8a99;
+        min-height: 1.4em;
+        text-align: center;
+        max-width: 1024px;
+      }
+      #stats .fps-good {
+        color: #4ade80;
+      }
+      #stats .fps-ok {
+        color: #facc15;
+      }
+      #stats .fps-bad {
+        color: #f87171;
+      }
+      #explainer {
+        width: min(780px, 100%);
+        margin: 30px auto 24px;
+        color: #b9b9c6;
+        line-height: 1.65;
+        font-size: 13.5px;
+      }
+      /* Heading icon: a 4×2 block of glyphs from the real matcher, sized to sit
+         on the heading's own cap height. */
+      /* Heading icon: an 8×4 block of glyphs, so the heading becomes a row with
+         the pictogram beside its text rather than a taller line of type. */
+      #explainer h2:has(.hicon) {
+        display: flex;
+        align-items: center;
+        gap: 0.55em;
+      }
+      .hicon {
+        white-space: pre;
+        font-size: 0.5em;
+        /* A character cell is about 0.6 wide to 1 tall, so 8 columns need a
+           1.2 line-height to come out square over 4 rows. */
+        line-height: 1.2;
+        letter-spacing: 0;
+        color: #7c9cff;
+        opacity: 0.95;
+        flex: 0 0 auto;
+      }
+      #explainer h2 {
+        color: #7c9cff;
+        font-size: 1rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        margin: 2.2em 0 0.6em;
+      }
+      #explainer h2:first-child {
+        margin-top: 0;
+      }
+      #explainer p {
+        margin: 0.7em 0;
+      }
+      #explainer strong {
+        color: #d6d6de;
+      }
+      #explainer ul,
+      #explainer ol {
+        margin: 0.7em 0;
+        padding-left: 1.4em;
+      }
+      #explainer li {
+        margin: 0.35em 0;
+      }
+      /* Typeset formulas (KaTeX). They sit in the same slab as the code blocks
+         so the page reads as one thing, but scroll on their own rather than
+         widening it on a narrow screen. */
+      .formula {
+        background: #101018;
+        border: 1px solid #23232f;
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin: 0.7em 0;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        color: #d6d6de;
+      }
+      .formula .katex {
+        font-size: 1.02em;
+      }
+      /* KaTeX centres display math; these read as statements, not equations. */
+      .formula .katex-display {
+        margin: 0;
+        text-align: left;
+      }
+      .formula .katex-display > .katex {
+        text-align: left;
+      }
+      /* Two classes to outrank .wnote, which is defined later and sized for
+         sidebar captions; under a full-width formula this should use the column. */
+      .wnote.formula-note {
+        max-width: none;
+        margin-top: -0.35em;
+      }
+      #explainer h3 {
+        font-size: 1rem;
+        margin: 1.5rem 0 0.5rem;
+        color: #d6d6de;
+      }
+      #explainer .lead {
+        color: var(--muted);
+        max-width: 46rem;
+      }
+      #explainer .note {
+        border-left: 3px solid var(--accent2);
+        background: var(--panel);
+        border-radius: 0 8px 8px 0;
+        padding: 0.7rem 1rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      #explainer table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.85rem;
+        margin: 1rem 0;
+      }
+      #explainer th,
+      #explainer td {
+        border: 1px solid var(--border);
+        padding: 0.4rem 0.7rem;
+        text-align: left;
+      }
+      #explainer td.num,
+      #explainer th.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      #explainer th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      /* ——— cross-library table ———
+         Twelve rows of grey numbers hid the one thing the table is for: how much
+         main-thread time each approach costs over the shared floor. So the cost
+         column is drawn as well as printed, each row carries its family colour
+         from the chart above, and how the glyph gets picked becomes a tag rather
+         than a sentence. */
+      #explainer table.libs th {
+        white-space: nowrap;
+      }
+      #explainer table.libs td {
+        vertical-align: middle;
+      }
+      #explainer table.libs .approach {
+        min-width: 12rem;
+      }
+      #explainer table.libs .swatch {
+        display: inline-block;
+        width: 3px;
+        height: 0.95em;
+        margin-right: 0.6em;
+        border-radius: 2px;
+        background: var(--row);
+        vertical-align: -1px;
+      }
+      #explainer table.libs .grid {
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      /* Ours, tinted so it can be found without reading every label. */
+      #explainer table.libs tr[data-us] {
+        background: color-mix(in srgb, var(--accent) 8%, transparent);
+      }
+      /* The baseline is not a competitor — it is the line everything is measured from. */
+      #explainer table.libs tr[data-floor] td {
+        color: var(--muted);
+      }
+      #explainer .tag {
+        display: inline-block;
+        padding: 0.08em 0.55em;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 0.75rem;
+        white-space: nowrap;
+      }
+      /* Green marks the rows that pick a glyph by shape — the axis that matters. */
+      #explainer .tag[data-kind='exact'] {
+        color: var(--accent2);
+        border-color: color-mix(in srgb, var(--accent2) 55%, transparent);
+        background: color-mix(in srgb, var(--accent2) 10%, transparent);
+      }
+      #explainer .tag[data-kind='shape'] {
+        color: var(--accent2);
+        border-color: color-mix(in srgb, var(--accent2) 35%, transparent);
+      }
+      #explainer .tag[data-kind='none'] {
+        opacity: 0.55;
+      }
+      #explainer table.libs .cost {
+        position: relative;
+        min-width: 6rem;
+      }
+      #explainer table.libs .cost-bar {
+        position: absolute;
+        left: 0;
+        top: 1px;
+        bottom: 1px;
+        background: color-mix(in srgb, var(--row) 34%, transparent);
+        border-left: 2px solid color-mix(in srgb, var(--row) 85%, white);
+        pointer-events: none;
+      }
+      #explainer table.libs .cost-num {
+        position: relative;
+      }
+      #explainer table.libs tr[data-floor] .cost-num {
+        font-size: 0.78rem;
+        opacity: 0.75;
+      }
 
-  <canvas class="demo" data-hero aria-label="Live ASCII rendering demo"></canvas>
-  <div class="chips" role="group" aria-label="Interaction presets">
-    <button data-interaction="reveal" data-active>reveal</button>
-    <button data-interaction="push">push</button>
-    <button data-interaction="wave">wave</button>
-    <button data-interaction="displace">displace</button>
-    <button data-interaction="resolution">magnify</button>
-    <button data-interaction="glyph-rotate">glyph-rotate</button>
-    <button data-interaction="color">color</button>
-    <button data-interaction="original-mix">original-mix</button>
-    <button data-interaction="none">none</button>
-  </div>
-  <p data-hero-status class="lead">starting demo…</p>
-  <p class="note">
-    Move your pointer over the canvas. Interactions run entirely in the composite stage — the matcher never
-    re-runs for pointer or time changes, which is why they cost ~nothing. This hero renders in
-    <code>foreground</code> mode (fitted glyph colors, page background showing through) at 96 columns — cells big
-    enough to read. <code>full</code> mode also fits a background per cell: maximum reconstruction fidelity, but at
-    small cell sizes it deliberately reads like the image itself rather than "ASCII art". Pick per use.
-  </p>
+      /* On a narrow screen the grid is near-constant and p95 is secondary, so
+         they give way to keep the approach and its cost over the floor — the
+         comparison itself — on screen without sideways scrolling. */
+      @media (max-width: 640px) {
+        #explainer table.libs .grid,
+        #explainer table.libs th:nth-child(3),
+        #explainer table.libs .p95 {
+          display: none;
+        }
+        #explainer table.libs .approach {
+          min-width: 0;
+        }
+        #explainer .table-scroll table.libs {
+          min-width: 0;
+        }
+        #explainer table.libs .tag {
+          white-space: normal;
+        }
+        #explainer table.libs .cost {
+          min-width: 4.5rem;
+        }
+        #explainer table.libs th,
+        #explainer table.libs td {
+          padding: 0.35rem 0.45rem;
+        }
+      }
 
-  <h2>Why it looks different</h2>
-  <div class="cards">
-    <div class="card">
-      <h3>Exact structural matching</h3>
-      <p>
-        Brightness ramps map luminance to density and lose edges. ASCII FX picks the glyph whose ink layout best
-        reconstructs the source cell — measured, not vibes: minimum squared-RGB reconstruction error over all 64
-        samples with per-cell fitted colors.
-      </p>
+      #explainer pre.astro-code {
+        background: #101018 !important;
+        border: 1px solid #23232f;
+        border-radius: 8px;
+        padding: 12px 14px;
+        overflow-x: auto;
+        font-size: 12.5px;
+        line-height: 1.6;
+        margin: 0.8em 0;
+      }
+
+      /* Small print: footnote markers and caveats, set below body text so they
+         read as an aside rather than another paragraph of the argument. */
+      #explainer .fine {
+        color: #6b6b7d;
+        font-size: 0.78rem;
+        line-height: 1.6;
+        max-width: 46rem;
+        margin: 0.6rem 0 0;
+      }
+      body > footer {
+        width: min(780px, 100%);
+        margin: 3rem auto 2rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid #23232f;
+        color: #6b6b7d;
+        font-size: 0.8rem;
+        line-height: 1.7;
+      }
+
+      /* Wide tables scroll in their own box rather than widening the page. */
+      #explainer .table-scroll {
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        margin: 1rem 0;
+      }
+      #explainer .table-scroll table {
+        margin: 0;
+        min-width: 32rem;
+      }
+      #explainer pre {
+        background: #101018;
+        border: 1px solid #23232f;
+        border-radius: 8px;
+        padding: 10px 14px;
+        overflow-x: auto;
+        font-size: 12.5px;
+        line-height: 1.55;
+        color: #c9c9d6;
+        margin: 0.8em 0;
+      }
+      #explainer code {
+        background: #17171f;
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-size: 0.95em;
+      }
+      #explainer pre code {
+        background: none;
+        border-radius: 0;
+        padding: 0;
+      }
+      .widget {
+        background: #101018;
+        border: 1px solid #23232f;
+        border-radius: 8px;
+        padding: 14px;
+        margin: 0.9em 0;
+      }
+      .widget:empty::before {
+        content: 'loading…';
+        color: #565668;
+      }
+      .wrow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        align-items: flex-start;
+      }
+      .wrow > * {
+        min-width: 0;
+        max-width: 100%;
+      }
+      .wcol {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-start;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .wtitle {
+        color: #7c9cff;
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .wnote {
+        color: #8a8a99;
+        font-size: 12px;
+        max-width: min(230px, 100%);
+      }
+      .wramp {
+        color: #c9c9d6;
+        letter-spacing: 1px;
+        font-size: 14px;
+        white-space: pre;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+      .pxgrid {
+        display: grid;
+        grid-template-columns: repeat(8, 18px);
+        grid-auto-rows: 18px;
+        gap: 1px;
+        background: #23232f;
+        border: 1px solid #23232f;
+        cursor: crosshair;
+        touch-action: none;
+        user-select: none;
+      }
+      .pxgrid div {
+        width: 18px;
+        height: 18px;
+      }
+      canvas.px,
+      canvas.wglyph,
+      canvas.watlas {
+        image-rendering: pixelated;
+        display: block;
+      }
+      canvas.px {
+        border: 1px solid #23232f;
+      }
+      canvas.watlas {
+        border: 1px solid #23232f;
+        border-radius: 4px;
+        cursor: crosshair;
+        touch-action: none;
+      }
+      .wtools {
+        display: flex;
+        gap: 6px;
+        /* The slider row carries a fixed-width range input plus a readout that
+           is wider than a phone; let it wrap rather than run off the page. */
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .wtools > * {
+        min-width: 0;
+      }
+      .wtools button {
+        font-size: 11.5px;
+        padding: 2px 8px;
+      }
+      .wpair {
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+      }
+      .cand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #8a8a99;
+        font-size: 12px;
+        white-space: pre;
+        padding: 1px 6px;
+        border-radius: 4px;
+        border: 1px solid transparent;
+      }
+      .cand.win {
+        color: #4ade80;
+        border-color: #274233;
+        background: #11181299;
+      }
+      .wstages {
+        gap: 10px;
+      }
+      .wstage {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1 1 160px;
+        min-width: 150px;
+      }
+      .wstagebox {
+        position: relative;
+        border: 1px solid #23232f;
+        border-radius: 4px;
+        overflow: hidden;
+        /* All stages display at the source aspect: reduced samples cover
+           non-square source regions, so this shows their true footprint and
+           keeps the linked cell marker aligned across stages. */
+        aspect-ratio: 2 / 1;
+      }
+      .wstagebox canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+      }
+      .wcellmark {
+        position: absolute;
+        border: 1.5px solid #f4f0e6;
+        box-shadow: 0 0 0 1.5px #0b0b0f;
+        pointer-events: none;
+        border-radius: 2px;
+      }
+      .wdetail {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: flex-start;
+        margin-top: 12px;
+      }
+      /* The card sits under the stage strip and updates on hover, so its height
+         must not depend on which cell you are pointing at. Two things made it
+         jump: the classify sentence changes length between cell classes, which
+         resized its column and repacked the whole row; and structured cells add
+         a fourth column. Fixing the column width stops the repacking, and the
+         reserved height below absorbs what is left. Content is top-aligned, so
+         any slack sits at the bottom rather than shifting the columns. */
+      .wdetail > * {
+        flex: 0 0 auto;
+        max-width: 100%;
+      }
+      .wdetail .wnote {
+        width: 12rem;
+        max-width: 100%;
+      }
+      .wdetail .wtitle {
+        white-space: normal;
+      }
+      /* Reserved height per layout band: one row of columns when they fit, two
+         when the card narrows, stacked on a phone. Each value clears the tallest
+         cell class in its band, so the card never resizes while you sweep the
+         stages. */
+      .wdetail {
+        min-height: 132px;
+      }
+      /* 818px is where the explainer column stops being wide enough for four
+         columns on one row: 780px content − 28px widget padding = 752, against
+         the 751 the row needs. */
+      @media (max-width: 818px) {
+        .wdetail {
+          min-height: 268px;
+        }
+      }
+      @media (max-width: 560px) {
+        .wdetail {
+          min-height: 472px;
+        }
+      }
+      .wswatch {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        border: 1px solid #2c2c3a;
+        vertical-align: -2px;
+      }
+      canvas.wtemporal {
+        display: block;
+        width: min(560px, 100%);
+        border: 1px solid #23232f;
+        border-radius: 4px;
+        image-rendering: pixelated;
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ASCII FX playground</h1>
+    <canvas id="out"></canvas>
+    <div id="stats">loading profile…</div>
+    <div id="panel">
+      <fieldset>
+        <legend><i data-lucide="clapperboard"></i> Source</legend>
+        <select id="source" aria-label="Source" title="What gets turned into ASCII: scenes, your webcam, or your own files (all client-side)">
+          <option value="orbs" selected>Animated orbs</option>
+          <option value="dvd">DVD bounce</option>
+          <option value="plasma">Plasma</option>
+          <option value="starfield">Starfield</option>
+          <option value="life">Game of Life</option>
+          <option value="clock">Clock</option>
+          <option value="marquee">Marquee ♪</option>
+          <option value="webcam">Webcam</option>
+          <option value="upload-image">Your image…</option>
+          <option value="upload-video">Your video…</option>
+        </select>
+        <label><input id="animate" type="checkbox" checked /> <span class="hint" tabindex="0" data-hint="Advance the scene animation every frame. Off = a still frame (interactions keep working)">animate</span></label>
+        <input id="imageFile" class="file-input" type="file" accept="image/*" tabindex="-1" aria-label="Choose an image file" />
+        <input id="videoFile" class="file-input" type="file" accept="video/*" tabindex="-1" aria-label="Choose a video file" />
+      </fieldset>
+      <fieldset>
+        <legend><i data-lucide="type"></i> Font</legend>
+        <select id="font" aria-label="Font" title="The glyph set. Compiled profiles render identically everywhere; system fonts are profiled at runtime in your browser">
+          <option value="geist" selected>Geist Mono (compiled)</option>
+          <option value="monospace">System monospace</option>
+          <option value="Courier New">Courier New</option>
+          <option value="Menlo">Menlo</option>
+          <option value="upload">Your font file…</option>
+        </select>
+        <input id="fontFile" class="file-input" type="file" accept=".ttf,.otf,.woff,.woff2,font/*" tabindex="-1" aria-label="Choose a font file" />
+        <label><span class="hint" tabindex="0" data-hint="Match with only these characters (e.g. 01 for binary rain). Empty = the full charset. The compiled profile can only narrow its ascii charset; runtime fonts rasterize anything the browser can draw, blocks ▀▓ and braille ⣿ included">chars</span>
+          <input id="chars" type="text" placeholder="all" size="10" spellcheck="false" autocomplete="off" /></label>
+      </fieldset>
+      <fieldset>
+        <legend><i data-lucide="cpu"></i> Backend</legend>
+        <select id="backend" aria-label="Backend" title="auto uses your GPU (WebGPU) when available and falls back to the exact CPU matcher. Same output, different speed">
+          <option value="auto" selected>auto</option>
+          <option value="webgpu">webgpu</option>
+          <option value="cpu">cpu</option>
+        </select>
+        <label><input id="temporal" type="checkbox" checked /> <span class="hint" tabindex="0" data-hint="Skip re-matching cells whose pixels didn't change since the last frame. Exact, great for video (WebGPU only)">temporal</span></label>
+        <label><input id="adaptive" type="checkbox" checked /> <span class="hint" tabindex="0" data-hint="Automatically lower the column count when the frame rate drops, and recover when it's smooth (WebGPU only)">adaptive</span></label>
+      </fieldset>
+      <fieldset>
+        <legend><i data-lucide="scan-text"></i> Matching</legend>
+        <label><span class="hint" tabindex="0" data-hint="Characters per row. More columns = finer detail but more work per frame">columns</span> <input id="columns" type="range" min="24" max="240" step="4" value="120" /><output id="columnsOut">120</output></label>
+        <label><span class="hint" tabindex="0" data-hint="mono: one ink color · foreground: a fitted color per glyph · full: fitted glyph AND background color per cell (closest to the original image)">color</span>
+          <select id="color">
+            <option value="foreground" selected>foreground</option>
+            <option value="full">full</option>
+            <option value="mono">mono</option>
+          </select>
+        </label>
+        <label><span class="hint" tabindex="0" data-hint="mask: transparent source pixels become empty cells · ignore: treat everything as opaque">alpha</span>
+          <select id="alpha">
+            <option value="mask" selected>mask</option>
+            <option value="ignore">ignore</option>
+          </select>
+        </label>
+        <label><span class="hint" tabindex="0" data-hint="Cells with less light/dark contrast than this render as a single tone instead of a shape. Higher = smoother, lower = busier">flat</span> <input id="flat" type="range" min="0" max="48" step="1" value="15" /><output id="flatOut">15</output></label>
+        <label id="fgLab" hidden><span class="hint" tabindex="0" data-hint="Ink color used for matching in mono mode. Swap fg/bg to invert (dark-on-light vs light-on-dark)">fg</span> <input id="fg" type="color" value="#ffffff" /></label>
+        <label id="bgLab"><span class="hint" tabindex="0" data-hint="Backdrop color the glyph colors are fitted against (mono and foreground modes)">bg</span> <input id="bg" type="color" value="#000000" /></label>
+        <span id="colWarn" class="warn" hidden><i data-lucide="triangle-alert"></i>past ~120 columns you'll want webgpu</span>
+      </fieldset>
+      <fieldset>
+        <legend><i data-lucide="crop"></i> View</legend>
+        <label><span class="hint" tabindex="0" data-hint="How the ASCII grid maps into the canvas: letterbox (contain), crop to fill (cover), or stretch">fit</span>
+          <select id="fit">
+            <option value="contain" selected>contain</option>
+            <option value="cover">cover</option>
+            <option value="stretch">stretch</option>
+          </select>
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend><i data-lucide="sparkles"></i> Interaction</legend>
+        <select id="interaction" aria-label="Interaction" title="Pointer/time effects composited on top of the glyph field. Matching never re-runs for these">
+          <option value="none" selected>none</option>
+          <option value="reveal">reveal</option>
+          <option value="displace">displace</option>
+          <option value="wave">wave</option>
+          <option value="push">push</option>
+          <option value="color">color</option>
+          <option value="glyph-scale">glyph-scale</option>
+          <option value="glyph-rotate">glyph-rotate</option>
+          <option value="original-mix">original-mix</option>
+          <option value="resolution">magnify</option>
+        </select>
+        <label><span class="hint" tabindex="0" data-hint="Size of the pointer effect, as a fraction of the canvas's short side">radius</span> <input id="fxRadius" type="range" min="0.05" max="0.5" step="0.01" value="0.2" /><output id="fxRadiusOut">0.20</output></label>
+        <label><span class="hint" tabindex="0" data-hint="Softness of the effect's edge. 0 is a hard rim">feather</span> <input id="fxFeather" type="range" min="0" max="0.3" step="0.01" value="0.08" /><output id="fxFeatherOut">0.08</output></label>
+        <label><span class="hint" tabindex="0" data-hint="Strength of the effect">intensity</span> <input id="fxIntensity" type="range" min="0" max="2" step="0.05" value="1" /><output id="fxIntensityOut">1.00</output></label>
+      </fieldset>
+      <fieldset>
+        <legend><i data-lucide="package"></i> Export</legend>
+        <button id="exportComponent" class="primary"><i data-lucide="component"></i><span class="btn-label">export component…</span></button>
+        <button id="copyText"><i data-lucide="clipboard-copy"></i><span class="btn-label">copy text</span></button>
+        <button id="savePng"><i data-lucide="image-down"></i><span class="btn-label">save .png</span></button>
+        <button id="saveText"><i data-lucide="file-text"></i><span class="btn-label">save .txt</span></button>
+      </fieldset>
     </div>
-    <div class="card">
-      <h3>Bit-exact, GPU or CPU</h3>
+    <section id="explainer">
+      <h2>What is this?</h2>
       <p>
-        The matcher is all-integer arithmetic, so the WebGPU compute path agrees with the CPU reference
-        bit-for-bit — glyphs, colors, flags — enforced by a browser conformance suite. <code>backend: 'auto'</code>
-        never trades quality, only speed.
+        Most ASCII filters map brightness to a character ramp like <code>.:-=+*#%@</code>. That works, but it
+        throws away shape: a diagonal edge and a flat gray patch of the same brightness get the same character.
       </p>
-    </div>
-    <div class="card">
-      <h3>Fonts compiled ahead of time</h3>
       <p>
-        A deterministic compiler turns a font into a <code>.asciip</code> profile: glyph masks, coverage, and the
-        display atlas — byte-identical on every machine. The same data both matches and renders, so there is no
-        browser font drift. Zero runtime rasterization.
+        ASCII FX matches shape. Each cell is compared against the actual pixel shapes of the font's glyphs, and
+        the glyph that reconstructs the cell best wins. Color is fitted per cell on top. Two rules shaped the
+        design:
       </p>
-    </div>
-  </div>
+      <ul>
+        <li><strong>Deterministic.</strong> Same input, same characters, everywhere. GPU and CPU agree byte for byte.</li>
+        <li><strong>No startup analysis.</strong> A compiler measures the font once and ships a small binary profile.</li>
+      </ul>
 
-  <h2>Matcher comparison, live</h2>
-  <p class="lead">
-    Rendered in your browser just now by the exact CPU reference — 40 columns, mono, so the glyph choices are
-    actually legible. <code>structural</code> is the default; <code>shape6</code> (a Harri-inspired 6D
-    descriptor) and <code>ramp</code> are explicit opt-ins — faster, measurably worse, and never chosen silently.
-  </p>
-  <div class="compare" data-compare>
-    <figure>
-      <canvas class="demo" data-variant="original"></canvas>
-      <figcaption><b>original</b> · procedural source</figcaption>
-    </figure>
-    <figure>
-      <canvas class="demo" data-variant="structural"></canvas>
-      <figcaption><b>structural</b> (exact default) · <span data-ms="structural">…</span></figcaption>
-    </figure>
-    <figure>
-      <canvas class="demo" data-variant="shape6"></canvas>
-      <figcaption><b>shape6</b> (approximate) · <span data-ms="shape6">…</span></figcaption>
-    </figure>
-    <figure>
-      <canvas class="demo" data-variant="ramp"></canvas>
-      <figcaption><b>ramp</b> (brightness only) · <span data-ms="ramp">…</span></figcaption>
-    </figure>
-  </div>
+      <h2>The pipeline</h2>
+      <p>
+        Once per font, a compiler builds a profile: an 8×8 mask, a coverage value, and an atlas tile per glyph.
+        Then every frame runs four stages. Here is a real frame going through the real code. Hover any stage to
+        follow one cell all the way; drag the columns slider and watch the grid, the samples, and every
+        decision recompute.
+      </p>
+      <div id="wPipe" class="widget"></div>
+      <p>
+        Stage 3 colors each cell by its class: gray cells are transparent, blue are flat, orange carry
+        structure worth matching. The sections below take the stages one at a time.
+      </p>
 
-  <h2>Quick start</h2>
-  <h3>React — zero config</h3>
-  <pre><code>import &#123; AsciiImage &#125; from '@ascii-fx/react'
+      <h2>Compile the font</h2>
+      <p>
+        System rasterizers (browser canvas, CoreText, FreeType) all anti-alias differently, and determinism dies
+        there. So the compiler brings its own: integer scanline rasterization into a 64 px cell, 4×4 subsamples
+        per pixel, fixed Bézier flattening, nonzero winding. Same font bytes, same profile bytes, always.
+      </p>
+      <p>Per glyph it stores:</p>
+      <ul>
+        <li>an 8×8 binary mask, 1 = ink. The shape the matcher sees.</li>
+        <li>a 16-bit coverage value: how much of the cell is ink. Drives flat cells.</li>
+        <li>an anti-aliased tile in a texture atlas. Only used for drawing.</li>
+      </ul>
+      <p>
+        Below: the live atlas of whatever font is selected up top. Hover a glyph to see the 8×8 mask the
+        matcher compares against. Notice how thin glyphs like <code>_</code> and <code>-</code> get sparse or
+        empty masks; those are reached through coverage, not shape.
+      </p>
+      <div id="wAtlas" class="widget"></div>
+      <p>
+        What can go in a charset? Any code point the font has outlines for. The
+        built-in <code>ascii-blocks</code> set adds half-blocks and quadrants (▀ ▄ ▌ ▚ ▓), and braille patterns
+        (⠏ ⣠ ⣿) are a classic trick: each glyph is a 2×4 dot grid, which hands the matcher 256 distinct
+        shapes. The compiler refuses characters the font lacks, so a compiled profile never contains tofu.
+        Runtime profiles cannot check that; a missing glyph quietly profiles the fallback box. Color emoji are
+        out on three counts: most emoji fonts are bitmap-only with no outlines to rasterize, emoji advance two
+        cells wide so the monospace check fails, and the pipeline fits one ink color per cell, which would
+        repaint them anyway.
+      </p>
+      <p>
+        The profile records SHA-256 hashes of the font, charset, and parameters. Frames reference profiles by
+        fingerprint, so a frame can never decode against the wrong font.
+      </p>
 
-&lt;AsciiImage src="/cat.jpg" alt="Cat" /&gt;</code></pre>
-  <h3>Vanilla — GPU renderer</h3>
-  <pre><code>import &#123; createAsciiRenderer &#125; from '@ascii-fx/gpu'
-import &#123; loadProfile &#125; from '@ascii-fx/core'
+      <h2>The grid</h2>
+      <p>Cells are not square, so the cell aspect enters the row count. For source W×H and cell cw×ch:</p>
+      <div class="formula" data-tex="\textsf{columns} = C \qquad \textsf{rows} = \max\bigl(1,\ \operatorname{rdiv}(H \cdot C \cdot c_w,\ W \cdot c_h)\bigr)"></div>
+      <div class="formula" data-tex="\operatorname{rdiv}(n, d) = \left\lfloor \frac{2n + d}{2d} \right\rfloor"></div>
+      <p class="wnote formula-note">Round half up — used everywhere in the pipeline.</p>
+      <p>The pipeline explorer above prints this exact formula with live numbers as you drag its slider.</p>
 
-const ascii = await createAsciiRenderer(&#123;
-  canvas,
-  profile: await loadProfile('/default.asciip'),
-  columns: 160,
-  color: 'full',
-&#125;)
-ascii.setSource(video)
-ascii.start()</code></pre>
-  <h3>Build-time profiles — Vite</h3>
-  <pre><code>// vite.config.ts
-import &#123; ascii &#125; from '@ascii-fx/vite'
-export default defineConfig(&#123; plugins: [ascii()] &#125;)
+      <h2>Shrink the source</h2>
+      <p>Each cell gets exactly 8×8 = 64 samples: an alpha-weighted box filter over the pixels under each sample.</p>
+      <div class="formula" data-tex="\textsf{sample} = \bigl(\operatorname{rdiv}(\textstyle\sum ra,\ \sum a),\ \operatorname{rdiv}(\sum ga,\ \sum a),\ \operatorname{rdiv}(\sum ba,\ \sum a),\ \operatorname{rdiv}(\sum a,\ n)\bigr)"></div>
+      <p>
+        GPU texture filtering is banned here: bilinear taps round differently per vendor. The compute shader
+        does the same integer sums, one workgroup per cell, one lane per sample.
+      </p>
 
-// anywhere
-import profileRef from 'virtual:ascii-profile/default'
-&lt;AsciiImage src="/hero.jpg" alt="…" profile=&#123;profileRef&#125; /&gt;</code></pre>
-  <p class="note">
-    This site is built with Astro and uses that exact Vite plugin for its own profile — the demo above loaded a
-    build-time-compiled Geist Mono <code>.asciip</code> (~13KB over the wire).
-  </p>
-</Base>
+      <h2>Classify each cell</h2>
+      <div class="formula" data-tex="\textsf{luma} = \left\lfloor \frac{77r + 150g + 29b + 128}{256} \right\rfloor"></div>
+      <p class="wnote formula-note">Integer only — in the code that floor is a <code>&gt;&gt; 8</code>.</p>
+      <ul>
+        <li><strong>Transparent.</strong> Mean alpha below 128 (with <code>alpha: mask</code>): blank glyph, done.</li>
+        <li>
+          <strong>Flat.</strong> Brightest minus darkest luma under the <code>flat</code> slider: no structure
+          worth matching. Pick the glyph whose coverage is closest to the cell's mean luma. Drag to see the
+          whole ramp of this font:
+          <div id="wFlat" class="widget"></div>
+          In <code>full</code> mode both colors are free, so any glyph reconstructs a flat cell. The blank glyph
+          is pinned for stability.
+        </li>
+        <li><strong>Structured.</strong> Everything else, below.</li>
+      </ul>
 
-<script>
-  import '../scripts/hero'
-  import '../scripts/compare'
-</script>
+      <h2>The source mask</h2>
+      <p>
+        The darkest and brightest samples become two color endpoints. Each sample joins the nearer one by
+        squared RGB distance. That is a color comparison, not luma: a red stroke on equally bright green still
+        masks cleanly.
+      </p>
+      <p>
+        Try it. Paint an 8×8 cell below and the real matcher runs on every stroke: endpoint classification,
+        polarity, the Hamming shortlist over the whole charset, and the exact rerank from the next two
+        sections. The preloaded stroke is a soft-edged diagonal. Its gray edge samples join whichever endpoint
+        is nearer, which is why anti-aliased strokes still mask cleanly.
+      </p>
+      <div id="wCell" class="widget"></div>
+      <p>
+        Polarity: glyph masks say 1 = ink, so which source side counts as ink follows from the palette. White
+        on black means the bright side is ink, and the mask is inverted before comparing. This is derived,
+        never a flag. A free invert option would let the shortlist and the rerank optimize different
+        orientations.
+      </p>
+
+      <h2>Shortlist by shape</h2>
+      <div class="formula" data-tex="d(g) = \operatorname{popcount}(\textsf{mask}_{lo} \oplus g_{lo}) + \operatorname{popcount}(\textsf{mask}_{hi} \oplus g_{hi})"></div>
+      <p>
+        Keep the 8 smallest, ties to the lower glyph id. Hamming is two XORs and two popcounts. The exact error
+        below costs about 64 multiplies per glyph, so: cheap filter over the whole charset, exact score over 8.
+        Same winner, a fraction of the cost. In <code>full</code> mode the score is <code>min(d, 64−d)</code>,
+        because free colors can flip orientation.
+      </p>
+
+      <h2>Fit colors, pick the winner</h2>
+      <p>Partition the cell's 64 samples by the candidate's own mask, then fit:</p>
+      <pre><code>glyph mask ──▶  ink samples        fg = their mean      (full, foreground)
+                the rest           bg = their mean      (full)  or fixed backdrop
+mono: both colors fixed by the palette</code></pre>
+      <p>
+        The mean is the unique minimizer of squared error for a fixed partition, so every candidate is scored
+        with the best colors it could possibly have:
+      </p>
+      <div class="formula" data-tex="\operatorname{err}(g) = \sum_{k=0}^{63} (r_k - c_r)^2 + (g_k - c_g)^2 + (b_k - c_b)^2 \qquad c = \begin{cases} \textsf{fg} & \text{bit } k \text{ of } g = 1 \\ \textsf{bg} & \text{otherwise} \end{cases}"></div>
+      <p>
+        Worst case is 64 · 3 · 255² = 12,484,800, so the comparison fits in exact u32 math. Means are rounded
+        to u8 before scoring, so backends cannot drift. Lowest error wins, ties keep shortlist order. The
+        winner's id and colors are the frame.
+      </p>
+
+      <h2>Draw it</h2>
+      <p>
+        Each cell samples its glyph's atlas tile and blends fg over bg by coverage. The atlas is mipmapped so
+        strokes keep their weight at any scale. The CPU backend builds the same mip chain in Canvas2D.
+      </p>
+      <p>
+        Pointer effects (reveal, push, wave, magnify, glyph rotation) warp this composite. They never re-run
+        matching. The GPU evaluates them per pixel, the CPU per cell, same formulas.
+      </p>
+
+      <h2>Bit for bit on GPU and CPU</h2>
+      <ul>
+        <li>Integer arithmetic only, one rounding rule. No floats to disagree over.</li>
+        <li>Per-cell sums are u32 atomics. Integer addition is associative, so thread order cannot matter.</li>
+        <li>Every comparison has a written tie-break, implemented identically on both backends.</li>
+        <li>The conformance suite compares raw output arrays across backends, not screenshots.</li>
+      </ul>
+
+      <h2>Going faster</h2>
+      <ul>
+        <li><strong>Temporal.</strong> A cell whose 64 samples did not change re-uses its result. Exact, not approximate.</li>
+        <li><strong>Dirty rectangles.</strong> Invalidate a region, re-match only that.</li>
+        <li><strong>Adaptive resolution.</strong> Columns drop when the frame rate sags, recover when it is smooth.</li>
+      </ul>
+      <p>
+        Temporal reuse, live. Red cells are the only ones re-matched this frame; everything else is served
+        from the previous result because its samples are byte-identical:
+      </p>
+      <div id="wTemporal" class="widget"></div>
+
+      <h2>Cheaper matchers</h2>
+      <ul>
+        <li>
+          <strong>shape6</strong>: a cell as 6 numbers (mean, vertical, horizontal, diagonal, center vs ring,
+          detail), nearest glyph in that space, optional 262,144-entry LUT for O(1) lookups.
+        </li>
+        <li><strong>ramp</strong>: coverage only, the classic brightness ramp. A cheap effect, not quality.</li>
+      </ul>
+      <p>Both are opt-in, never a silent fallback, and measurably worse than exact. The repo benchmarks say how much.</p>
+
+      <h2 id="performance">Performance</h2>
+      <p class="lead">
+        Numbers, not adjectives. Picking glyphs by shape costs less main-thread time than every brightness ramp
+        measured here — and these figures regenerate from a real harness, so they cannot drift from what ran.
+      </p>
+
+      <h3>Versus other libraries</h3>
+      <BenchChart />
+      <p>
+        Real published packages, plus the two techniques this project credits as influences, all fed the same
+        animated source at the same glyph grid. <b>Over floor</b> is what each approach costs you on top of simply
+        drawing that source.
+      </p>
+      <div class="table-scroll">
+        <table class="libs">
+          <thead>
+            <tr>
+              <th>approach</th>
+              <th>picks glyphs by</th>
+              <th>grid</th>
+              <th class="num">p50 ms</th>
+              <th class="num p95">p95 ms</th>
+              <th class="num cost-head">over floor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr data-us={r.us || undefined} data-floor={r.overFloor <= 0 || undefined} style={`--row: ${r.color}`}>
+                <td class="approach">
+                  <span class="swatch" aria-hidden="true"></span>
+                  {r.emphasis ? <b>{r.label}</b> : r.label}{r.marker}
+                </td>
+                <td><span class="tag" data-kind={r.kind}>{r.picks}</span></td>
+                <td class="grid">{r.grid}</td>
+                <td class="num">{r.p50.toFixed(1)}</td>
+                <td class="num p95">{r.p95.toFixed(1)}</td>
+                <td class="num cost">
+                  {r.overFloor > 0 && (
+                    <span class="cost-bar" style={`width: ${((r.overFloor / worstOverFloor) * 100).toFixed(1)}%`} aria-hidden="true"></span>
+                  )}
+                  <span class="cost-num">{r.overFloor <= 0 ? 'the floor' : `+${r.overFloor.toFixed(1)}`}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="note">
+        Exact structural matching with a fitted colour per cell adds
+        {' '}{(webgpu.p50 - baseline.p50).toFixed(1)}ms — matching and compositing overlap on the GPU, so it lands
+        below every brightness ramp in the table while doing considerably more.
+      </p>
+      <p class="fine">
+        Measured {measuredOn} on one Apple-silicon laptop: headless Chromium, vsync off, 200 timed frames after 40
+        warmup, each library alone in a fresh page, best of two passes.
+        {' '}* Not libraries — the brightness-ramp technique hand-written with zero overhead, marking the floor any
+        ramp library could reach. † Main-thread JavaScript, composite-bound at this glyph size: matching alone is
+        {' '}~{matchMs('ascii-fx shape6-lut')}ms against ~{exactMs.toFixed(0)}ms for exact structural.
+      </p>
+
+      <BenchRunner />
+
+      <h3>What the fallback costs</h3>
+      <p>
+        Same matcher, same output, no GPU required. A still image is a one-off
+        {' '}~{cpu160 ? cpu160.p50.toFixed(0) : '30'}ms at 160 columns; live video stays comfortable to about 120.
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>grid</th><th class="num">cells</th><th class="num">p50 ms</th><th class="num">cells/ms</th></tr></thead>
+          <tbody>
+            {cpuFull.map((r) => (
+              <tr>
+                <td>{r.grid}</td>
+                <td class="num">{r.cells.toLocaleString('en-US')}</td>
+                <td class="num">{r.p50.toFixed(1)}</td>
+                <td class="num">{r.cellsPerMs}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3>What the cheap matchers buy</h3>
+      <p>
+        Both are opt-in, as above. This is how much they save, and what it costs you.
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>matcher</th><th class="num">speed vs exact</th><th>what you give up</th></tr></thead>
+          <tbody>
+            {APPROX.map((a) => (
+              <tr>
+                <td>{a.matcher}</td>
+                <td class="num">{a.speedup.toFixed(1)}×</td>
+                <td>{a.quality}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="using-it">Using it</h2>
+      <p class="lead">
+        Compile a font once, hand the renderer a source, and everything above happens on its own. Three ways in.
+      </p>
+
+      <h3>React</h3>
+      <Code code={reactSample} lang="tsx" theme="github-dark" />
+      <ul>
+        <li>Server-rendered and layout-stable: the original media shows first, the canvas swaps in with no flash or shift.</li>
+        <li><code>alt</code> is required, and the fallback stays in the accessibility tree.</li>
+        <li>Pauses offscreen, on hidden tabs, and under <code>prefers-reduced-motion</code> — each one opt-out.</li>
+      </ul>
+
+      <h3>Anything else</h3>
+      <Code code={vanillaSample} lang="ts" theme="github-dark" />
+      <ul>
+        <li><code>auto</code> takes WebGPU when it can and the CPU matcher when it cannot.</li>
+        <li>Want text instead of pixels? <code>toText()</code>, <code>toAnsi()</code>, <code>toHTML()</code>.</li>
+      </ul>
+
+      <h3>Three.js</h3>
+      <Code code={threeSample} lang="tsx" theme="github-dark" />
+      <p>
+        Matching runs on Three's own device, so nothing is ever read back. WebGL is unsupported on purpose — exact
+        matching there would need a GPU→CPU copy every frame.
+      </p>
+
+      <h3>Ahead-of-time profiles</h3>
+      <Code code={configSample} lang="ts" theme="github-dark" />
+      <p>
+        Profiles compile once, cache by content, and hot-reload in dev — about 13KB over the wire. Frames go
+        further and precompute the matching itself, so hero art costs nothing at runtime. There is a CLI if you are
+        not on Vite. This page eats its own cooking: the playground above loaded a build-time profile.
+      </p>
+
+      <h3>Narrowing the character set</h3>
+      <Code code={charsetSample} lang="ts" theme="github-dark" />
+      <p>
+        Subsetting carries each glyph's raster data over exactly, so a narrowed profile matches identically to one
+        compiled that way — no recompile, no drift.
+      </p>
+    </section>
+    <footer>
+      ASCII FX — shape, not brightness. Exact structural matching on WebGPU with a bit-identical CPU reference.
+      Geist Mono under the SIL Open Font License. The structural approach follows the Ditherlab/chafa lineage —
+      chafa-wasm is in the table above — and the shape-vector matcher follows Alex Harri's work.
+    </footer>
+    <script>
+      import '../playground/main'
+    </script>
+  </body>
+</html>

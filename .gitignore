@@ -2,7 +2,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
-apps/playground/public/default.asciip
-apps/playground/public/GeistMono-Regular.ttf
+apps/docs/public/default.asciip
+apps/docs/public/GeistMono-Regular.ttf
 apps/benchmarks/results/
 .astro/
+apps/docs/public/bench/

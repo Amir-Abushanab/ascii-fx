@@ -1,7 +1,7 @@
 // CPU-backend interactions: the Canvas2D implementations (shader math at cell
 // granularity) must visibly affect the output without ever touching the
 // matcher (spec §9/§35 semantics preserved).
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createAsciiRenderer } from '@ascii-fx/gpu'
 import type { AsciiRenderer } from '@ascii-fx/gpu'
 import { STANDARD_SIX, makeProfile, randomImage } from '../../core/test/synthetic.js'
@@ -47,6 +47,43 @@ async function mkCpu(): Promise<{ renderer: AsciiRenderer; canvas: HTMLCanvasEle
 }
 
 describe('cpu backend interactions', () => {
+  it('cancels the old video callback when a running renderer changes source', async () => {
+    const renderer = await createAsciiRenderer({
+      canvas: document.createElement('canvas'),
+      profile: makeProfile(STANDARD_SIX),
+      backend: 'cpu',
+    })
+    const first = document.createElement('video')
+    const second = document.createElement('video')
+    const firstCancel = vi.fn()
+    let staleCallback: VideoFrameRequestCallback | undefined
+    const firstRequest = vi.fn((callback: VideoFrameRequestCallback) => {
+      staleCallback = callback
+      return 11
+    })
+    const secondRequest = vi.fn(() => 22)
+    Object.defineProperties(first, {
+      requestVideoFrameCallback: { value: firstRequest },
+      cancelVideoFrameCallback: { value: firstCancel },
+    })
+    Object.defineProperties(second, {
+      requestVideoFrameCallback: { value: secondRequest },
+      cancelVideoFrameCallback: { value: vi.fn() },
+    })
+    try {
+      renderer.setSource(first)
+      renderer.start()
+      renderer.setSource(second)
+      expect(firstCancel).toHaveBeenCalledWith(11)
+      expect(secondRequest).toHaveBeenCalledOnce()
+      staleCallback?.(0, {} as VideoFrameCallbackMetadata)
+      expect(firstRequest).toHaveBeenCalledOnce()
+      expect(secondRequest).toHaveBeenCalledOnce()
+    } finally {
+      renderer.destroy()
+    }
+  })
+
   it('reveal, magnify, color, and original-mix visibly change the composite', async () => {
     const { renderer, canvas } = await mkCpu()
     try {

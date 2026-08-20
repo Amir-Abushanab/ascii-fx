@@ -87,6 +87,7 @@ describe('@ascii-fx/vite plugin', () => {
     const code = await runHooks(plugin, 'virtual:ascii-frame/hero', watched)
     expect(code).toContain(`profile: "default"`)
     expect(watched).toContain(pngPath)
+    expect(watched).toContain(FONT_PATH)
     const framePath = assetPathOf(code)
     const profilePath = assetPathOf(await runHooks(plugin, 'virtual:ascii-profile/default', []))
     const profile = decodeProfile(new Uint8Array(readFileSync(profilePath)))
@@ -104,5 +105,26 @@ describe('@ascii-fx/vite plugin', () => {
   it('ignores unrelated ids', () => {
     const resolveId = plugin.resolveId as (id: string) => string | null
     expect(resolveId.call(plugin, './regular-module.ts')).toBeNull()
+  })
+
+  it('invalidates compiled profiles when a watched font changes', async () => {
+    const hotDir = mkdtempSync(join(tmpdir(), 'ascii-fx-vite-hmr-'))
+    const fontPath = join(hotDir, 'font.ttf')
+    const originalFont = readFileSync(FONT_PATH)
+    writeFileSync(fontPath, originalFont)
+    const hotPlugin = ascii({
+      config: { profiles: { default: { font: fontPath } } },
+      cacheDir: join(hotDir, 'cache'),
+    })
+    ;(hotPlugin.configResolved as (c: { root: string }) => void)({ root: hotDir })
+    const first = assetPathOf(await runHooks(hotPlugin, 'virtual:ascii-profile/default', []))
+
+    // A trailing byte is ignored by the font parser but must still invalidate
+    // the content-addressed profile cache and virtual module.
+    writeFileSync(fontPath, Buffer.concat([originalFont, Buffer.from([0])]))
+    const watchChange = hotPlugin.watchChange as (id: string) => void
+    watchChange.call(hotPlugin, fontPath)
+    const second = assetPathOf(await runHooks(hotPlugin, 'virtual:ascii-profile/default', []))
+    expect(second).not.toBe(first)
   })
 })

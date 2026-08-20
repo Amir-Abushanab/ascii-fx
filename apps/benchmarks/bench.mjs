@@ -4,6 +4,7 @@
 import { readFile } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 import { decodeProfile, matchFrame } from '@ascii-fx/core'
+import { markdownTable, upsertSection } from './resultsFile.mjs'
 
 const profileBytes = await readFile(new URL('../../fixtures/profiles/default.asciip', import.meta.url))
 const profile = decodeProfile(new Uint8Array(profileBytes))
@@ -73,3 +74,29 @@ for (const r of results) {
   )
 }
 console.log()
+
+// Published by the docs site, so it is written to RESULTS.md rather than left
+// in the console for someone to transcribe.
+const section = `## CPU reference (single-threaded)
+
+Generated ${new Date().toISOString()} · Node ${process.version} · ${W}×${H} procedural source (gradient + rings + deterministic noise) · exact \`structural-v1\` matcher · ${profile.glyphCount} glyphs · p50/p95 of ${RUNS} runs after ${WARMUP} warmup.
+
+${markdownTable(
+  ['grid', 'color', 'cells', 'p50 ms', 'p95 ms', 'cells/ms'],
+  ['left', 'left', 'right', 'right', 'right', 'right'],
+  results.map((r) => [
+    r.grid,
+    r.color,
+    String(r.cells),
+    r.p50.toFixed(2),
+    r.p95.toFixed(2),
+    (r.cells / r.p50).toFixed(0),
+  ]),
+)}
+
+This is the fallback path for machines without WebGPU. It is the exact reference implementation the GPU
+compute path is verified against bit-for-bit, so the fallback costs speed and never quality.
+`
+
+await upsertSection('## CPU reference (single-threaded)', section)
+console.log('RESULTS.md updated.\n')

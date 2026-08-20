@@ -15,6 +15,7 @@ import {
   reduceSource,
 } from '@ascii-fx/core'
 import { Pause, Play, createElement, type IconNode } from 'lucide'
+import { pointerUV } from './pointer'
 
 /** createElement() does not add the .lucide class createIcons() would. */
 const icon = (node: IconNode): SVGElement => {
@@ -80,7 +81,13 @@ function glyphCanvas(p: AsciiProfile, id: number, cssHeight: number): HTMLCanvas
   return cv
 }
 
-function grid8Canvas(colorAt: (k: number) => string, cssSize: number): HTMLCanvasElement {
+/**
+ * An 8×8 sample grid. `aspect` is width/height of the thing the grid covers:
+ * cells are not square (a 30×64 glyph cell is roughly 0.47), so a mask drawn
+ * square would not line up with the glyph beside it. Pass 1 for grids that are
+ * abstract rather than a picture of a real cell.
+ */
+function grid8Canvas(colorAt: (k: number) => string, cssHeight: number, aspect = 1): HTMLCanvasElement {
   const cv = document.createElement('canvas')
   cv.width = 8
   cv.height = 8
@@ -89,10 +96,14 @@ function grid8Canvas(colorAt: (k: number) => string, cssSize: number): HTMLCanva
     ctx.fillStyle = colorAt(k)
     ctx.fillRect(k % 8, Math.floor(k / 8), 1, 1)
   }
-  cv.style.width = cv.style.height = `${cssSize}px`
+  cv.style.height = `${cssHeight}px`
+  cv.style.width = `${Math.round(cssHeight * aspect)}px`
   cv.className = 'px'
   return cv
 }
+
+/** Width/height of one glyph cell — what every mask and sample grid covers. */
+const cellAspect = (p: AsciiProfile): number => p.atlas.cellWidth / p.atlas.cellHeight
 
 const label = (text: string): HTMLDivElement => {
   const d = document.createElement('div')
@@ -376,14 +387,32 @@ function buildAtlasWidget(host: HTMLElement, p: AsciiProfile): void {
   cv.width = perRow * cw
   cv.height = rows * ch
   const ctx = cv.getContext('2d')!
-  const tile = document.createElement('canvas')
-  tile.width = cw
-  tile.height = ch
-  const tctx = tile.getContext('2d')!
+  // Compose the whole sheet as one ImageData, then upload it once.
+  //
+  // Writing a single tile canvas and drawImage-ing it once per glyph relies on
+  // every draw snapshotting the source immediately. Engines that defer canvas
+  // work — a GPU-backed webview, for instance — can sample that tile after
+  // later writes, so runs of cells receive whichever glyph it happened to hold
+  // at flush time, and everything after the final write shows the last glyph.
+  const sheet = ctx.createImageData(cv.width, cv.height)
+  const src = p.atlas
   for (let g = 0; g < shown; g++) {
-    tctx.putImageData(glyphImageData(p, g), 0, 0)
-    ctx.drawImage(tile, (g % perRow) * cw, Math.floor(g / perRow) * ch)
+    const dx = (g % perRow) * cw
+    const dy = Math.floor(g / perRow) * ch
+    const sx = (g % src.columns) * src.pitchWidth + src.padding
+    const sy = Math.floor(g / src.columns) * src.pitchHeight + src.padding
+    for (let y = 0; y < ch; y++) {
+      let o = ((dy + y) * cv.width + dx) * 4
+      let i = (sy + y) * src.width + sx
+      for (let x = 0; x < cw; x++, o += 4, i++) {
+        sheet.data[o] = 255
+        sheet.data[o + 1] = 255
+        sheet.data[o + 2] = 255
+        sheet.data[o + 3] = src.data[i]
+      }
+    }
   }
+  ctx.putImageData(sheet, 0, 0)
   const scale = Math.min(0.55, 480 / cv.width)
   cv.style.width = `${Math.round(cv.width * scale)}px`
   cv.className = 'watlas'
@@ -402,10 +431,14 @@ function buildAtlasWidget(host: HTMLElement, p: AsciiProfile): void {
         pair.className = 'wpair'
         pair.append(
           glyphCanvas(p, g, 72),
-          grid8Canvas((k) => {
-            const ink = k < 32 ? (lo >>> k) & 1 : (hi >>> (k - 32)) & 1
-            return ink ? '#eaeaf2' : '#14141d'
-          }, 72),
+          grid8Canvas(
+            (k) => {
+              const ink = k < 32 ? (lo >>> k) & 1 : (hi >>> (k - 32)) & 1
+              return ink ? '#eaeaf2' : '#14141d'
+            },
+            72,
+            cellAspect(p),
+          ),
         )
         return pair
       })(),
@@ -413,9 +446,10 @@ function buildAtlasWidget(host: HTMLElement, p: AsciiProfile): void {
     )
   }
   const pick = (e: PointerEvent): void => {
-    const r = cv.getBoundingClientRect()
-    const gx = Math.floor(((e.clientX - r.left) / r.width) * perRow)
-    const gy = Math.floor(((e.clientY - r.top) / r.height) * rows)
+    const [u, v] = pointerUV(e, cv)
+    const gx = Math.floor(u * perRow)
+    const gy = Math.floor(v * rows)
+    if (gx < 0 || gx >= perRow || gy < 0 || gy >= rows) return
     const g = gy * perRow + gx
     if (g >= 0 && g < shown) inspect(g)
   }
@@ -577,9 +611,9 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
   const slider = document.createElement('input')
   slider.type = 'range'
   slider.min = '8'
-  slider.max = '28'
+  slider.max = '64'
   slider.step = '1'
-  slider.value = '16'
+  slider.value = '28'
   slider.style.width = '160px'
   const sliderRow = document.createElement('div')
   sliderRow.className = 'wtools'
@@ -704,10 +738,14 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
     }
     const d = cellDetail(reduced, columns, cx, cy)
     const SW = columns * 8
-    const zoom = grid8Canvas((k) => {
-      const o = ((cy * 8 + (k >> 3)) * SW + cx * 8 + (k % 8)) * 4
-      return `rgba(${reduced[o]},${reduced[o + 1]},${reduced[o + 2]},${reduced[o + 3] / 255})`
-    }, 88)
+    const zoom = grid8Canvas(
+      (k) => {
+        const o = ((cy * 8 + (k >> 3)) * SW + cx * 8 + (k % 8)) * 4
+        return `rgba(${reduced[o]},${reduced[o + 1]},${reduced[o + 2]},${reduced[o + 3] / 255})`
+      },
+      88,
+      cellAspect(p),
+    )
     const parts: HTMLElement[] = [col(label(`cell (${cx}, ${cy}) · its 64 samples`), zoom)]
     const clsNote = document.createElement('div')
     clsNote.className = 'wnote'
@@ -721,7 +759,7 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
       clsNote.textContent = `Δluma ${d.deltaLuma} ≥ ${FLAT_THRESHOLD} → structured`
       parts.push(
         col(label('classify'), clsNote),
-        col(label('mask · 1 = ink'), grid8Canvas((k) => (d.mask![k] ? '#7c9cff' : '#14141d'), 88)),
+        col(label('mask · 1 = ink'), grid8Canvas((k) => (d.mask![k] ? '#7c9cff' : '#14141d'), 88, cellAspect(p))),
       )
     }
     const ci = cy * columns + cx
@@ -738,10 +776,13 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
   }
 
   for (const s of stages) {
-    s.canvas.parentElement!.addEventListener('pointermove', (e) => {
-      const r = (s.canvas.parentElement as HTMLElement).getBoundingClientRect()
-      const cx = Math.max(0, Math.min(columns - 1, Math.floor(((e.clientX - r.left) / r.width) * columns)))
-      const cy = Math.max(0, Math.min(rows - 1, Math.floor(((e.clientY - r.top) / r.height) * rows)))
+    // Bound to the canvas rather than its wrapper: pointerUV reads offsets
+    // relative to the event target, and the cell marker over it is
+    // pointer-events:none, so the canvas is the only thing that can be hit.
+    s.canvas.addEventListener('pointermove', (e) => {
+      const [u, v] = pointerUV(e, s.canvas)
+      const cx = Math.max(0, Math.min(columns - 1, Math.floor(u * columns)))
+      const cy = Math.max(0, Math.min(rows - 1, Math.floor(v * rows)))
       inspect(cx, cy)
     })
   }

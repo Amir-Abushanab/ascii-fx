@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { decodeFrame, decodeProfile, encodeFrame, encodeProfile, matchFrame, peekFrame } from '@ascii-fx/core'
 import { STANDARD_SIX, makeProfile, randomImage, randomProfile } from './synthetic.js'
 
+const sectionBase = (bytes: Uint8Array, headerSize: number, countOffset: number, type: number): number => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const count = view.getUint32(countOffset, true)
+  for (let i = 0; i < count; i++) {
+    const base = headerSize + i * 12
+    if (view.getUint32(base, true) === type) return base
+  }
+  throw new Error(`section ${type} not found`)
+}
+
 describe('asciip/1 codec', () => {
   it('roundtrips a profile bit-for-bit', () => {
     const profile = randomProfile(23, 99)
@@ -30,6 +40,32 @@ describe('asciip/1 codec', () => {
     const bytes = encodeProfile(makeProfile(STANDARD_SIX))
     new DataView(bytes.buffer).setUint32(4, 9, true)
     expect(() => decodeProfile(bytes)).toThrow(/schema v9.*Rebuild/s)
+  })
+
+  it('rejects malformed section tables and payload lengths before allocating', () => {
+    const table = encodeProfile(makeProfile(STANDARD_SIX))
+    new DataView(table.buffer).setUint32(8, 0xffff_ffff, true)
+    expect(() => decodeProfile(table)).toThrow(/section table is truncated/)
+
+    const payload = encodeProfile(makeProfile(STANDARD_SIX))
+    const base = sectionBase(payload, 172, 8, 3)
+    new DataView(payload.buffer).setUint32(base + 4, payload.byteLength + 1, true)
+    expect(() => decodeProfile(payload)).toThrow(/outside the file/)
+
+    const overlap = encodeProfile(makeProfile(STANDARD_SIX))
+    const overlapView = new DataView(overlap.buffer)
+    const firstOffset = overlapView.getUint32(172 + 4, true)
+    overlapView.setUint32(172 + 12 + 4, firstOffset, true)
+    expect(() => decodeProfile(overlap)).toThrow(/overlaps section/)
+  })
+
+  it('rejects inconsistent glyph counts', () => {
+    const bytes = encodeProfile(makeProfile(STANDARD_SIX))
+    const view = new DataView(bytes.buffer)
+    const base = sectionBase(bytes, 172, 8, 1)
+    const offset = view.getUint32(base + 4, true)
+    view.setUint32(offset, view.getUint32(12, true) + 1, true)
+    expect(() => decodeProfile(bytes)).toThrow(/glyph table contains/)
   })
 })
 
@@ -90,5 +126,36 @@ describe('asciif/1 codec', () => {
     const decoded = decodeFrame(bytes, profile)
     expect(decoded.glyphIds).toEqual(frame.glyphIds)
     if (patched) expect(decoded.flags.every((f) => f === 0)).toBe(true)
+  })
+
+  it('rejects unknown color modes and out-of-bounds sections', () => {
+    const badMode = encodeFrame(matchFrame(img, { profile, columns: 10, color: 'mono' }))
+    new DataView(badMode.buffer).setUint32(16, 99, true)
+    expect(() => peekFrame(badMode)).toThrow(/unknown color mode/)
+
+    const badSection = encodeFrame(matchFrame(img, { profile, columns: 10, color: 'mono' }))
+    const base = sectionBase(badSection, 56, 20, 1)
+    new DataView(badSection.buffer).setUint32(base + 4, badSection.byteLength + 4, true)
+    expect(() => decodeFrame(badSection, profile)).toThrow(/outside the file/)
+
+    const overlap = encodeFrame(matchFrame(img, { profile, columns: 10, color: 'full' }))
+    const overlapView = new DataView(overlap.buffer)
+    const firstOffset = overlapView.getUint32(56 + 4, true)
+    overlapView.setUint32(56 + 12 + 4, firstOffset, true)
+    expect(() => decodeFrame(overlap, profile)).toThrow(/overlaps section/)
+  })
+
+  it('rejects missing glyphs and incomplete color planes', () => {
+    const badGlyph = encodeFrame(matchFrame(img, { profile, columns: 10, color: 'mono' }))
+    const glyphView = new DataView(badGlyph.buffer)
+    const glyphBase = sectionBase(badGlyph, 56, 20, 1)
+    const glyphOffset = glyphView.getUint32(glyphBase + 4, true)
+    glyphView.setUint16(glyphOffset, profile.glyphCount, true)
+    expect(() => decodeFrame(badGlyph, profile)).toThrow(/missing glyph/)
+
+    const incomplete = encodeFrame(matchFrame(img, { profile, columns: 10, color: 'foreground' }))
+    const blueBase = sectionBase(incomplete, 56, 20, 4)
+    new DataView(incomplete.buffer).setUint32(blueBase, 200, true)
+    expect(() => decodeFrame(incomplete, profile)).toThrow(/color plane group is incomplete/)
   })
 })

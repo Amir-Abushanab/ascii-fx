@@ -25,7 +25,23 @@ ascii.start()
 | [`@ascii-fx/react-three`](./packages/react-three) | `<AsciiEffect>` `<AsciiGlyphs>` for R3F |
 | [`@ascii-fx/vite`](./packages/vite) | build-time profiles/frames as typed virtual modules |
 
-Apps: `apps/docs` (Astro site — live demos with explanations, deploys to GitHub Pages via `.github/workflows/deploy-docs.yml`; it dogfoods the Vite plugin for its own profile), `apps/playground` (kitchen-sink demo: backends, interactions, animation), `apps/benchmarks` (CPU perf + approximate-matcher quality reports → [`RESULTS.md`](./apps/benchmarks/RESULTS.md)).
+Apps: `apps/docs` (the whole Astro site — the playground and pipeline explainer, with benchmarks and API reference below; deploys to GitHub Pages via `.github/workflows/deploy-docs.yml` and dogfoods the Vite plugin for its own profile), `apps/benchmarks` (CPU perf + approximate-matcher quality reports → [`RESULTS.md`](./apps/benchmarks/RESULTS.md)).
+
+## Benchmarks
+
+Real published libraries, identical animated 1280×720 source, same 160×42 glyph grid where each library allows it, vsync off, each row in an isolated page (best of 2 passes, headless Chromium on an M3 Pro). Only the shape-aware rows pick glyphs by shape; the rest map brightness.
+
+| approach | picks glyphs by | p50 ms/frame | ~fps |
+| --- | --- | ---: | ---: |
+| **ascii-fx · WebGPU** | **shape + fitted color (exact)** | **2.7** | **370** |
+| p5.asciify 0.10 (WebGL) | brightness + color | 3.0 | 333 |
+| three.js AsciiEffect | brightness | 5.9 | 169 |
+| aalib.js 2.0 · mono | brightness | 9.5 | 105 |
+| aalib.js 2.0 · colored | brightness + color | 15.0 | 67 |
+| ascii-fx · CPU fallback | shape + fitted color (exact) | 38.8 | 26 |
+| chafa-wasm 0.3 | shape-aware blocks + fg/bg | 45.3 | 22 |
+
+The scene-only floor is 2.6ms, so the WebGPU path costs the main thread ~0.1ms — matching and compositing overlap on the GPU. Full table (baseline, our approximate matchers, hand-optimized reference implementations), methodology, and regeneration: [`RESULTS.md`](./apps/benchmarks/RESULTS.md) · `pnpm --filter @ascii-fx-internal/benchmarks compare`.
 
 ## Documents
 
@@ -37,14 +53,27 @@ Apps: `apps/docs` (Astro site — live demos with explanations, deploys to GitHu
 ```bash
 pnpm install
 pnpm build            # all packages (tsup, ESM + d.ts)
+pnpm dev              # the site at localhost:4321 — the playground, with performance and API below it
 pnpm test             # node suite: unit, golden, oracle-conformance, SSR
 pnpm test:gpu         # browser suite: CPU↔GPU bit-exact conformance (headless Chromium + WebGPU)
-pnpm bench            # CPU matcher benchmarks
-pnpm --filter @ascii-fx-internal/benchmarks run quality   # approximate-matcher quality report
-pnpm playground       # kitchen-sink demo at localhost:5273 (pinned, strictPort)
-pnpm docs:dev         # docs site (Astro) at localhost:4321
 pnpm docs:build       # static docs build (set DOCS_BASE=/<repo>/ for GitHub Pages)
 pnpm golden:update    # regenerate goldens after an intentional algorithm change
+```
+
+One Astro app, one page: the playground and its interactive pipeline explainer, with the benchmark tables and
+the API reference folded onto the end. One dev server, one build.
+
+### Benchmarks
+
+Every performance figure the docs site publishes is read out of `apps/benchmarks/RESULTS.md` when the site
+builds — the pages hold no transcribed numbers, so regenerating a benchmark is the only way they move. The
+same cross-library harness is also served at `/#run-it-yourself` for visitors to run themselves
+(in an ordinary tab, so vsync caps it — indicative, not the published figure).
+
+```bash
+pnpm bench            # CPU matcher reference           → RESULTS.md
+pnpm bench:compare    # cross-library render loop       → RESULTS.md  (headless, vsync off, ~4 min)
+pnpm bench:quality    # approximate-matcher quality     → RESULTS.md
 ```
 
 Hygiene tooling:

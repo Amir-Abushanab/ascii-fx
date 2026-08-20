@@ -8,6 +8,7 @@ import type {
   InteractionOptions,
 } from '@ascii-fx/gpu'
 import { createAsciiRenderer, getAsciiSupport } from '@ascii-fx/gpu'
+import { profileSourceKey, rendererOptionsKey } from './hookKeys.js'
 
 /** Capability probe as a hook (spec §50). null until resolved. */
 export function useAsciiSupport(): AsciiSupport | null {
@@ -31,7 +32,7 @@ export function useAsciiSupport(): AsciiSupport | null {
  */
 export function useAsciiProfile(source?: ProfileSource | null): AsciiProfile | null {
   const [profile, setProfile] = useState<AsciiProfile | null>(null)
-  const key = useMemo(() => profileKey(source), [source])
+  const key = useMemo(() => profileSourceKey(source), [source])
   useEffect(() => {
     let live = true
     const pending = source == null ? createAsciiProfile() : loadProfile(source)
@@ -49,15 +50,6 @@ export function useAsciiProfile(source?: ProfileSource | null): AsciiProfile | n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
   return profile
-}
-
-const profileKey = (source: ProfileSource | null | undefined): string => {
-  if (source == null) return 'null'
-  if (typeof source === 'string') return `url:${source}`
-  if (source instanceof URL) return `url:${source.href}`
-  if (source instanceof Uint8Array || source instanceof ArrayBuffer) return `bytes:${source.byteLength}`
-  if ('url' in source && !('glyphs' in source)) return `url:${(source as { url: string }).url}`
-  return `profile:${(source as AsciiProfile).fingerprint}`
 }
 
 export function usePrefersReducedMotion(): boolean {
@@ -78,6 +70,8 @@ export interface UseAsciiOptions extends AsciiRendererRuntimeOptions {
   profile?: ProfileSource
   backend?: BackendChoice
   interaction?: InteractionOptions | null
+  /** Default true: disable motion interactions when the OS requests reduced motion. */
+  respectReducedMotion?: boolean
 }
 
 export interface UseAsciiResult {
@@ -85,9 +79,6 @@ export interface UseAsciiResult {
   profile: AsciiProfile | null
   error: Error | null
 }
-
-const optionsKey = (o: AsciiRendererRuntimeOptions): string =>
-  JSON.stringify([o.columns, o.rows, o.color, o.alpha, o.foreground, o.background, o.flatThreshold, o.fit, o.clearColor])
 
 /**
  * Renderer lifecycle on a canvas ref (spec §31): created once per
@@ -103,7 +94,7 @@ export function useAscii(
   const [renderer, setRenderer] = useState<AsciiRenderer | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const reducedMotion = usePrefersReducedMotion()
-  const { profile: _p, backend, interaction, ...runtime } = options
+  const { profile: _p, backend, interaction, respectReducedMotion = true, ...runtime } = options
   const runtimeRef = useRef(runtime)
   runtimeRef.current = runtime
 
@@ -134,7 +125,7 @@ export function useAscii(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, backend, canvasRef])
 
-  const runtimeKey = optionsKey(runtime)
+  const runtimeKey = rendererOptionsKey(runtime)
   useEffect(() => {
     renderer?.setOptions(runtimeRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,9 +133,9 @@ export function useAscii(
 
   const interactionKey = JSON.stringify(interaction ?? null)
   useEffect(() => {
-    renderer?.setInteraction(reducedMotion ? null : (interaction ?? null))
+    renderer?.setInteraction(respectReducedMotion && reducedMotion ? null : (interaction ?? null))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderer, interactionKey, reducedMotion])
+  }, [renderer, interactionKey, reducedMotion, respectReducedMotion])
 
   return { renderer, profile, error }
 }

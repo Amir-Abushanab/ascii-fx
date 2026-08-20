@@ -25,7 +25,8 @@ import profileRef from 'virtual:ascii-profile/default'
 ```
 
 - `alt` is required on `AsciiImage` (`alt=""` for decorative). The fallback element stays in the accessibility tree; the canvas is `aria-hidden` (spec §32).
-- `prefers-reduced-motion` disables interactions while keeping the static ASCII.
+- Continuous `<AsciiVideo>` / `<AsciiCanvas>` rendering pauses automatically while offscreen or while the document is hidden. Set `pauseWhenOffscreen={false}` to opt out.
+- `prefers-reduced-motion` disables autoplay and interactions while keeping a static ASCII frame. Set `respectReducedMotion={false}` only when the surrounding UI provides an explicit motion control.
 - Ordinary prop changes map to `setOptions` — the renderer is recreated only when the profile or backend changes (spec §31). Pointer moves are forwarded automatically.
 - Ref handle: `{ renderer, render(), capture(): Promise<AsciiFrame>, getSupport() }`.
 

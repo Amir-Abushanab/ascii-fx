@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "High-fidelity structural ASCII rendering \u2014 core types, exact CPU matcher, profile/frame codecs.",
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {

@@ -5,41 +5,22 @@
 //
 // Run: pnpm --filter @ascii-fx-internal/benchmarks compare
 import { createServer } from 'node:http'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { encodeProfile } from '@ascii-fx/core'
-import { buildProfile } from '@ascii-fx/compiler'
-
-const here = fileURLToPath(new URL('.', import.meta.url))
-const root = join(here, '../..')
+import { buildShape6Profile, HARNESS_FILES, repoRoot as root } from './harnessAssets.mjs'
+import { upsertSection } from './resultsFile.mjs'
 
 // A shape6+LUT profile for the Harri-style matcher rows (the fixture profile
 // carries structural data only).
 console.log('building shape6 profile (one-time)…')
-const font = new Uint8Array(await readFile(join(root, 'fixtures/fonts/GeistMono-Regular.ttf')))
-const shape6Bytes = encodeProfile(buildProfile({ font, shape6: { lut: true } }).profile)
+const shape6Bytes = await buildShape6Profile()
 const { chromium } = await import(join(root, 'node_modules/playwright/index.mjs'))
 
-// three's export map hides internal file paths from require.resolve; the
-// pnpm symlink in our own node_modules is stable, so read files through it.
-const threeRoot = join(here, 'node_modules/three')
-const threeModule = join(threeRoot, 'build/three.module.js')
-const asciiEffect = join(threeRoot, 'examples/jsm/effects/AsciiEffect.js')
-
 const MIME = { '.js': 'text/javascript', '.html': 'text/html', '.asciip': 'application/octet-stream', '.wasm': 'application/wasm' }
-const ROUTES = {
-  '/': join(here, 'compare/index.html'),
-  '/three.module.js': threeModule,
-  '/three.core.js': join(threeRoot, 'build/three.core.js'),
-  '/AsciiEffect.js': asciiEffect,
-  '/aalib.js': join(here, 'node_modules/aalib.js/dist/aalib.js'),
-  '/p5.min.js': join(here, 'node_modules/p5/lib/p5.min.js'),
-  '/p5.asciify.umd.js': join(here, 'node_modules/p5.asciify/dist/p5.asciify.umd.js'),
-  '/chafa.js': join(here, 'node_modules/chafa-wasm/dist/chafa.js'),
-  '/chafa.wasm': join(here, 'node_modules/chafa-wasm/dist/chafa.wasm'),
-  '/default.asciip': join(root, 'fixtures/profiles/default.asciip'),
-}
+// The harness fetches its assets relative to index.html, which this server
+// mounts at the root; the same files are copied under /bench/ for the docs site.
+const ROUTES = Object.fromEntries(Object.entries(HARNESS_FILES).map(([name, path]) => [`/${name}`, path]))
+ROUTES['/'] = HARNESS_FILES['index.html']
 
 const server = createServer(async (req, res) => {
   const url = req.url.split('?')[0]
@@ -121,9 +102,5 @@ ${table}
 Method notes: library rows are the real published packages — aalib.js 2.0 (reader → aa() → its canvas renderer), p5.asciify 0.10 on p5 2.x (WebGL textmode add-on, instance mode, redraw-driven), chafa-wasm 0.3 (raw ImageData → imageToHtml, default shape-aware symbol set), three.js AsciiEffect from three 0.185 (CanvasTexture quad, its DOM output). ascii-fx webgpu/cpu rows run the exact structural matcher with per-cell color fitting ('foreground'). The shape6-lut row is the in-repo implementation of Alex Harri's shape-vector approach (a spec-credited influence, published as writing rather than a package) with its 3-bit LUT, and the ramp-matcher row is our cheapest opt-in — both through the real core path (matchFrame → compositeFrame) on the main thread. The "ramp reference" rows are not libraries: the standard brightness-ramp technique hand-optimized with zero library overhead, the technique's floor. What each computes differs: aalib and AsciiEffect map brightness to a ramp (aalib's colored mode adds per-cell color), p5.asciify maps brightness to a colored textmode grid, chafa does shape-aware block/border selection with fg+bg colors — with Harri's descriptor, the two shape-aware influences this project credits. The spec's structural-reconstruction credit ("Ditherlab / chafa-style") is represented here by chafa-wasm: the credited 8×8 mask → Hamming prefilter → exact-rerank pipeline is chafa's documented algorithm, and no separately runnable Ditherlab artifact could be located to bench. Equal speed is not equal output.
 `
 
-const resultsPath = join(here, 'RESULTS.md')
-let md = await readFile(resultsPath, 'utf8')
-const marker = '## Cross-library render loop'
-md = md.includes(marker) ? md.slice(0, md.indexOf(marker)).trimEnd() + '\n\n' + section : md.trimEnd() + '\n\n' + section
-await writeFile(resultsPath, md)
+await upsertSection('## Cross-library render loop', section)
 console.log('\nRESULTS.md updated.')

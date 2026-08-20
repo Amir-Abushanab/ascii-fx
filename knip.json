@@ -1,6 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreDependencies": ["@webgpu/types"],
+  "ignoreDependencies": [
+    "@webgpu/types"
+  ],
   "workspaces": {
     ".": {
       "entry": [],
@@ -9,15 +11,22 @@
     "packages/*": {
       "project": "src/**/*.{ts,tsx}"
     },
-    "apps/playground": {
-      "project": "src/**/*.ts"
-    },
     "apps/benchmarks": {
       "project": "*.mjs",
-      "ignoreDependencies": ["three", "aalib.js", "p5", "p5.asciify", "chafa-wasm"]
+      "ignoreDependencies": [
+        "three",
+        "aalib.js",
+        "p5",
+        "p5.asciify",
+        "chafa-wasm"
+      ]
     },
     "apps/docs": {
-      "entry": ["src/pages/**/*.astro", "src/scripts/*.ts", "ascii-fx.config.ts"],
+      "entry": [
+        "src/pages/**/*.astro",
+        "src/playground/main.ts",
+        "ascii-fx.config.ts"
+      ],
       "project": "src/**/*.{ts,astro}"
     }
   }

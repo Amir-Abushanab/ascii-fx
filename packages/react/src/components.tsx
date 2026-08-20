@@ -10,7 +10,7 @@ import {
 import type { AlphaMode, AsciiFrame, AsciiSupport, ColorMode, ProfileSource, RGB } from '@ascii-fx/core'
 import type { AsciiRenderer, BackendChoice, FitMode, InteractionOptions } from '@ascii-fx/gpu'
 import { getAsciiSupport } from '@ascii-fx/gpu'
-import { useAscii } from './hooks.js'
+import { useAscii, usePrefersReducedMotion } from './hooks.js'
 
 export interface AsciiCommonProps {
   /** Omit for a runtime 'monospace' profile — precompiled profiles render faster and deterministically. */
@@ -26,6 +26,12 @@ export interface AsciiCommonProps {
   fit?: FitMode
   clearColor?: readonly [number, number, number, number]
   interaction?: InteractionOptions | null
+  temporal?: boolean
+  adaptiveResolution?: boolean
+  /** Pause continuous rendering while the component is outside the viewport. Default true. */
+  pauseWhenOffscreen?: boolean
+  /** Honor the user's reduced-motion preference for autoplay and interactions. Default true. */
+  respectReducedMotion?: boolean
   className?: string
   style?: CSSProperties
 }
@@ -121,6 +127,69 @@ function usePointerForward(
   }, [wrapperRef, renderer])
 }
 
+/** Keep expensive render/media loops aligned with actual component visibility. */
+function useContinuousPlayback(
+  wrapperRef: React.RefObject<HTMLDivElement | null>,
+  renderer: AsciiRenderer | null,
+  enabled: boolean,
+  pauseWhenOffscreen: boolean,
+  respectReducedMotion: boolean,
+  mediaRef?: React.RefObject<HTMLVideoElement | null>,
+): boolean {
+  const reducedMotion = usePrefersReducedMotion()
+
+  useEffect(() => {
+    if (!renderer || !enabled) {
+      renderer?.stop()
+      return
+    }
+    const element = wrapperRef.current
+    let intersecting = true
+    let running = false
+
+    const sync = (): void => {
+      const documentVisible = typeof document === 'undefined' || document.visibilityState !== 'hidden'
+      const motionAllowed = !respectReducedMotion || !reducedMotion
+      const shouldRun = documentVisible && motionAllowed && (!pauseWhenOffscreen || intersecting)
+      const media = mediaRef?.current
+      if (shouldRun) {
+        if (!running) renderer.start()
+        if (media?.paused) void media.play().catch(() => {})
+      } else {
+        renderer.stop()
+        media?.pause()
+        // Reduced motion still gets a useful static frame when visible.
+        if (!running && documentVisible && intersecting) renderer.render()
+      }
+      running = shouldRun
+    }
+
+    const onVisibilityChange = (): void => sync()
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    let observer: IntersectionObserver | undefined
+    if (pauseWhenOffscreen && element && typeof IntersectionObserver !== 'undefined') {
+      const rect = element.getBoundingClientRect()
+      intersecting = rect.bottom >= 0 && rect.right >= 0 && rect.top <= innerHeight && rect.left <= innerWidth
+      observer = new IntersectionObserver(([entry]) => {
+        intersecting = entry?.isIntersecting ?? true
+        sync()
+      })
+      observer.observe(element)
+    }
+
+    sync()
+    return () => {
+      observer?.disconnect()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      renderer.stop()
+      mediaRef?.current?.pause()
+    }
+  }, [wrapperRef, renderer, enabled, pauseWhenOffscreen, respectReducedMotion, reducedMotion, mediaRef])
+
+  return reducedMotion
+}
+
 export interface AsciiImageProps extends AsciiCommonProps {
   src: string
   /** Required; use alt="" for decorative images (spec §32). */
@@ -129,12 +198,24 @@ export interface AsciiImageProps extends AsciiCommonProps {
 }
 
 export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function AsciiImage(props, ref) {
-  const { src, alt, crossOrigin, className, style, profile, backend, interaction, ...options } = props
+  const {
+    src,
+    alt,
+    crossOrigin,
+    className,
+    style,
+    profile,
+    backend,
+    interaction,
+    pauseWhenOffscreen: _pauseWhenOffscreen,
+    respectReducedMotion,
+    ...options
+  } = props
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const [ready, setReady] = useState(false)
-  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, ...options })
+  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
 
   useEffect(() => {
     const img = imgRef.current
@@ -190,13 +271,15 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
     profile,
     backend,
     interaction,
+    pauseWhenOffscreen = true,
+    respectReducedMotion = true,
     ...options
   } = props
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [ready, setReady] = useState(false)
-  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, ...options })
+  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
 
   useEffect(() => {
     const video = videoRef.current
@@ -206,7 +289,6 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
       if (!live || video.videoWidth === 0) return
       renderer.setSource(video)
       renderer.render()
-      renderer.start()
       setReady(true)
     }
     if (video.readyState >= 2) attach()
@@ -218,6 +300,15 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
       setReady(false)
     }
   }, [renderer, src])
+
+  const reducedMotion = useContinuousPlayback(
+    wrapperRef,
+    renderer,
+    ready && autoPlay,
+    pauseWhenOffscreen,
+    respectReducedMotion,
+    videoRef,
+  )
 
   useCanvasAutosize(canvasRef, renderer)
   usePointerForward(wrapperRef, renderer)
@@ -231,7 +322,7 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
         poster={poster}
         muted={muted}
         loop={loop}
-        autoPlay={autoPlay}
+        autoPlay={autoPlay && (!respectReducedMotion || !reducedMotion)}
         playsInline={playsInline}
         style={fallbackStyle(ready)}
       />
@@ -249,19 +340,37 @@ export interface AsciiCanvasProps extends AsciiCommonProps {
 }
 
 export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(function AsciiCanvas(props, ref) {
-  const { source, renderMode = 'continuous', children, className, style, profile, backend, interaction, ...options } =
-    props
+  const {
+    source,
+    renderMode = 'continuous',
+    children,
+    className,
+    style,
+    profile,
+    backend,
+    interaction,
+    pauseWhenOffscreen = true,
+    respectReducedMotion = true,
+    ...options
+  } = props
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, ...options })
+  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
 
   useEffect(() => {
     if (!renderer || !source) return
     renderer.setSource(source)
-    if (renderMode === 'continuous') renderer.start()
-    else renderer.render()
+    renderer.render()
     return () => renderer.stop()
   }, [renderer, source, renderMode])
+
+  useContinuousPlayback(
+    wrapperRef,
+    renderer,
+    Boolean(source) && renderMode === 'continuous',
+    pauseWhenOffscreen,
+    respectReducedMotion,
+  )
 
   useCanvasAutosize(canvasRef, renderer)
   usePointerForward(wrapperRef, renderer)

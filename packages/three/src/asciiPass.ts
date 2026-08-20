@@ -77,9 +77,28 @@ export class AsciiPass {
 
   /** Compile pipelines on the renderer's device. Call once after renderer.init(). */
   async init(): Promise<void> {
-    this.device = getDevice(this.rendererRef)
-    this.engine = await AsciiEngine.create(this.device, this.profile)
-    this.stream = await this.engine.createStream(navigator.gpu.getPreferredCanvasFormat())
+    if (this.disposed) throw new Error('AsciiPass.init() called after dispose().')
+    if (this.stream) return
+    const device = getDevice(this.rendererRef)
+    const engine = await AsciiEngine.create(device, this.profile)
+    if (this.disposed) {
+      engine.destroy()
+      return
+    }
+    try {
+      const stream = await engine.createStream(navigator.gpu.getPreferredCanvasFormat())
+      if (this.disposed) {
+        stream.destroy()
+        engine.destroy()
+        return
+      }
+      this.device = device
+      this.engine = engine
+      this.stream = stream
+    } catch (error) {
+      engine.destroy()
+      throw error
+    }
   }
 
   /** Update matcher/composite options (spec §2: `ascii.set({...})`). */

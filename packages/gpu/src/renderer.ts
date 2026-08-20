@@ -50,6 +50,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   private renderScheduled = false
 
   private running = false
+  private loopGeneration = 0
   private rafId = 0
   private rvfcId = 0
   private destroyed = false
@@ -136,25 +137,37 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   }
 
   setSource(source: RenderSource): void {
+    const restart = this.running
+    if (restart) this.stop()
     this.source = source
     this.sourceLive = isLiveSource(source)
     this.sourceDirty = true
+    if (restart) this.start()
   }
 
   setOptions(options: AsciiRendererRuntimeOptions): void {
-    const prevColor = this.opts.color ?? 'mono'
-    this.opts = { ...this.opts, ...options }
+    const previous = this.opts
+    const prevColor = previous.color ?? 'mono'
+    this.opts = { ...previous, ...options }
     const color = this.opts.color ?? 'mono'
-    if (
-      options.columns !== undefined ||
-      options.rows !== undefined ||
-      options.color !== undefined ||
-      options.alpha !== undefined ||
-      options.foreground !== undefined ||
-      options.background !== undefined ||
-      options.flatThreshold !== undefined ||
-      options.temporal !== undefined
-    ) {
+    const matchChanged =
+      previous.columns !== this.opts.columns ||
+      previous.rows !== this.opts.rows ||
+      previous.color !== this.opts.color ||
+      previous.alpha !== this.opts.alpha ||
+      previous.foreground !== this.opts.foreground ||
+      previous.background !== this.opts.background ||
+      previous.flatThreshold !== this.opts.flatThreshold ||
+      previous.temporal !== this.opts.temporal
+    const adaptiveChanged = previous.adaptiveResolution !== this.opts.adaptiveResolution
+    if (adaptiveChanged && !this.opts.adaptiveResolution) {
+      this.adaptiveScale = 1
+      this.adaptiveEma = 1000 / 60
+      this.adaptiveHealthy = 0
+      this.adaptiveCooldown = 0
+      this.lastTickAt = 0
+    }
+    if (matchChanged || adaptiveChanged) {
       this.matchDirty = true
       if (this.srcTexture) this.reconfigureStream()
     }
@@ -339,11 +352,12 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   start(): void {
     if (this.running || this.destroyed) return
     this.running = true
+    const generation = ++this.loopGeneration
     const video =
       typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement ? this.source : null
     if (video && 'requestVideoFrameCallback' in video) {
       const cb = (): void => {
-        if (!this.running) return
+        if (!this.running || generation !== this.loopGeneration) return
         this.sourceDirty = true
         this.render()
         this.rvfcId = video.requestVideoFrameCallback(cb)
@@ -351,7 +365,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.rvfcId = video.requestVideoFrameCallback(cb)
     } else {
       const tick = (): void => {
-        if (!this.running) return
+        if (!this.running || generation !== this.loopGeneration) return
         if (this.opts.adaptiveResolution) this.paceAdaptive()
         this.render()
         this.rafId = requestAnimationFrame(tick)
@@ -391,6 +405,13 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
 
   stop(): void {
     this.running = false
+    this.loopGeneration++
+    // The pacing clock measures the gap between consecutive rendered frames.
+    // A stopped loop is not a slow frame, so drop the timestamp: without this
+    // the first tick after a resume feeds the whole pause into the EMA, which
+    // reads as a stall and collapses adaptive resolution (reconfiguring the
+    // stream on the way down) before slowly climbing back.
+    this.lastTickAt = 0
     if (this.rafId) cancelAnimationFrame(this.rafId)
     const video =
       typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement ? this.source : null

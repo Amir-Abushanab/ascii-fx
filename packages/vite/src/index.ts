@@ -29,6 +29,13 @@ interface ProfileEntry {
   fontPath: string
 }
 
+interface FrameEntry {
+  cachePath: string
+  profileName: string
+  imagePath: string
+  fontPath: string
+}
+
 const sha = (data: string | Uint8Array): string => createHash('sha256').update(data).digest('hex')
 
 /**
@@ -44,7 +51,8 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
   let config: AsciiConfig | undefined
   let configDeps: string[] = []
   const profiles = new Map<string, ProfileEntry>()
-  const frames = new Map<string, { cachePath: string; profileName: string; imagePath: string }>()
+  const frames = new Map<string, FrameEntry>()
+  const pendingHmrIds = new Set<string>()
 
   async function ensureConfig(): Promise<AsciiConfig> {
     if (config) return config
@@ -100,7 +108,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     return entry
   }
 
-  async function ensureFrame(name: string): Promise<{ cachePath: string; profileName: string; imagePath: string }> {
+  async function ensureFrame(name: string): Promise<FrameEntry> {
     const cached = frames.get(name)
     if (cached) return cached
     const cfg = await ensureConfig()
@@ -111,7 +119,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
       )
     }
     const profileName = fc.profile ?? 'default'
-    const { profile } = await ensureProfile(profileName)
+    const { profile, fontPath } = await ensureProfile(profileName)
     const imagePath = resolve(root, fc.image)
     if (!existsSync(imagePath)) throw new Error(`[ascii-fx] Image not found for frame "${name}": ${imagePath}`)
     const imageBytes = new Uint8Array(readFileSync(imagePath))
@@ -131,9 +139,38 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
       mkdirSync(cacheDir, { recursive: true })
       writeFileSync(cachePath, built.binary)
     }
-    const entry = { cachePath, profileName, imagePath }
+    const entry = { cachePath, profileName, imagePath, fontPath }
     frames.set(name, entry)
     return entry
+  }
+
+  function invalidateFile(id: string): string[] {
+    const affectedProfiles = new Set<string>()
+    const affectedFrames = new Set<string>()
+    if (configDeps.includes(id)) {
+      for (const name of profiles.keys()) affectedProfiles.add(name)
+      for (const name of frames.keys()) affectedFrames.add(name)
+      config = typeof options.config === 'object' ? options.config : undefined
+      configDeps = []
+      profiles.clear()
+      frames.clear()
+      pendingHmrIds.clear()
+    } else {
+      for (const [name, entry] of profiles) {
+        if (entry.fontPath === id) affectedProfiles.add(name)
+      }
+      for (const [name, entry] of frames) {
+        if (entry.imagePath === id || entry.fontPath === id || affectedProfiles.has(entry.profileName)) {
+          affectedFrames.add(name)
+        }
+      }
+      for (const name of affectedProfiles) profiles.delete(name)
+      for (const name of affectedFrames) frames.delete(name)
+    }
+    return [
+      ...Array.from(affectedProfiles, (name) => RESOLVED + PROFILE_PREFIX + name),
+      ...Array.from(affectedFrames, (name) => RESOLVED + FRAME_PREFIX + name),
+    ]
   }
 
   return {
@@ -143,12 +180,29 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
       cacheDir = options.cacheDir ? resolve(root, options.cacheDir) : resolve(root, 'node_modules/.ascii-fx')
       // Config/watch state resets per build so edits are picked up.
       config = typeof options.config === 'object' ? options.config : undefined
+      configDeps = []
       profiles.clear()
       frames.clear()
+      pendingHmrIds.clear()
     },
     resolveId(id) {
       if (id.startsWith(PROFILE_PREFIX) || id.startsWith(FRAME_PREFIX)) return RESOLVED + id
       return null
+    },
+    watchChange(id) {
+      for (const moduleId of invalidateFile(id)) pendingHmrIds.add(moduleId)
+    },
+    handleHotUpdate(ctx) {
+      const ids = [...pendingHmrIds, ...invalidateFile(ctx.file)]
+      pendingHmrIds.clear()
+      if (ids.length === 0) return
+      const modules = ids.flatMap((id) => {
+        const module = ctx.server.moduleGraph.getModuleById(id)
+        if (!module) return []
+        ctx.server.moduleGraph.invalidateModule(module)
+        return [module]
+      })
+      return [...new Set([...ctx.modules, ...modules])]
     },
     async load(id) {
       if (id.startsWith(RESOLVED + PROFILE_PREFIX)) {
@@ -165,6 +219,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
         const name = id.slice(RESOLVED.length + FRAME_PREFIX.length)
         const entry = await ensureFrame(name)
         this.addWatchFile(entry.imagePath)
+        this.addWatchFile(entry.fontPath)
         for (const dep of configDeps) this.addWatchFile(dep)
         return (
           `import url from ${JSON.stringify(`${entry.cachePath}?url`)}\n` +

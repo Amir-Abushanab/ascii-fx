@@ -42,6 +42,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private lastFrame?: AsciiFrame
   private matchDirty = true
   private running = false
+  private loopGeneration = 0
   private rafId = 0
   private rvfcId = 0
   private fxRafId = 0
@@ -95,10 +96,13 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   setSource(source: RenderSource): void {
+    const restart = this.running
+    if (restart) this.stop()
     this.source = source
     this.sourceLive = isLiveSource(source)
     this.matchDirty = true
     this.srcFxFor = undefined
+    if (restart) this.start()
   }
 
   setOptions(options: AsciiRendererRuntimeOptions): void {
@@ -496,6 +500,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   start(): void {
     if (this.running || this.destroyed) return
     this.running = true
+    const generation = ++this.loopGeneration
     if (this.fxRafId) {
       cancelAnimationFrame(this.fxRafId)
       this.fxRafId = 0
@@ -504,7 +509,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement ? this.source : null
     if (video && 'requestVideoFrameCallback' in video) {
       const cb = (): void => {
-        if (!this.running) return
+        if (!this.running || generation !== this.loopGeneration) return
         this.matchDirty = true
         this.render()
         this.rvfcId = video.requestVideoFrameCallback(cb)
@@ -512,7 +517,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       this.rvfcId = video.requestVideoFrameCallback(cb)
     } else {
       const tick = (): void => {
-        if (!this.running) return
+        if (!this.running || generation !== this.loopGeneration) return
         this.render()
         this.rafId = requestAnimationFrame(tick)
       }
@@ -522,6 +527,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   stop(): void {
     this.running = false
+    this.loopGeneration++
     if (this.rafId) cancelAnimationFrame(this.rafId)
     const video =
       typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement ? this.source : null
@@ -530,7 +536,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     }
     this.rafId = 0
     this.rvfcId = 0
-    this.ensureFxLoop()
+    if (this.fxRafId) cancelAnimationFrame(this.fxRafId)
+    this.fxRafId = 0
   }
 
   /** CPU v1 has no partial rematch: an invalidation re-matches fully (correct, just not partial). */

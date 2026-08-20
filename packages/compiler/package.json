@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Build-time compiler for ASCII FX: deterministic font rasterization, glyph atlases, .asciip/.asciif generation.",
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "bin": {
     "ascii-fx": "./dist/cli.js"

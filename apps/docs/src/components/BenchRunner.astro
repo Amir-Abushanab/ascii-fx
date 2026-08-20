@@ -1,0 +1,256 @@
+---
+// "Run it yourself": drives the very same harness the CLI benchmark uses
+// (apps/benchmarks/compare/index.html, copied into public/bench/ by
+// `pnpm --filter @ascii-fx-internal/benchmarks run prep:web`), one contender per
+// fresh iframe so libraries cannot contaminate each other's numbers.
+//
+// It cannot reproduce the published figures and does not try to: a normal tab
+// has vsync on, so everything faster than the display refresh reads the same.
+// What it does show is which approaches fall *below* your refresh rate.
+import { crossLibrary } from '../lib/results'
+
+// Published p50s, shown beside each live result for context.
+const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
+---
+
+<h3 id="run-it-yourself">Run it on your machine</h3>
+<p>
+  The table above is a controlled measurement. This is the same harness — same scene, same grid, same code — run
+  right here in your tab instead.
+</p>
+<p class="note">
+  Your browser paints in step with your display, so anything that can hold your refresh rate reports much the
+  same frame time. Read it as pass/fail on your own hardware, not as a ranking: the rows that fall below refresh
+  are the ones that cannot keep up here. The ranking is the table above.
+</p>
+
+<div class="runner" data-bench-runner data-published={JSON.stringify(published)}>
+  <div class="runner-bar">
+    <button type="button" data-run>run the comparison</button>
+    <span data-progress class="runner-progress">~30 seconds, {published.length} contenders</span>
+  </div>
+  <p class="runner-hint" data-hint>
+    Loads about 8&nbsp;MB of third-party libraries (three.js, p5, aalib.js, chafa-wasm) on the first run — nothing
+    is fetched until you press the button.
+  </p>
+  <div class="runner-stage" data-stage hidden></div>
+  <div class="table-scroll" data-results hidden>
+    <table>
+      <thead>
+        <tr><th>approach</th><th class="num">your p50 ms</th><th class="num">your fps</th><th class="num">published p50 ms</th></tr>
+      </thead>
+      <tbody data-rows></tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  .runner {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    padding: 0.9rem 1rem 1rem;
+    margin: 1.2rem 0;
+  }
+  .runner-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8rem;
+  }
+  .runner button {
+    font: inherit;
+    color: var(--text);
+    background: var(--code-bg);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 0.35rem 0.9rem;
+    cursor: pointer;
+  }
+  .runner button:hover:not(:disabled) {
+    color: var(--accent);
+  }
+  .runner button:disabled {
+    border-color: var(--border);
+    color: var(--muted);
+    cursor: default;
+  }
+  .runner-progress,
+  .runner-hint {
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+  .runner-hint {
+    margin: 0.6rem 0 0;
+  }
+  .runner-stage {
+    margin-top: 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #000;
+    /* The harness renders at 1280×720; scale it down to a preview strip so the
+       contender is visibly working without dominating the page. */
+    height: 180px;
+  }
+  .runner-stage iframe {
+    width: 1280px;
+    height: 720px;
+    border: 0;
+    transform: scale(0.28);
+    transform-origin: 0 0;
+    display: block;
+  }
+  .runner tbody td[data-state='running'] {
+    color: var(--accent);
+  }
+  .runner tbody td[data-state='failed'] {
+    color: var(--muted);
+  }
+</style>
+
+<script>
+  const BASE = import.meta.env.BASE_URL
+  // Shorter than the CLI pass: at vsync a longer run tells you nothing extra,
+  // and 12 contenders have to fit in a tolerable wait.
+  const WARMUP = 20
+  const FRAMES = 90
+  // Browsers throttle requestAnimationFrame to a crawl in a background tab, so a
+  // contender that stops advancing is almost always a hidden page rather than a
+  // slow library. Cap it so one stall cannot hang the whole run.
+  const CONTENDER_TIMEOUT_MS = 60_000
+
+  interface BenchResult {
+    name: string
+    p50: number
+    p95: number
+    fps: number
+  }
+
+  interface HarnessWindow extends Window {
+    benchNames?: string[]
+    runBench?: (name: string, opts?: { warmup?: number; frames?: number }) => Promise<BenchResult>
+  }
+
+  function setup(root: HTMLElement) {
+    const button = root.querySelector<HTMLButtonElement>('[data-run]')!
+    const progress = root.querySelector<HTMLElement>('[data-progress]')!
+    const hint = root.querySelector<HTMLElement>('[data-hint]')!
+    const stage = root.querySelector<HTMLElement>('[data-stage]')!
+    const results = root.querySelector<HTMLElement>('[data-results]')!
+    const tbody = root.querySelector<HTMLElement>('[data-rows]')!
+    const published = new Map<string, number>(
+      (JSON.parse(root.dataset.published ?? '[]') as { name: string; p50: number }[]).map((p) => [p.name, p.p50]),
+    )
+
+    /** A fresh iframe per contender: same isolation the CLI pass gets from a fresh page. */
+    async function openHarness(): Promise<HTMLIFrameElement> {
+      const frame = document.createElement('iframe')
+      frame.src = `${BASE}bench/index.html`
+      stage.replaceChildren(frame)
+      await new Promise<void>((resolve, reject) => {
+        frame.addEventListener('load', () => resolve(), { once: true })
+        frame.addEventListener('error', () => reject(new Error('harness failed to load')), { once: true })
+        setTimeout(() => reject(new Error('harness timed out')), 30000)
+      })
+      // The harness compiles pipelines and wasm before it announces itself.
+      const deadline = Date.now() + 30000
+      for (;;) {
+        const w = frame.contentWindow as HarnessWindow | null
+        if (w?.runBench && w.benchNames) return frame
+        if (Date.now() > deadline) throw new Error('harness never became ready')
+        await new Promise((r) => setTimeout(r, 100))
+      }
+    }
+
+    function row(name: string) {
+      const tr = document.createElement('tr')
+      const pub = published.get(name)
+      tr.innerHTML =
+        `<td></td><td class="num" data-state="running">running…</td><td class="num"></td>` +
+        `<td class="num">${pub === undefined ? '—' : pub.toFixed(1)}</td>`
+      tr.children[0].textContent = name
+      tbody.append(tr)
+      return {
+        done(r: BenchResult) {
+          const cell = tr.children[1] as HTMLElement
+          cell.removeAttribute('data-state')
+          cell.textContent = r.p50.toFixed(1)
+          tr.children[2].textContent = String(Math.round(r.fps))
+        },
+        failed(message: string) {
+          const cell = tr.children[1] as HTMLElement
+          cell.dataset.state = 'failed'
+          cell.textContent = 'unavailable'
+          cell.title = message
+        },
+      }
+    }
+
+    /** Reject if the harness stops making progress (usually a backgrounded tab). */
+    function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
+      return Promise.race([
+        work,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`${label} did not finish in ${CONTENDER_TIMEOUT_MS / 1000}s`)),
+            CONTENDER_TIMEOUT_MS,
+          ),
+        ),
+      ])
+    }
+
+    let running = false
+
+    // Frames only advance while the tab is in front; say so rather than looking
+    // like the run has crashed.
+    document.addEventListener('visibilitychange', () => {
+      if (running && document.hidden) progress.textContent = 'paused — frames only advance while this tab is visible'
+    })
+
+    button.addEventListener('click', async () => {
+      if (running) return
+      running = true
+      button.disabled = true
+      hint.hidden = true
+      stage.hidden = false
+      results.hidden = false
+      tbody.replaceChildren()
+
+      let names: string[] = []
+      try {
+        const probe = await withTimeout(openHarness(), 'harness')
+        names = [...((probe.contentWindow as HarnessWindow).benchNames ?? [])]
+      } catch (err) {
+        progress.textContent = `could not start the harness: ${(err as Error).message}`
+        stage.replaceChildren()
+        stage.hidden = true
+        button.disabled = false
+        running = false
+        return
+      }
+
+      for (const [i, name] of names.entries()) {
+        progress.textContent = `${i + 1}/${names.length} · ${name}`
+        const entry = row(name)
+        try {
+          const frame = await withTimeout(openHarness(), name)
+          const win = frame.contentWindow as HarnessWindow
+          entry.done(await withTimeout(win.runBench!(name, { warmup: WARMUP, frames: FRAMES }), name))
+        } catch (err) {
+          // One contender failing (no WebGPU, blocked wasm) must not end the run.
+          entry.failed((err as Error).message)
+        }
+      }
+
+      stage.replaceChildren()
+      stage.hidden = true
+      progress.textContent = `done · ${names.length} contenders on your machine, at your display's refresh rate`
+      button.disabled = false
+      button.textContent = 'run again'
+      running = false
+    })
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-bench-runner]').forEach(setup)
+</script>

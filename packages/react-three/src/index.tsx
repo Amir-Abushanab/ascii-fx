@@ -56,13 +56,19 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
     }
     let live = true
     const created = new AsciiPass({ profile, renderer, fit, clearColor })
-    void created.init().then(() => {
-      if (!live) {
+    void created
+      .init()
+      .then(() => {
+        if (!live) {
+          created.dispose()
+          return
+        }
+        setPass(created)
+      })
+      .catch((err: unknown) => {
         created.dispose()
-        return
-      }
-      setPass(created)
-    })
+        if (live) console.error('[ascii-fx] AsciiPass init failed:', err)
+      })
     return () => {
       live = false
       created.dispose()
@@ -71,7 +77,19 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl, profile])
 
-  const matchKey = JSON.stringify([match.columns, match.rows, match.color, match.alpha, match.foreground, match.background, match.flatThreshold, fit, clearColor])
+  const matchKey = JSON.stringify([
+    match.columns,
+    match.rows,
+    match.color,
+    match.alpha,
+    match.foreground,
+    match.background,
+    match.flatThreshold,
+    match.srgbEncode,
+    match.temporal,
+    fit,
+    clearColor,
+  ])
   useEffect(() => {
     pass?.set({ ...match, fit, clearColor })
     // eslint-disable-next-line react-hooks/exhaustive-deps

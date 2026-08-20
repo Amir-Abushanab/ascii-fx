@@ -12,7 +12,7 @@ import {
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import { add, attribute, div, float, floor, mix, mod, mul, texture, uv, vec2 } from 'three/tsl'
 import type { AsciiFrame, AsciiProfile } from '@ascii-fx/core'
-import { FLAG_TRANSPARENT, unpackB, unpackG, unpackR } from '@ascii-fx/core'
+import { FLAG_TRANSPARENT, blankGlyphId, unpackB, unpackG, unpackR } from '@ascii-fx/core'
 
 export interface AsciiGlyphsOptions {
   profile: AsciiProfile
@@ -40,13 +40,21 @@ export class AsciiGlyphs {
   private readonly aGlyph: InstancedBufferAttribute
   private readonly aFg: InstancedBufferAttribute
   private readonly aBg: InstancedBufferAttribute
+  private readonly aVisible: InstancedBufferAttribute
+  private readonly aUseBackground: InstancedBufferAttribute
   private readonly atlasTexture: DataTexture
+  private readonly profileFingerprint: string
+  private readonly glyphCount: number
+  private readonly blankGlyph: number
 
   constructor(options: AsciiGlyphsOptions) {
     const { profile, columns, rows } = options
     const cellSize = options.cellSize ?? 1
     this.columns = columns
     this.rows = rows
+    this.profileFingerprint = profile.fingerprint
+    this.glyphCount = profile.glyphCount
+    this.blankGlyph = blankGlyphId(profile)
     const { atlas } = profile
     const aspect = atlas.cellWidth / atlas.cellHeight
     const count = columns * rows
@@ -55,9 +63,13 @@ export class AsciiGlyphs {
     this.aGlyph = new InstancedBufferAttribute(new Float32Array(count), 1)
     this.aFg = new InstancedBufferAttribute(new Float32Array(count * 3).fill(1), 3)
     this.aBg = new InstancedBufferAttribute(new Float32Array(count * 3), 3)
+    this.aVisible = new InstancedBufferAttribute(new Float32Array(count).fill(1), 1)
+    this.aUseBackground = new InstancedBufferAttribute(new Float32Array(count).fill(1), 1)
     geometry.setAttribute('aGlyph', this.aGlyph)
     geometry.setAttribute('aFg', this.aFg)
     geometry.setAttribute('aBg', this.aBg)
+    geometry.setAttribute('aVisible', this.aVisible)
+    geometry.setAttribute('aUseBackground', this.aUseBackground)
 
     this.atlasTexture = new DataTexture(
       atlas.data as Uint8Array<ArrayBuffer>,
@@ -93,7 +105,13 @@ export class AsciiGlyphs {
     const texel = n.add(tile, n.mul(guv, n.vec2(atlas.cellWidth, atlas.cellHeight)))
     const auv = n.div(texel, n.vec2(atlas.width, atlas.height))
     const alpha = n.texture(this.atlasTexture, auv).r
-    this.material.colorNode = n.mix(n.attribute('aBg'), n.attribute('aFg'), alpha)
+    const foreground = n.attribute('aFg')
+    const useBackground = n.attribute('aUseBackground')
+    const cellColor = n.mix(n.attribute('aBg'), foreground, alpha)
+    this.material.colorNode = n.mix(foreground, cellColor, useBackground)
+    this.material.opacityNode = n.mul(n.attribute('aVisible'), n.mix(alpha, n.float(1), useBackground))
+    this.material.transparent = true
+    this.material.depthWrite = false
 
     this.mesh = new InstancedMesh(geometry, this.material, count)
     this.mesh.frustumCulled = false
@@ -110,6 +128,12 @@ export class AsciiGlyphs {
 
   /** Load glyph ids and colors from a matched frame (same grid dimensions). */
   updateFromFrame(frame: AsciiFrame): void {
+    if (frame.profile.fingerprint !== this.profileFingerprint) {
+      throw new Error(
+        `Frame profile "${frame.profile.id}" (${frame.profile.fingerprint.slice(0, 12)}…) does not match ` +
+          `AsciiGlyphs profile (${this.profileFingerprint.slice(0, 12)}…).`,
+      )
+    }
     if (frame.columns !== this.columns || frame.rows !== this.rows) {
       throw new Error(
         `Frame grid ${frame.columns}×${frame.rows} does not match AsciiGlyphs grid ${this.columns}×${this.rows}.`,
@@ -119,9 +143,17 @@ export class AsciiGlyphs {
     const g = this.aGlyph.array as Float32Array
     const fg = this.aFg.array as Float32Array
     const bg = this.aBg.array as Float32Array
+    const visible = this.aVisible.array as Float32Array
+    const useBackground = this.aUseBackground.array as Float32Array
     for (let i = 0; i < n; i++) {
       const transparent = (frame.flags[i] & FLAG_TRANSPARENT) !== 0
-      g[i] = transparent ? 0 : frame.glyphIds[i]
+      const glyphId = frame.glyphIds[i]
+      if (glyphId >= this.glyphCount) {
+        throw new Error(`Frame cell ${i} references glyph ${glyphId}, but the profile has ${this.glyphCount} glyphs.`)
+      }
+      g[i] = transparent ? this.blankGlyph : glyphId
+      visible[i] = transparent ? 0 : 1
+      useBackground[i] = frame.colorMode === 'foreground' ? 0 : 1
       const fgc = frame.foreground?.[i]
       const bgc = frame.background?.[i]
       fg[i * 3] = fgc !== undefined ? unpackR(fgc) / 255 : 1
@@ -134,6 +166,8 @@ export class AsciiGlyphs {
     this.aGlyph.needsUpdate = true
     this.aFg.needsUpdate = true
     this.aBg.needsUpdate = true
+    this.aVisible.needsUpdate = true
+    this.aUseBackground.needsUpdate = true
   }
 
   dispose(): void {

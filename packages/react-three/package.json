@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "React Three Fiber bindings for ASCII FX: <AsciiEffect>, <AsciiGlyphs>, useAsciiEffect (WebGPURenderer only).",
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {
