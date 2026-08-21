@@ -15,7 +15,7 @@ export function getAsciiSupport(): Promise<AsciiSupport> {
 async function probe(): Promise<AsciiSupport> {
   const limitations: string[] = []
   let webgpu = false
-  if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
+  if (typeof navigator !== 'undefined' && navigator.gpu) {
     try {
       const adapter = await navigator.gpu.requestAdapter()
       if (adapter) {

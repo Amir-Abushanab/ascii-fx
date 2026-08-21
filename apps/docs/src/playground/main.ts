@@ -319,7 +319,9 @@ function updateStats(): void {
     ? `chromatic-v1${selectionSize() === null ? ' · curated' : ''}`
     : (renderer.profile.metadata.fontFamily ?? renderer.profile.id)
   stats.replaceChildren(
-    document.createTextNode(`${renderer.backend} · ${grid ? `${grid.columns}×${grid.rows} cells` : '—'} · `),
+    document.createTextNode(
+      `${renderer.backend}${backendNote ? ` (${backendNote})` : ''} · ${grid ? `${grid.columns}×${grid.rows} cells` : '—'} · `,
+    ),
     fpsSpan,
     document.createTextNode(` · ${name}${subset} · ${active?.kind ?? '—'}`),
   )
@@ -381,6 +383,8 @@ let lastDeviceLossAt = 0
  * 'auto' would keep choosing WebGPU forever; this pins the rebuild to CPU.
  */
 let forcedBackend: BackendChoice | null = null
+/** Why the running backend differs from the dropdown (webgpu picked, unavailable); shown in the status line. */
+let backendNote: string | null = null
 function handleGpuError(error: GPUError): void {
   if (forcedBackend) return
   forcedBackend = 'cpu'
@@ -424,18 +428,39 @@ async function rebuild(): Promise<void> {
     stats.textContent = `font failed: ${err instanceof Error ? err.message : String(err)}`
     return
   }
+  const backend = forcedBackend ?? (els.backend.value as BackendChoice)
+  backendNote = null
   try {
     renderer = await createAsciiRenderer({
       canvas: out,
       profile,
-      backend: forcedBackend ?? (els.backend.value as BackendChoice),
+      backend,
       onDeviceLost: handleDeviceLost,
       onError: handleGpuError,
       ...matchOptions(),
     })
   } catch (err) {
-    stats.textContent = `renderer failed: ${err instanceof Error ? err.message : String(err)}`
-    return
+    const message = err instanceof Error ? err.message : String(err)
+    // An explicit WebGPU pick on a machine without it should degrade like
+    // 'auto' does, not dead-end — but visibly: the status keeps saying which
+    // backend actually runs and why the requested one could not.
+    if (backend === 'webgpu') {
+      backendNote = `webgpu unavailable, fell back: ${message}`
+      try {
+        renderer = await createAsciiRenderer({
+          canvas: out,
+          profile,
+          backend: 'cpu',
+          ...matchOptions(),
+        })
+      } catch (cpuErr) {
+        stats.textContent = `renderer failed: ${cpuErr instanceof Error ? cpuErr.message : String(cpuErr)}`
+        return
+      }
+    } else {
+      stats.textContent = `renderer failed: ${message}`
+      return
+    }
   }
   syncCanvasSize()
   if (active) renderer.setSource(active.source)

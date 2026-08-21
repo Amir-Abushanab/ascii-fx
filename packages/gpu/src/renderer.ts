@@ -106,7 +106,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   }
 
   static async create(options: AsciiRendererOptions): Promise<WebGpuAsciiRenderer> {
-    if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
+    // Truthiness, not `in`: privacy modes and test shims leave the property
+    // present but undefined, and `'gpu' in navigator` would pass them through
+    // to a raw TypeError instead of this message.
+    if (typeof navigator === 'undefined' || !navigator.gpu) {
       throw new Error('WebGPU is unavailable in this environment (navigator.gpu missing).')
     }
     // Fail BEFORE touching the canvas: acquiring a 'webgpu' context locks the
@@ -235,7 +238,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       if (++this.recoverAttempts > MAX_RECOVERY_ATTEMPTS) {
         throw new Error(`device lost ${MAX_RECOVERY_ATTEMPTS} times in quick succession`)
       }
-      if (typeof navigator === 'undefined' || !('gpu' in navigator)) throw new Error('navigator.gpu went away')
+      if (typeof navigator === 'undefined' || !navigator.gpu) throw new Error('navigator.gpu went away')
       const adapter = await navigator.gpu.requestAdapter()
       if (this.destroyed) return
       if (!adapter) throw new Error('no adapter available after device loss')
