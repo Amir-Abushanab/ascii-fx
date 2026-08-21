@@ -210,6 +210,69 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
     }
   })
 
+  // The temporal-reuse snapshot must not survive a matcher flip. When
+  // `matcher`/`temporal` were missing from the engine's reset key, a
+  // structural→chromatic→structural sequence left the snapshot primed over a
+  // cells buffer holding chromatic ids — and since the content never changed,
+  // every cell skipped rematching and kept them: chromatic-palette ids
+  // rendered as structural cells with fg=bg=0.
+  it('temporal snapshot resets across matcher flips', async () => {
+    const profile = randomChromaticProfile(24, 21)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+      temporal: true,
+    })
+    try {
+      const img = randomImage(96, 56, 61)
+      renderer.setOptions({ columns: 12, color: 'full', alpha: 'ignore' })
+      renderer.setSource(img)
+      await renderer.captureFrame() // structural era primes the snapshot
+      renderer.setOptions({ matcher: 'chromatic' })
+      await renderer.captureFrame() // snapshot copies stop
+      renderer.setOptions({ matcher: 'structural' })
+      const gpu = await renderer.captureFrame()
+      const cpu = matchFrame(img, { profile, columns: 12, color: 'full', alpha: 'ignore' })
+      expect(gpu.glyphIds, 'glyphIds after matcher round-trip').toEqual(cpu.glyphIds)
+      expect(gpu.flags).toEqual(cpu.flags)
+      expect(gpu.foreground).toEqual(cpu.foreground)
+      expect(gpu.background).toEqual(cpu.background)
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  // ALGORITHM.md: hysteresis is suppressed for one frame after any option
+  // change. `hysteresis` itself must be in the reset key: adjusting it
+  // mid-flight used to keep stale incumbents against a fresh CPU chain.
+  it('hysteresis is suppressed for one frame after an option change', async () => {
+    const profile = makeChromaticProfile([solid('k', 0, 0, 0), solid('b', 0, 0, 255)])
+    const source = new OffscreenCanvas(64, 64)
+    const ctx = source.getContext('2d') as OffscreenCanvasRenderingContext2D
+    const fill = (css: string): RawImage => {
+      ctx.fillStyle = css
+      ctx.fillRect(0, 0, 64, 64)
+      const d = ctx.getImageData(0, 0, 64, 64)
+      return { width: 64, height: 64, data: new Uint8Array(d.data.buffer.slice(0)) }
+    }
+    const base = { columns: 8, matcher: 'chromatic' as const, alpha: 'ignore' as const, hysteresis: 0.1 }
+    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, ...base })
+    try {
+      fill('rgb(200 200 255)') // primes incumbents: blue everywhere
+      renderer.setSource(source)
+      renderer.render()
+      const imgB = fill('rgb(255 255 0)') // challenger black; blue survives h=0.9 if not suppressed
+      renderer.setOptions({ hysteresis: 0.9 })
+      renderer.render()
+      const gpu = await renderer.captureFrame()
+      const cpu = matchFrame(imgB, { profile, ...base, hysteresis: 0.9 }) // no previous: suppressed
+      expectFramesEqual(gpu, cpu, 'post-change suppression')
+    } finally {
+      renderer.destroy()
+    }
+  })
+
   // The CPU backend builds its own matchFrame options, so `matcher` reaching it
   // is a separate wire from the WebGPU path. Missing it does not fail loudly:
   // an emoji profile silently matches under structural-v1, which fits one ink

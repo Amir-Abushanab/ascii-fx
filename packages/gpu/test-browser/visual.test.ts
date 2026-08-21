@@ -82,6 +82,43 @@ describe.runIf(gpuAvailable)('composite renders glyph shapes (not blocks)', () =
       renderer.destroy()
     }
   })
+
+  // Setting canvas dims discards the presented frame. With no running loop the
+  // WebGPU backend used to leave the canvas blank until some other trigger
+  // rendered (the conformance resize test masked it by calling render()
+  // manually); resize() must schedule a repaint itself, like the CPU backend's
+  // synchronous re-present.
+  it('resize() repaints a static image without a running loop', async () => {
+    const res = await fetch(profileUrl)
+    const profile = decodeProfile(new Uint8Array(await res.arrayBuffer()))
+    const white = {
+      width: 32,
+      height: 16,
+      data: new Uint8Array(32 * 16 * 4).fill(255),
+    }
+    const canvas = new OffscreenCanvas(480, 256)
+    const renderer = await createAsciiRenderer({ canvas, profile, backend: 'webgpu', columns: 4, color: 'mono' })
+    try {
+      renderer.setSource(white)
+      renderer.render()
+      await (renderer as unknown as { device: GPUDevice }).device.queue.onSubmittedWorkDone()
+
+      renderer.resize(320, 160)
+      // scheduleRender coalesces through requestAnimationFrame; give it two.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      await (renderer as unknown as { device: GPUDevice }).device.queue.onSubmittedWorkDone()
+
+      const probe = new OffscreenCanvas(320, 160)
+      const ctx = probe.getContext('2d')!
+      ctx.drawImage(canvas, 0, 0)
+      const img = ctx.getImageData(0, 0, 320, 160)
+      let lit = 0
+      for (let i = 0; i < img.data.length; i += 4) if (img.data[i] > 128) lit++
+      expect(lit, 'resized canvas must show ink, not stay blank').toBeGreaterThan(50)
+    } finally {
+      renderer.destroy()
+    }
+  })
 })
 
 describe.skipIf(gpuAvailable)('WebGPU unavailable', () => {

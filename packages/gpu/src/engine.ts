@@ -413,6 +413,11 @@ export class AsciiStream {
     this.boundSrc = src
     this.srcW = srcW
     this.srcH = srcH
+    // Every option that feeds matching belongs in this key: it gates the
+    // temporal/hysteresis reset (§21/§C5's one-frame suppression after any
+    // option change). `matcher` and `temporal` in particular — without them a
+    // structural→chromatic→structural flip left the snapshot primed over a
+    // buffer of chromatic cell ids, and every content-stable cell kept them.
     const optsKey = JSON.stringify([
       opts.color,
       opts.alpha,
@@ -420,6 +425,9 @@ export class AsciiStream {
       opts.background,
       opts.flatThreshold,
       opts.srgbEncode,
+      opts.matcher,
+      opts.temporal,
+      opts.hysteresis,
       srcW,
       srcH,
     ])

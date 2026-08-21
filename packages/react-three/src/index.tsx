@@ -19,6 +19,30 @@ const normalizeInteraction = (
 ): InteractionOptions | null =>
   interaction == null ? null : typeof interaction === 'string' ? { type: interaction } : interaction
 
+const binaryIds = new WeakMap<ArrayBuffer | Uint8Array, number>()
+let nextBinaryId = 1
+
+/**
+ * Stable for semantic sources, identity-based for mutable binary inputs
+ * (mirrors @ascii-fx/react's hookKeys). Keying the load effect by object
+ * identity instead re-decoded — and rebuilt the whole AsciiPass, WGSL
+ * recompile included — on every parent re-render for inline sources.
+ */
+const profileSourceKey = (source: ProfileSource): string => {
+  if (typeof source === 'string') return `url:${source}`
+  if (source instanceof URL) return `url:${source.href}`
+  if (source instanceof Uint8Array || source instanceof ArrayBuffer) {
+    let id = binaryIds.get(source)
+    if (id === undefined) {
+      id = nextBinaryId++
+      binaryIds.set(source, id)
+    }
+    return `bytes:${id}`
+  }
+  if ('url' in source && !('glyphs' in source)) return `url:${(source as { url: string }).url}`
+  return `profile:${(source as AsciiProfile).fingerprint}`
+}
+
 /**
  * AsciiPass lifecycle inside an R3F canvas. Requires the Canvas to run a
  * THREE.WebGPURenderer (`gl` factory returning WebGPURenderer in R3F v9).
@@ -42,7 +66,7 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeof profileSource === 'string' ? profileSource : profileSource])
+  }, [profileSourceKey(profileSource)])
 
   useEffect(() => {
     if (!profile) return
@@ -145,7 +169,12 @@ export function AsciiGlyphs(props: AsciiGlyphsProps): React.JSX.Element {
   )
   useEffect(() => () => glyphs.dispose(), [glyphs])
   useEffect(() => {
-    if (frame) glyphs.updateFromFrame(frame)
-  }, [glyphs, frame])
+    // A grid prop change rebuilds `glyphs` in the same render, while `frame`
+    // state may still hold the previous grid's match for a beat — forwarding
+    // it would throw from updateFromFrame into the nearest error boundary.
+    // Skip mismatched frames; the caller's next capture fits the new grid.
+    if (!frame || frame.columns !== columns || frame.rows !== rows) return
+    glyphs.updateFromFrame(frame)
+  }, [glyphs, frame, columns, rows])
   return <primitive object={glyphs.mesh} />
 }

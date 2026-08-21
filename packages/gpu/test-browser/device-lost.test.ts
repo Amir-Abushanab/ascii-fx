@@ -88,4 +88,48 @@ describe.skipIf(!gpuAvailable)('webgpu device loss', () => {
       restore()
     }
   })
+
+  // Per spec a stale adapter RESOLVES requestDevice with an already-lost
+  // device (every op on it no-ops), so a naive recover() "succeeds", watches
+  // the dead device, sees it lost, and recovers again — an unbounded, silent
+  // loop that re-runs full engine setup per cycle and never fires
+  // onDeviceLost. The cascade must be bounded and must signal.
+  it('bounds recovery and signals when replacement devices arrive already lost', async () => {
+    const proto = GPUAdapter.prototype as unknown as { requestDevice: GPUAdapter['requestDevice'] }
+    const original = proto.requestDevice
+    const profile = makeProfile(STANDARD_SIX)
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 64
+    let lostInfo: GPUDeviceLostInfo | undefined
+    const renderer = await createAsciiRenderer({
+      canvas,
+      profile,
+      columns: 8,
+      backend: 'webgpu',
+      onDeviceLost: (info) => {
+        lostInfo = info
+      },
+    })
+    let handedOut = 0
+    try {
+      renderer.setSource(randomImage(64, 64, 9))
+      await renderer.captureFrame()
+      // From here, every replacement device is dead on arrival.
+      proto.requestDevice = async function (this: GPUAdapter, ...args) {
+        const device = await original.apply(this, args)
+        handedOut++
+        device.destroy()
+        return device
+      }
+      ;(renderer as unknown as { device: GPUDevice }).device.destroy()
+
+      const signalled = await until(() => lostInfo !== undefined, 8000)
+      expect(signalled, 'onDeviceLost must fire instead of looping forever').toBe(true)
+      expect(handedOut, 'recovery attempts must be bounded').toBeLessThanOrEqual(3)
+    } finally {
+      proto.requestDevice = original
+      renderer.destroy()
+    }
+  })
 })

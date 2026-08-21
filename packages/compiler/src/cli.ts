@@ -2,7 +2,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import process from 'node:process'
 import { decodeProfile, peekFrame } from '@ascii-fx/core'
-import type { AlphaMode, ColorMode } from '@ascii-fx/core'
+import { type Args, enumFlag, parseArgs, positiveIntFlag, str } from './cliArgs.js'
 import { buildProfile } from './profile.js'
 import { buildFrame } from './frameBuild.js'
 import { decodePng } from './png.js'
@@ -16,37 +16,6 @@ Usage:
                        [--columns N] [--rows N] [--color mono|foreground|full] [--alpha mask|ignore]
   ascii-fx inspect <file.asciip | file.asciif>
 `
-
-interface Args {
-  positional: string[]
-  flags: Map<string, string | true>
-}
-
-function parseArgs(argv: string[]): Args {
-  const positional: string[] = []
-  const flags = new Map<string, string | true>()
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    if (a.startsWith('--')) {
-      const key = a.slice(2)
-      const next = argv[i + 1]
-      if (next !== undefined && !next.startsWith('--')) {
-        flags.set(key, next)
-        i++
-      } else {
-        flags.set(key, true)
-      }
-    } else {
-      positional.push(a)
-    }
-  }
-  return { positional, flags }
-}
-
-const str = (args: Args, key: string): string | undefined => {
-  const v = args.flags.get(key)
-  return typeof v === 'string' ? v : undefined
-}
 
 const requireStr = (args: Args, key: string): string => {
   const v = str(args, key)
@@ -92,15 +61,13 @@ async function main(): Promise<void> {
     }
     const profile = decodeProfile(new Uint8Array(await readFile(profilePath)))
     const image = decodePng(new Uint8Array(await readFile(imagePath)))
-    const columns = str(args, 'columns')
-    const rows = str(args, 'rows')
     const { frame, binary } = buildFrame({
       image,
       profile,
-      columns: columns !== undefined ? Number(columns) : undefined,
-      rows: rows !== undefined ? Number(rows) : undefined,
-      color: (str(args, 'color') as ColorMode | undefined) ?? 'mono',
-      alpha: str(args, 'alpha') as AlphaMode | undefined,
+      columns: positiveIntFlag('columns', str(args, 'columns')),
+      rows: positiveIntFlag('rows', str(args, 'rows')),
+      color: enumFlag('color', str(args, 'color'), ['mono', 'foreground', 'full'] as const) ?? 'mono',
+      alpha: enumFlag('alpha', str(args, 'alpha'), ['mask', 'ignore'] as const),
     })
     await writeFile(outPath, binary)
     console.log(`${outPath}: ${frame.columns}×${frame.rows} cells, ${frame.colorMode}, ${binary.length} bytes`)

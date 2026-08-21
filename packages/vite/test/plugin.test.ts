@@ -127,4 +127,50 @@ describe('@ascii-fx/vite plugin', () => {
     const second = assetPathOf(await runHooks(hotPlugin, 'virtual:ascii-profile/default', []))
     expect(second).not.toBe(first)
   })
+
+  // A crash mid-write used to leave a truncated cache entry that every later
+  // build trusted, surfacing as "Corrupt ASCII FX profile" with no mention of
+  // the cache and no way out short of deleting node_modules/.ascii-fx by hand.
+  // Writes are atomic now, and an unreadable entry is treated as a miss.
+  it('rebuilds over a corrupt profile cache entry instead of failing forever', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ascii-fx-vite-corrupt-'))
+    const cacheDir = join(dir, 'cache')
+    const make = (): ReturnType<typeof ascii> => {
+      const p = ascii({ config: { profiles: { default: { font: FONT_PATH } } }, cacheDir })
+      ;(p.configResolved as (c: { root: string }) => void)({ root: dir })
+      return p
+    }
+    const cachePath = assetPathOf(await runHooks(make(), 'virtual:ascii-profile/default', []))
+    writeFileSync(cachePath, readFileSync(cachePath).subarray(0, 100)) // truncate in place
+
+    // A fresh plugin instance (new dev server) must rebuild, not throw.
+    const rebuilt = assetPathOf(await runHooks(make(), 'virtual:ascii-profile/default', []))
+    expect(rebuilt).toBe(cachePath)
+    expect(decodeProfile(new Uint8Array(readFileSync(rebuilt))).glyphCount).toBe(95)
+  })
+
+  it('rebuilds over a corrupt frame cache entry', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ascii-fx-vite-corrupt-frame-'))
+    const image = join(dir, 'hero.png')
+    writeFileSync(image, Buffer.from(makePng()))
+    const cacheDir = join(dir, 'cache')
+    const make = (): ReturnType<typeof ascii> => {
+      const p = ascii({
+        config: {
+          profiles: { default: { font: FONT_PATH } },
+          frames: { hero: { image, columns: 16, color: 'full' } },
+        },
+        cacheDir,
+      })
+      ;(p.configResolved as (c: { root: string }) => void)({ root: dir })
+      return p
+    }
+    const cachePath = assetPathOf(await runHooks(make(), 'virtual:ascii-frame/hero', []))
+    writeFileSync(cachePath, readFileSync(cachePath).subarray(0, 16))
+
+    const rebuilt = assetPathOf(await runHooks(make(), 'virtual:ascii-frame/hero', []))
+    expect(rebuilt).toBe(cachePath)
+    const profile = decodeProfile(new Uint8Array(readFileSync(assetPathOf(await runHooks(make(), 'virtual:ascii-profile/default', [])))))
+    expect(decodeFrame(new Uint8Array(readFileSync(rebuilt)), profile).columns).toBe(16)
+  })
 })

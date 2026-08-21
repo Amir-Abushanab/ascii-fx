@@ -11,6 +11,10 @@ import type {
 } from './types.js'
 import { isLiveSource, isRawImage, sourceDims } from './types.js'
 
+/** Recovery cascade bound: consecutive attempts allowed inside one incident window. */
+const MAX_RECOVERY_ATTEMPTS = 3
+const RECOVERY_INCIDENT_MS = 10_000
+
 export class WebGpuAsciiRenderer implements AsciiRenderer {
   readonly backend = 'webgpu' as const
   readonly profile: AsciiProfile
@@ -59,6 +63,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   private deviceLost = false
   /** In-flight rebuild, so device work can wait it out instead of failing. */
   private recovery?: Promise<void>
+  /** Consecutive recovery attempts inside one incident window (see recover). */
+  private recoverAttempts = 0
+  private lastRecoverAt = 0
   private readonly onDeviceLost?: (info: GPUDeviceLostInfo) => void
   private readonly onError?: (error: GPUError) => void
 
@@ -134,6 +141,19 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
           `WebGPU accepted the renderer setup and then reported an error, so it would render nothing: ${failure.message}`,
         )
       }
+      // A device can be handed out already lost (stale adapter) or die during
+      // setup. Every call above then no-ops and BOTH error scopes resolve
+      // null, so without this check a dead renderer passes setup, binds the
+      // canvas, and forecloses the CPU fallback. One macrotask lets the lost
+      // promise's reaction run if it has already resolved.
+      let lostDuringSetup: GPUDeviceLostInfo | undefined
+      void device.lost.then((lost) => {
+        lostDuringSetup = lost
+      })
+      await new Promise((r) => setTimeout(r, 0))
+      if (lostDuringSetup) {
+        throw new Error(`WebGPU device was lost during renderer setup (${lostDuringSetup.reason}).`)
+      }
       // Touch the canvas last. Everything above can fail on a browser with a
       // partial WebGPU implementation, and 'auto' has to be able to fall back to
       // the CPU backend afterwards — which it cannot once this call has bound the
@@ -186,6 +206,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       // late; neither is a failure.
       if (this.destroyed || device !== this.device) return
       this.deviceLost = true
+      // A loss long after the last recovery is a fresh incident, not evidence
+      // that recovery failed — its attempt budget starts from zero.
+      if (Date.now() - this.lastRecoverAt > RECOVERY_INCIDENT_MS) this.recoverAttempts = 0
       const wasRunning = this.running
       this.stop()
       const attempt = this.recover(info, wasRunning).finally(() => {
@@ -203,8 +226,18 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
    */
   private async recover(info: GPUDeviceLostInfo, wasRunning: boolean): Promise<void> {
     try {
+      // A replacement device can arrive already lost — a stale adapter
+      // resolves rather than rejects, every op on the dead device no-ops, so
+      // recovery "succeeds", watches the new device, sees it lost, and
+      // recovers again, forever and silently. Bound the cascade: the budget
+      // resets only when a device survives past the incident window.
+      this.lastRecoverAt = Date.now()
+      if (++this.recoverAttempts > MAX_RECOVERY_ATTEMPTS) {
+        throw new Error(`device lost ${MAX_RECOVERY_ATTEMPTS} times in quick succession`)
+      }
       if (typeof navigator === 'undefined' || !('gpu' in navigator)) throw new Error('navigator.gpu went away')
       const adapter = await navigator.gpu.requestAdapter()
+      if (this.destroyed) return
       if (!adapter) throw new Error('no adapter available after device loss')
       const device = await adapter.requestDevice()
       if (this.destroyed) {
@@ -213,6 +246,12 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       }
       const engine = await AsciiEngine.create(device, this.profile)
       const stream = await engine.createStream(this.format)
+      // destroy() may have raced the awaits above; a destroyed renderer must
+      // not re-bind its canvas or keep a live replacement device for GC.
+      if (this.destroyed) {
+        device.destroy()
+        return
+      }
       // Everything below is device-owned and died with it.
       this.srcTexture = undefined
       this.srcW = 0
@@ -232,8 +271,11 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     } catch {
       // Out of our hands: recovery needs a working GPU, and if there is not one
       // the caller has to decide (swap in a fresh canvas on the CPU backend, or
-      // show a still). Leave deviceLost set so the loop stays parked.
-      this.onDeviceLost?.(info)
+      // show a still). Leave deviceLost set so the loop stays parked — but
+      // never silently: a parked canvas with zero trace is undebuggable
+      // (mirrors onError's console default).
+      if (this.onDeviceLost) this.onDeviceLost(info)
+      else console.error('[ascii-fx] WebGPU device lost and not recovered:', info.reason, info.message)
     }
   }
 
@@ -310,6 +352,11 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     this.canvas.width = width
     this.canvas.height = height
     this.compositeDirty = true
+    // Setting canvas dims discards the presented frame; without a running
+    // loop nothing else would repaint and the canvas stays blank (the CPU
+    // backend re-presents synchronously here). scheduleRender no-ops while
+    // the loop runs.
+    this.scheduleRender()
   }
 
   private reconfigureStream(): void {

@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import type { Plugin } from 'vite'
-import { loadConfigFromFile } from 'vite'
+import { loadConfigFromFile, normalizePath } from 'vite'
 import type { AsciiProfile } from '@ascii-fx/core'
-import { decodeProfile } from '@ascii-fx/core'
+import { decodeProfile, peekFrame } from '@ascii-fx/core'
 import type { AsciiConfig } from '@ascii-fx/compiler'
 import { COMPILER_PACKAGE_VERSION, buildFrame, buildProfile, decodePng } from '@ascii-fx/compiler'
 
@@ -38,6 +38,22 @@ interface FrameEntry {
 
 const sha = (data: string | Uint8Array): string => createHash('sha256').update(data).digest('hex')
 
+// Vite hands watcher ids to watchChange/handleHotUpdate POSIX-normalized, so
+// every path stored for === comparison — and every specifier emitted into a
+// virtual module — must be normalized the same way, or invalidation (and, for
+// specifiers, resolution) is dead on Windows.
+const abs = (...segments: string[]): string => normalizePath(resolve(...segments))
+
+// Temp + rename: a crash mid-write must not leave a truncated file at the
+// final path, where every later build would trust it. The read sites still
+// treat an undecodable entry as a cache miss, so a bad file from any other
+// cause cannot wedge the build either.
+const writeAtomic = (path: string, bytes: Uint8Array): void => {
+  const tmp = `${path}.tmp-${process.pid}`
+  writeFileSync(tmp, bytes)
+  renameSync(tmp, path)
+}
+
 /**
  * ASCII FX Vite plugin (spec §17): compiles font profiles and static frames at
  * build time and exposes them as typed virtual modules
@@ -66,7 +82,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     if (!loaded) {
       throw new Error(`[ascii-fx] Could not load config at ${file}. Create it with defineAsciiConfig({ profiles: ... }).`)
     }
-    configDeps = [loaded.path, ...loaded.dependencies.map((d) => resolve(root, d))]
+    configDeps = [normalizePath(loaded.path), ...loaded.dependencies.map((d) => abs(root, d))]
     config = loaded.config as AsciiConfig
     return config
   }
@@ -81,7 +97,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
         `[ascii-fx] Profile "${name}" is not defined in the config (available: ${Object.keys(cfg.profiles ?? {}).join(', ') || 'none'}).`,
       )
     }
-    const fontPath = resolve(root, pc.font)
+    const fontPath = abs(root, pc.font)
     if (!existsSync(fontPath)) throw new Error(`[ascii-fx] Font not found for profile "${name}": ${fontPath}`)
     const font = new Uint8Array(readFileSync(fontPath))
     // COMPILER_PACKAGE_VERSION salts the key because the cache dir survives installs: without
@@ -96,11 +112,16 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
         'asciip/1',
       ]),
     ).slice(0, 16)
-    const cachePath = resolve(cacheDir, `${name}-${key}.asciip`)
-    let profile: AsciiProfile
+    const cachePath = abs(cacheDir, `${name}-${key}.asciip`)
+    let profile: AsciiProfile | undefined
     if (existsSync(cachePath)) {
-      profile = decodeProfile(new Uint8Array(readFileSync(cachePath)))
-    } else {
+      try {
+        profile = decodeProfile(new Uint8Array(readFileSync(cachePath)))
+      } catch {
+        profile = undefined // corrupt entry — treat as a miss, rebuild over it
+      }
+    }
+    if (profile === undefined) {
       const built = buildProfile({
         font,
         id: name,
@@ -109,7 +130,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
         shape6: pc.shape6,
       })
       mkdirSync(cacheDir, { recursive: true })
-      writeFileSync(cachePath, built.binary)
+      writeAtomic(cachePath, built.binary)
       profile = built.profile
     }
     const entry = { cachePath, profile, fontPath }
@@ -129,7 +150,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     }
     const profileName = fc.profile ?? 'default'
     const { profile, fontPath } = await ensureProfile(profileName)
-    const imagePath = resolve(root, fc.image)
+    const imagePath = abs(root, fc.image)
     if (!existsSync(imagePath)) throw new Error(`[ascii-fx] Image not found for frame "${name}": ${imagePath}`)
     const imageBytes = new Uint8Array(readFileSync(imagePath))
     // Salted like the profile key: matching lives in @ascii-fx/core, but the fixed release
@@ -146,8 +167,20 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
         'asciif/1',
       ]),
     ).slice(0, 16)
-    const cachePath = resolve(cacheDir, `${name}-${key}.asciif`)
-    if (!existsSync(cachePath)) {
+    const cachePath = abs(cacheDir, `${name}-${key}.asciif`)
+    let cacheHit = false
+    if (existsSync(cachePath)) {
+      try {
+        // Frames are served to the browser without a build-time decode, so a
+        // corrupt entry would surface as a runtime failure in the app; peek
+        // the header here and rebuild over anything unreadable.
+        peekFrame(new Uint8Array(readFileSync(cachePath)))
+        cacheHit = true
+      } catch {
+        cacheHit = false
+      }
+    }
+    if (!cacheHit) {
       const built = buildFrame({
         image: decodePng(imageBytes),
         profile,
@@ -157,7 +190,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
         alpha: fc.alpha,
       })
       mkdirSync(cacheDir, { recursive: true })
-      writeFileSync(cachePath, built.binary)
+      writeAtomic(cachePath, built.binary)
     }
     const entry = { cachePath, profileName, imagePath, fontPath }
     frames.set(name, entry)
@@ -197,7 +230,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     name: 'ascii-fx',
     configResolved(resolved) {
       root = resolved.root
-      cacheDir = options.cacheDir ? resolve(root, options.cacheDir) : resolve(root, 'node_modules/.ascii-fx')
+      cacheDir = options.cacheDir ? abs(root, options.cacheDir) : abs(root, 'node_modules/.ascii-fx')
       // Config/watch state resets per build so edits are picked up.
       config = typeof options.config === 'object' ? options.config : undefined
       configDeps = []

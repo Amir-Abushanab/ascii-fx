@@ -113,8 +113,24 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   setOptions(options: AsciiRendererRuntimeOptions): void {
-    this.hysteresisPrimed = false
-    this.opts = { ...this.opts, ...options }
+    const previous = this.opts
+    this.opts = { ...previous, ...options }
+    // One-frame hysteresis suppression happens after an option *change*, not
+    // after any call — a value-identical setOptions must keep incumbents, or
+    // this backend diverges from the WebGPU key-based reset. Field list
+    // mirrors the WebGPU renderer's matchChanged.
+    const changed =
+      previous.columns !== this.opts.columns ||
+      previous.rows !== this.opts.rows ||
+      previous.color !== this.opts.color ||
+      previous.matcher !== this.opts.matcher ||
+      previous.hysteresis !== this.opts.hysteresis ||
+      previous.alpha !== this.opts.alpha ||
+      previous.foreground !== this.opts.foreground ||
+      previous.background !== this.opts.background ||
+      previous.flatThreshold !== this.opts.flatThreshold ||
+      previous.temporal !== this.opts.temporal
+    if (changed) this.hysteresisPrimed = false
     this.matchDirty = true
   }
 

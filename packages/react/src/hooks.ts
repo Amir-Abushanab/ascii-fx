@@ -125,13 +125,25 @@ export function useAscii(
     setLostGeneration((g) => g + 1)
   }, [])
 
+  // Overlapping inits on one canvas are poison: each create configures the
+  // shared GPUCanvasContext in its constructor, and destroying a superseded
+  // renderer unconfigures it — out from under the survivor, whose next
+  // getCurrentTexture then throws with nothing ever reconfiguring. StrictMode
+  // guarantees the overlap on every dev mount; the chain serializes inits so a
+  // superseded one is fully created and destroyed (or skipped — its `live`
+  // flag is usually already false by the time its turn comes) before the next
+  // touches the context.
+  const initChain = useRef<Promise<void>>(Promise.resolve())
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!profile || !canvas) return
     let live = true
     let created: AsciiRenderer | undefined
-    createAsciiRenderer({ canvas, profile, backend, onDeviceLost: handleDeviceLost, ...runtimeRef.current })
-      .then((r) => {
+    initChain.current = initChain.current.then(async () => {
+      if (!live) return
+      try {
+        const r = await createAsciiRenderer({ canvas, profile, backend, onDeviceLost: handleDeviceLost, ...runtimeRef.current })
         if (!live) {
           r.destroy()
           return
@@ -139,11 +151,11 @@ export function useAscii(
         created = r
         setRenderer(r)
         setError(null)
-      })
-      .catch((err: unknown) => {
+      } catch (err) {
         console.error('[ascii-fx] renderer init failed:', err)
         if (live) setError(err instanceof Error ? err : new Error(String(err)))
-      })
+      }
+    })
     return () => {
       live = false
       created?.destroy()
