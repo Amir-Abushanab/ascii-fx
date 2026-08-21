@@ -120,11 +120,21 @@ const profileCache = new Map<string, Promise<AsciiProfile>>()
 let customFontCounter = 0
 let customFontFamily: string | null = null
 
-/** The chars field, deduped in given order; null when empty (= full charset). */
+/**
+ * The chars field, deduped in given order; null when empty (= full charset).
+ * Dedupe by grapheme, not code point: subsetProfile segments strings by the
+ * profile's own glyph strings, so a VS16/ZWJ emoji must reach it whole — a
+ * per-code-point pass would hand on half a glyph. The field itself is never
+ * rewritten; sanitizing happens on read.
+ */
 function charSubset(): string | null {
   const text = els.chars.value
   if (!text) return null
-  return [...new Set(Array.from(text))].join('')
+  const units =
+    typeof Intl !== 'undefined' && 'Segmenter' in Intl
+      ? Array.from(new Intl.Segmenter().segment(text), (s) => s.segment)
+      : Array.from(text)
+  return [...new Set(units)].join('')
 }
 
 const emojiOn = (): boolean => els.emojiMode.checked

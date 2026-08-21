@@ -4,7 +4,7 @@
 // winner in two passes, so a disagreement here is exactly the class of bug that
 // arrangement risks: a lost tie-break, or an early exit that changed a result.
 import { describe, expect, it } from 'vitest'
-import type { AsciiFrame, RGB } from '@ascii-fx/core'
+import type { AsciiFrame, RGB, RawImage } from '@ascii-fx/core'
 import { matchFrame } from '@ascii-fx/core'
 import { createAsciiRenderer } from '@ascii-fx/gpu'
 import { makeChromaticProfile, randomImage, solid } from '../../core/test/synthetic.js'
@@ -170,6 +170,43 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
     } finally {
       switched.destroy()
       fresh.destroy()
+    }
+  })
+
+  // §C5's keep-incumbent compare needs 44-bit products: errors reach the §C4
+  // ceiling of 12,484,800 and are multiplied by up to 1000. This sequence puts
+  // BOTH frames in that range (best 8.32M vs incumbent 12.48M at h=0.1), where
+  // a naive u32 product wraps on both sides and keeps the incumbent the exact
+  // rule rejects — the random-palette sweeps never drive errors this high.
+  it('hysteresis stays exact at error magnitudes whose products overflow 32 bits', async () => {
+    const profile = makeChromaticProfile([solid('k', 0, 0, 0), solid('b', 0, 0, 255)])
+    const source = new OffscreenCanvas(64, 64)
+    const ctx = source.getContext('2d') as OffscreenCanvasRenderingContext2D
+    const fill = (css: string): RawImage => {
+      ctx.fillStyle = css
+      ctx.fillRect(0, 0, 64, 64)
+      const d = ctx.getImageData(0, 0, 64, 64)
+      return { width: 64, height: 64, data: new Uint8Array(d.data.buffer.slice(0)) }
+    }
+    const opts = { columns: 8, matcher: 'chromatic' as const, alpha: 'ignore' as const, hysteresis: 0.1 }
+    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, ...opts })
+    try {
+      const imgA = fill('rgb(200 200 255)') // picks the blue glyph (err 5.12M vs 9.28M)
+      renderer.setSource(source)
+      renderer.render()
+      const gpuA = await renderer.captureFrame()
+      const imgB = fill('rgb(255 255 0)') // challenger black (8.32M) vs incumbent blue (12.48M)
+      renderer.render()
+      const gpuB = await renderer.captureFrame()
+
+      const cpuA = matchFrame(imgA, { profile, ...opts })
+      const cpuB = matchFrame(imgB, { profile, ...opts, previous: cpuA.glyphIds })
+      expectFramesEqual(gpuA, cpuA, 'overflow frame A')
+      expectFramesEqual(gpuB, cpuB, 'overflow frame B')
+      // The construction only proves something if the challenger actually wins.
+      expect(cpuB.glyphIds).not.toEqual(cpuA.glyphIds)
+    } finally {
+      renderer.destroy()
     }
   })
 

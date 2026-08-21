@@ -171,6 +171,9 @@ export class AsciiGlyphs {
   }
 
   dispose(): void {
+    // The mesh's own dispose releases its instanced attributes (instanceMatrix et al.);
+    // without it their GPU buffers wait on backend WeakMap GC.
+    this.mesh.dispose()
     this.mesh.geometry.dispose()
     this.material.dispose()
     this.atlasTexture.dispose()

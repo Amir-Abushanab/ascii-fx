@@ -87,6 +87,8 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
     match.flatThreshold,
     match.srgbEncode,
     match.temporal,
+    match.matcher,
+    match.hysteresis,
     fit,
     clearColor,
   ])

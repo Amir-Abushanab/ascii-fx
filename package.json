@@ -20,8 +20,9 @@
     "knip": "knip",
     "ncu": "ncu --workspaces --root",
     "prepare": "git config core.hooksPath .githooks",
+    "publint": "pnpm -r --filter \"./packages/*\" exec publint --strict",
     "quality": "pnpm check && pnpm audit --audit-level low",
-    "release": "pnpm build && node scripts/publish-if-needed.mjs",
+    "release": "pnpm build && pnpm publint && node scripts/publish-if-needed.mjs",
     "skill:stale": "pnpm --filter @ascii-fx/core skill:stale",
     "skill:validate": "pnpm --filter @ascii-fx/core skill:validate",
     "test": "vitest run --project node",
@@ -40,6 +41,7 @@
     "knip": "^6.32.2",
     "npm-check-updates": "^23.0.2",
     "playwright": "^1.62.1",
+    "publint": "^0.3.24",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },

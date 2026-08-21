@@ -51,8 +51,11 @@ export interface AsciiRendererOptions {
   color?: ColorMode
   /**
    * Default 'structural'. 'chromatic' needs a profile carrying chromatic glyph
-   * data and ignores `color`/`foreground`, since the glyph carries its own
-   * (ALGORITHM.md §C). The approximate CPU matchers are not offered here.
+   * data; the glyph carries its own colour (ALGORITHM.md §C), so `color`'s
+   * plane selection and `foreground` are ignored — except that
+   * `color: 'foreground'` keeps its transparent-canvas meaning: glyphs are
+   * emitted with their own alpha for the page to composite, instead of being
+   * drawn over `background`. The approximate CPU matchers are not offered here.
    */
   matcher?: 'structural' | 'chromatic'
   alpha?: AlphaMode
@@ -63,7 +66,7 @@ export interface AsciiRendererOptions {
   hysteresis?: number
   /** How the ASCII grid maps onto the canvas. Default 'contain'. */
   fit?: FitMode
-  /** Letterbox/clear color (rgba 0..1). Default opaque black; transparent for 'foreground'. */
+  /** Letterbox/clear color (rgba 0..1). Default: transparent for 'foreground', the backdrop for chromatic, opaque black otherwise. */
   clearColor?: readonly [number, number, number, number]
   interaction?: InteractionOptions | null
   /** Exact temporal reuse for video/live sources (spec §21). WebGPU backend only. */

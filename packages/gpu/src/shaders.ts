@@ -478,7 +478,7 @@ struct CompParams {
   cellW: u32,
   cellH: u32,
   colorMode: u32,      // 0 mono, 1 foreground, 2 full
-  useBackdrop: u32,    // foreground mode: 1 = blend onto backdrop, 0 = premultiplied alpha out
+  useBackdrop: u32,    // foreground/glyph modes: 1 = blend onto backdrop, 0 = premultiplied alpha out
   backdrop: u32,       // packed rgb
   _pad0: u32,
   atlasW: f32,
@@ -720,6 +720,19 @@ fn errOf(g: u32) -> u32 {
   return err;
 }
 
+// §C5 keep-incumbent test: best·1000 >= inc·(1000−h). Errors reach 12,484,800
+// (§C4), so the products need 44 bits — a u32 multiply wraps and f32 cannot
+// hold them exactly either, while the CPU compares in f64. Split each error
+// into 16-bit halves; every partial product stays under 2^26 and the (hi, lo)
+// pairs compare exactly.
+fn hystKeeps(best: u32, inc: u32, m: u32) -> bool {
+  let bLo = (best & 0xffffu) * 1000u;
+  let bHi = (best >> 16u) * 1000u + (bLo >> 16u);
+  let iLo = (inc & 0xffffu) * m;
+  let iHi = (inc >> 16u) * m + (iLo >> 16u);
+  return bHi > iHi || (bHi == iHi && (bLo & 0xffffu) >= (iLo & 0xffffu));
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k: u32) {
   let cellX = wg.x + P.baseCol;
@@ -784,7 +797,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k
     // early-exited out of pass 1, and a partial sum would compare unequally.
     if (P.hysteresisMilli > 0u && wPrevId != id && wPrevId < P.glyphCount) {
       let incErr = errOf(wPrevId);
-      if (bestErr * 1000u >= incErr * (1000u - P.hysteresisMilli)) {
+      if (hystKeeps(bestErr, incErr, 1000u - P.hysteresisMilli)) {
         id = wPrevId;
       }
     }

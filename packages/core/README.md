@@ -28,7 +28,7 @@ const profile = await createAsciiProfile({ fontFamily: 'monospace' })
 - `AsciiFrame` — `toText() / toAnsi() / toHTML() / getCell(x, y)`, packed typed arrays inside.
 - `encodeProfile / decodeProfile` (`.asciip`), `encodeFrame / decodeFrame / peekFrame` (`.asciif`), `loadProfile / loadFrame` fetch helpers.
 - `compositeFrame(frame)` — reference CPU compositor (pure); `@ascii-fx/core/canvas2d` adds a canvas helper.
-- `subsetProfile(profile, characters)` — restrict any built profile (compiled or runtime) to a character subset, e.g. `subsetProfile(profile, '01')` for binary rain. Raster data is carried over exactly, so matching equals a profile compiled with that charset; the shape6 LUT (if any) is dropped. Duplicate or unknown characters are errors. The subset is a distinct profile (own fingerprint) — frames don't decode across it and its parent.
+- `subsetProfile(profile, characters)` — restrict any built profile (compiled or runtime) to a character subset, e.g. `subsetProfile(profile, '01')` for binary rain. Raster data is carried over exactly, so matching equals a profile compiled with that charset; the shape6 LUT (if any) is dropped. A string is segmented by greedy longest match against the profile's own glyph strings, so multi-code-point emoji (VS16, ZWJ) select correctly; pass an array to select exact strings. Duplicate or unknown characters are errors. The subset is a distinct profile (own fingerprint) — frames don't decode across it and its parent.
 - `resolveCharset`, `deriveGrid`, `reduceSource`, `getCell` utilities; `AsciiSupport` types.
 
 Normative algorithm definition: [`ALGORITHM.md`](../../ALGORITHM.md) — every constant, bit layout, and tie-break. Conformance is bit-exact by construction (all-integer arithmetic).

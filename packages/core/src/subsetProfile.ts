@@ -2,6 +2,38 @@ import type { AsciiProfile } from './types.js'
 import { idiv } from './util.js'
 
 /**
+ * Split `text` into the profile's own glyph strings by greedy longest match.
+ * Greedy is unambiguous for real palettes; a glyph that is a prefix of another
+ * simply loses to the longer match at that position.
+ */
+function segmentByGlyphs(profile: AsciiProfile, text: string): string[] {
+  const vocab = new Set(profile.glyphs)
+  let maxLen = 1
+  for (const g of profile.glyphs) maxLen = Math.max(maxLen, g.length)
+  const out: string[] = []
+  let i = 0
+  while (i < text.length) {
+    let match: string | undefined
+    for (let len = Math.min(maxLen, text.length - i); len >= 1; len--) {
+      const candidate = text.slice(i, i + len)
+      if (vocab.has(candidate)) {
+        match = candidate
+        break
+      }
+    }
+    if (match === undefined) {
+      throw new Error(
+        `subsetProfile: profile ${profile.id} has no glyph matching ${JSON.stringify(text.slice(i, i + 8))} (position ${i}). ` +
+          'Subsets can only narrow the compiled charset; rebuild the profile to add characters.',
+      )
+    }
+    out.push(match)
+    i += match.length
+  }
+  return out
+}
+
+/**
  * Derive a profile restricted to `characters` from an already-built profile —
  * compiled or runtime — preserving each glyph's raster data exactly (mask,
  * coverage, atlas tile). Matching against the subset behaves identically to a
@@ -16,18 +48,22 @@ import { idiv } from './util.js'
  * palette narrowable at runtime: chromatic-v1 searches every glyph it is given,
  * so removing glyphs is the only way to stop it reaching for them.
  *
- * Like the compiler: duplicate code points are an error, and so is any
- * character the profile has no glyph for.
+ * A string is segmented by greedy longest match against the profile's own
+ * glyph strings, so multi-code-point glyphs — VS16 emoji, ZWJ sequences —
+ * select correctly. The profile defines what a character is, not Unicode
+ * tables, which keeps the segmentation identical on every engine. Pass an
+ * array to select exact strings. Duplicate glyphs are an error, and so is any
+ * part of the input the profile has no glyph for.
  */
 export function subsetProfile(profile: AsciiProfile, characters: string | readonly string[]): AsciiProfile {
-  const requested = typeof characters === 'string' ? Array.from(characters) : [...characters]
+  const requested = typeof characters === 'string' ? segmentByGlyphs(profile, characters) : [...characters]
   if (requested.length === 0) {
     throw new Error('subsetProfile: empty character set. Pass at least one character, or use the profile as-is.')
   }
   const seen = new Set<string>()
   for (const ch of requested) {
     if (seen.has(ch)) {
-      throw new Error(`subsetProfile: duplicate character ${JSON.stringify(ch)}. Each code point may appear once.`)
+      throw new Error(`subsetProfile: duplicate character ${JSON.stringify(ch)}. Each glyph may appear once.`)
     }
     seen.add(ch)
   }
@@ -95,7 +131,14 @@ export function subsetProfile(profile: AsciiProfile, characters: string | readon
     h = Math.imul(h ^ v, 0x01000193) >>> 0
   }
   for (const ch of profile.fingerprint) fnv(ch.codePointAt(0) ?? 0)
-  for (const ch of requested) fnv(ch.codePointAt(0) ?? 0)
+  // Hash every code point of every glyph, with a separator: hashing only the
+  // first code point collides for glyphs sharing it (skin-tone variants), and
+  // without the separator ['ab','c'] and ['a','bc'] would hash alike — either
+  // way two distinct subsets could pair with each other's frames.
+  for (const g of requested) {
+    for (const ch of g) fnv(ch.codePointAt(0) ?? 0)
+    fnv(0x1f)
+  }
   const fingerprint = `5ab5${h.toString(16).padStart(8, '0')}`.padEnd(64, '0')
 
   return {

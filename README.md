@@ -25,7 +25,7 @@ ascii.start()
 | [`@ascii-fx/react-three`](./packages/react-three) | `<AsciiEffect>` `<AsciiGlyphs>` for R3F |
 | [`@ascii-fx/vite`](./packages/vite) | build-time profiles/frames as typed virtual modules |
 
-Apps: `apps/docs` (the whole Astro site — the playground and pipeline explainer, with benchmarks and API reference below; deploys to GitHub Pages via `.github/workflows/deploy-docs.yml` and dogfoods the Vite plugin for its own profile), `apps/benchmarks` (CPU perf + approximate-matcher quality reports → [`RESULTS.md`](./apps/benchmarks/RESULTS.md)).
+Apps: `apps/docs` (the whole Astro site — the playground and pipeline explainer, with benchmarks and API reference below; deploys to GitHub Pages via the `deploy-docs` job in `.github/workflows/ci.yml` and dogfoods the Vite plugin for its own profile), `apps/benchmarks` (CPU perf + approximate-matcher quality reports → [`RESULTS.md`](./apps/benchmarks/RESULTS.md)).
 
 ## Colour glyphs (`chromatic-v1`)
 
@@ -91,34 +91,7 @@ pnpm golden:update    # regenerate goldens after an intentional algorithm change
 One Astro app, one page: the playground and its interactive pipeline explainer, with the benchmark tables and
 the API reference folded onto the end. One dev server, one build.
 
-### Colour glyphs (`chromatic-v1`)
-
-Emoji carry their own colour, which removes the move `structural-v1` is built
-on: with a free foreground and background, the best colours for a mask are the
-means of its two sample sets, and that is what makes its rerank exact. Baked
-colour leaves nothing to fit, so `chromatic-v1` compares the cell's 64 samples
-against the glyph's own, composited over the backdrop it will be drawn on.
-
-```ts
-import { buildChromaticProfile } from '@ascii-fx/compiler'
-const { binary } = buildChromaticProfile({ glyphs: [{ char: '🌊', image }, ...] })
-```
-
-```ts
-const frame = matchFrame(source, { profile, matcher: 'chromatic', background: [11, 11, 15] })
-// colorMode 'glyph' — no colour planes, because the colour is in the glyph
-```
-
-It is a separate algorithm, not an approximation: no flat path, no polarity, no
-prefilter. [`ALGORITHM.md §C`](./ALGORITHM.md) is normative, and the WebGPU path
-is held to the CPU oracle bit-for-bit by the same conformance suite
-`structural-v1` uses. Measurements behind each of those choices — including why
-the palette is curated to ~100 glyphs, and why a prefilter turned out to cost
-more quality than it saved time — are in
-[`CHROMATIC-FINDINGS.md`](./CHROMATIC-FINDINGS.md). Flip **Emoji mode** in the
-playground to drive it.
-
-## Benchmarks
+### Regenerating benchmarks
 
 Every performance figure the docs site publishes is read out of `apps/benchmarks/RESULTS.md` when the site
 builds — the pages hold no transcribed numbers, so regenerating a benchmark is the only way they move. The
@@ -140,6 +113,6 @@ pnpm depcruise        # dependency rules: no cycles, resolvable imports, spec §
 ```
 
 Docs deploy: push to `main` with GitHub Pages set to "GitHub Actions" (repo Settings → Pages) and
-`.github/workflows/deploy-docs.yml` publishes `apps/docs` to `https://<user>.github.io/<repo>/` automatically.
+the `deploy-docs` job in `.github/workflows/ci.yml` publishes `apps/docs` to `https://<user>.github.io/<repo>/` automatically.
 
 Exactness is the contract: the GPU matcher must agree with the CPU reference bit-for-bit (glyphs, colors, flags) — enforced by the conformance suite across color modes, palettes, alpha modes, uneven reductions, temporal reuse, and dirty-region rematches.

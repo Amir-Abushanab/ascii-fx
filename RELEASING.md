@@ -52,7 +52,8 @@ with provenance attached. If OIDC misbehaves, add an `NPM_TOKEN` secret and unco
 | `pnpm check` | The gate: typecheck, node tests, GPU browser tests, knip, depcruise, skill validation. Also the pre-commit hook. |
 | `pnpm quality` | `check` plus `pnpm audit`. Local only — an advisory in a transitive dep should not block a PR. |
 | `pnpm version` | `changeset version` + sync the skill version. Run by the release workflow, not by hand. |
-| `pnpm release` | Build, then publish only the versions npm is missing. |
+| `pnpm publint` | [publint](https://publint.dev) every publishable package against its packed tarball. Needs a build first; CI runs it after `pnpm build`, and `pnpm release` runs it before publishing. |
+| `pnpm release` | Build, publint, then publish only the versions npm is missing. |
 
 `scripts/publish-if-needed.mjs` drives `pnpm publish` per package rather than `changeset publish`,
 which cannot be trusted against npm 11: its pre-publish check misreads an already-published package

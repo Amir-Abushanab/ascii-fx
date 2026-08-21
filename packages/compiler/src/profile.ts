@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import type { AsciiProfile, Shape6GlyphData } from '@ascii-fx/core'
 import { encodeProfile, idiv, nextPow2, rdiv, resolveCharset, shape6BucketCenter } from '@ascii-fx/core'
 import { loadFont } from './font.js'
@@ -13,6 +14,18 @@ import {
 } from './raster.js'
 
 export const COMPILER_VERSION = '0.1.0'
+
+/**
+ * The @ascii-fx/compiler version actually installed, read from its own manifest so it cannot
+ * drift the way a constant can. Every @ascii-fx/* package releases in one fixed group with
+ * exact internal pins, so this moves on any release that could change output bytes — which is
+ * what makes it a sound build-cache salt (@ascii-fx/vite keys on it). Deliberately separate
+ * from COMPILER_VERSION: that string is embedded in profile metadata, where following the
+ * package version would change profile bytes and break the golden fixtures on every release.
+ */
+export const COMPILER_PACKAGE_VERSION: string = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+).version
 export const REF_GLYPH_HEIGHT = 64
 export const ATLAS_PADDING = 4
 

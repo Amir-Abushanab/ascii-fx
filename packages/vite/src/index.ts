@@ -7,7 +7,7 @@ import { loadConfigFromFile } from 'vite'
 import type { AsciiProfile } from '@ascii-fx/core'
 import { decodeProfile } from '@ascii-fx/core'
 import type { AsciiConfig } from '@ascii-fx/compiler'
-import { buildFrame, buildProfile, decodePng } from '@ascii-fx/compiler'
+import { COMPILER_PACKAGE_VERSION, buildFrame, buildProfile, decodePng } from '@ascii-fx/compiler'
 
 export { defineAsciiConfig } from '@ascii-fx/compiler'
 export type { AsciiConfig, AsciiFrameConfig, AsciiProfileConfig } from '@ascii-fx/compiler'
@@ -84,8 +84,17 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     const fontPath = resolve(root, pc.font)
     if (!existsSync(fontPath)) throw new Error(`[ascii-fx] Font not found for profile "${name}": ${fontPath}`)
     const font = new Uint8Array(readFileSync(fontPath))
+    // COMPILER_PACKAGE_VERSION salts the key because the cache dir survives installs: without
+    // it, upgrading the packages would keep serving bytes built by the old compiler.
     const key = sha(
-      JSON.stringify([sha(font), pc.charset ?? 'ascii', pc.characters ?? null, pc.shape6 ?? false, 'asciip/1']),
+      JSON.stringify([
+        sha(font),
+        pc.charset ?? 'ascii',
+        pc.characters ?? null,
+        pc.shape6 ?? false,
+        COMPILER_PACKAGE_VERSION,
+        'asciip/1',
+      ]),
     ).slice(0, 16)
     const cachePath = resolve(cacheDir, `${name}-${key}.asciip`)
     let profile: AsciiProfile
@@ -123,8 +132,19 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     const imagePath = resolve(root, fc.image)
     if (!existsSync(imagePath)) throw new Error(`[ascii-fx] Image not found for frame "${name}": ${imagePath}`)
     const imageBytes = new Uint8Array(readFileSync(imagePath))
+    // Salted like the profile key: matching lives in @ascii-fx/core, but the fixed release
+    // group moves COMPILER_PACKAGE_VERSION whenever any of it changes.
     const key = sha(
-      JSON.stringify([sha(imageBytes), profile.fingerprint, fc.columns, fc.rows, fc.color, fc.alpha, 'asciif/1']),
+      JSON.stringify([
+        sha(imageBytes),
+        profile.fingerprint,
+        fc.columns,
+        fc.rows,
+        fc.color,
+        fc.alpha,
+        COMPILER_PACKAGE_VERSION,
+        'asciif/1',
+      ]),
     ).slice(0, 16)
     const cachePath = resolve(cacheDir, `${name}-${key}.asciif`)
     if (!existsSync(cachePath)) {

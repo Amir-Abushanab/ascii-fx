@@ -140,6 +140,11 @@ export function encodeProfile(profile: AsciiProfile): Uint8Array {
     sections.push({ type: SECTION.metadata, bytes: enc.encode(JSON.stringify(json)) })
   }
 
+  // §14: the section table is in ascending type order. The pushes above are
+  // grouped by feature, so order at emit — that also keeps any future section
+  // type correct by construction rather than by push placement.
+  sections.sort((a, b) => a.type - b.type)
+
   const tableOffset = HEADER_FIXED
   let cursor = align4(tableOffset + sections.length * 12)
   const placed = sections.map((s) => {

@@ -363,7 +363,7 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(function As
     renderer.setSource(source)
     renderer.render()
     return () => renderer.stop()
-  }, [renderer, source, renderMode])
+  }, [renderer, source])
 
   useContinuousPlayback(
     wrapperRef,

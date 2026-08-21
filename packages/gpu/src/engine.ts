@@ -310,6 +310,7 @@ export class AsciiEngine {
   /** Releases engine-owned resources. Does not destroy the device. */
   destroy(): void {
     this.atlasTexture.destroy()
+    this.atlasRgbaTexture.destroy()
     this.masksBuf.destroy()
     this.coverageBuf.destroy()
   }
@@ -659,7 +660,19 @@ export class AsciiStream {
       ATLAS_MIPS - 1,
       Math.max(0, Math.log2(Math.max(atlas.cellWidth / cellScreenW, atlas.cellHeight / cellScreenH, 1))),
     )
-    const clear = view.clearColor ?? (color === 'foreground' ? [0, 0, 0, 0] : [0, 0, 0, 1])
+    // Chromatic cells are matched against a backdrop (§C3), so they must be
+    // drawn over that same backdrop or the choice is un-optimised on screen.
+    // color: 'foreground' keeps its transparent-canvas meaning here too,
+    // mirroring the CPU backend's compositeFrame with background: null.
+    const glyphTransparent = color === 'glyph' && (this.opts.color ?? 'mono') === 'foreground'
+    const bd = this.opts.background ?? [0, 0, 0]
+    const clear =
+      view.clearColor ??
+      (color === 'foreground' || glyphTransparent
+        ? [0, 0, 0, 0]
+        : color === 'glyph'
+          ? [bd[0] / 255, bd[1] / 255, bd[2] / 255, 1]
+          : [0, 0, 0, 1])
 
     const dv = new DataView(this.compScratch)
     const u = (i: number, v: number): void => dv.setUint32(i * 4, v, true)
@@ -673,8 +686,8 @@ export class AsciiStream {
     u(6, atlas.cellWidth)
     u(7, atlas.cellHeight)
     u(8, COLOR_MODE_CODE[color])
-    u(9, 0)
-    u(10, 0)
+    u(9, color === 'glyph' && !glyphTransparent ? 1 : 0)
+    u(10, bd[0] | (bd[1] << 8) | (bd[2] << 16))
     u(11, 0)
     f(12, atlas.width)
     f(13, atlas.height)

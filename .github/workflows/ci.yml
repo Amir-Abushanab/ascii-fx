@@ -37,6 +37,9 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm check
       - run: pnpm build
+      # publint validates the *published* shape (exports maps → real dist files,
+      # files[] completeness), so it must run against a finished build.
+      - run: pnpm publint
 
   deploy-docs:
     name: Deploy docs → GitHub Pages
