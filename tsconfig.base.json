@@ -1,8 +1,5 @@
 {
   "compilerOptions": {
-    // TS 6 errors on deprecated options that tsup's dts step still injects
-    // (baseUrl); this silences deprecations without changing behavior.
-    "ignoreDeprecations": "6.0",
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",

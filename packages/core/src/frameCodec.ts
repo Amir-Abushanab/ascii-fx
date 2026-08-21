@@ -5,8 +5,8 @@ import { align4, bytesToHex, hexToBytes } from './util.js'
 export const FRAME_FORMAT_VERSION = 1
 const HEADER_FIXED = 56
 
-const COLOR_MODE_CODE: Record<ColorMode, number> = { mono: 0, foreground: 1, full: 2 }
-const COLOR_MODE_NAME: ColorMode[] = ['mono', 'foreground', 'full']
+const COLOR_MODE_CODE: Record<ColorMode, number> = { mono: 0, foreground: 1, full: 2, glyph: 3 }
+const COLOR_MODE_NAME: ColorMode[] = ['mono', 'foreground', 'full', 'glyph']
 
 const SECTION = {
   glyphIds: 1,
@@ -263,10 +263,14 @@ export function decodeFrame(bytes: Uint8Array, profile: AsciiProfile): AsciiFram
 
   const foreground = packPlanes(SECTION.fgR, SECTION.fgG, SECTION.fgB)
   const background = packPlanes(SECTION.bgR, SECTION.bgG, SECTION.bgB)
-  if (meta.colorMode !== 'mono' && !foreground) {
+  // 'glyph' carries no colour planes: chromatic-v1's colour lives in the glyph.
+  const colorless = meta.colorMode === 'mono' || meta.colorMode === 'glyph'
+  if (!colorless && !foreground) {
     throw corruptFrame(`${meta.colorMode} frames require foreground color planes.`)
   }
-  if (meta.colorMode === 'mono' && foreground) throw corruptFrame('mono frames must not contain color planes.')
+  if (colorless && foreground) {
+    throw corruptFrame(`${meta.colorMode} frames must not contain color planes.`)
+  }
   if (meta.colorMode === 'full' && !background) throw corruptFrame('full-color frames require background planes.')
   if (meta.colorMode !== 'full' && background) {
     throw corruptFrame(`${meta.colorMode} frames must not contain background color planes.`)

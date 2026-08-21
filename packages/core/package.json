@@ -19,15 +19,31 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "skills"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "skill:stale": "intent stale skills",
+    "skill:validate": "intent validate skills",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@tanstack/intent": "^0.3.6",
     "@webgpu/types": "^0.1.71",
     "tsup": "^8.5.1",
-    "typescript": "^6.0.0"
+    "typescript": "^7.0.2"
+  },
+  "keywords": [
+    "tanstack-intent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
+  "bugs": {
+    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
   }
 }

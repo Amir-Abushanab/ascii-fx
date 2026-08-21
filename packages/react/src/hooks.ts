@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AsciiProfile, AsciiSupport, ProfileSource } from '@ascii-fx/core'
 import { createAsciiProfile, loadProfile } from '@ascii-fx/core'
 import type {
@@ -78,7 +78,18 @@ export interface UseAsciiResult {
   renderer: AsciiRenderer | null
   profile: AsciiProfile | null
   error: Error | null
+  /**
+   * Put this on your `<canvas key={canvasKey}>`. It changes when the canvas has
+   * to be thrown away and remade: on a backend switch, and after a GPU device
+   * loss the renderer could not recover from. Both need a *new element* — a
+   * canvas is bound to its first context type for good, so a canvas that ran
+   * WebGPU can never fall back to the CPU matcher.
+   */
+  canvasKey: string
 }
+
+/** Remounts after this many unrecovered device losses are treated as a dead GPU. */
+const MAX_DEVICE_LOSS_REMOUNTS = 3
 
 /**
  * Renderer lifecycle on a canvas ref (spec §31): created once per
@@ -98,12 +109,28 @@ export function useAscii(
   const runtimeRef = useRef(runtime)
   runtimeRef.current = runtime
 
+  // The renderer rebuilds on a fresh device by itself; this is the case where it
+  // could not. Recovering from that means starting over on a new canvas element,
+  // which is the one thing the renderer cannot do for itself — so bump a
+  // generation, let React remount the canvas, and build again. 'auto' then picks
+  // the backend against current conditions and lands on CPU if the GPU is gone.
+  const [lostGeneration, setLostGeneration] = useState(0)
+  const remounts = useRef(0)
+  const handleDeviceLost = useCallback((info: GPUDeviceLostInfo) => {
+    remounts.current += 1
+    if (remounts.current > MAX_DEVICE_LOSS_REMOUNTS) {
+      setError(new Error(`GPU device lost and could not be restored: ${info.message || info.reason}`))
+      return
+    }
+    setLostGeneration((g) => g + 1)
+  }, [])
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!profile || !canvas) return
     let live = true
     let created: AsciiRenderer | undefined
-    createAsciiRenderer({ canvas, profile, backend, ...runtimeRef.current })
+    createAsciiRenderer({ canvas, profile, backend, onDeviceLost: handleDeviceLost, ...runtimeRef.current })
       .then((r) => {
         if (!live) {
           r.destroy()
@@ -123,7 +150,7 @@ export function useAscii(
       setRenderer(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, backend, canvasRef])
+  }, [profile, backend, canvasRef, lostGeneration])
 
   const runtimeKey = rendererOptionsKey(runtime)
   useEffect(() => {
@@ -137,5 +164,5 @@ export function useAscii(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderer, interactionKey, reducedMotion, respectReducedMotion])
 
-  return { renderer, profile, error }
+  return { renderer, profile, error, canvasKey: `${backend ?? 'auto'}:${lostGeneration}` }
 }

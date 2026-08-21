@@ -23,6 +23,7 @@ struct Params {
   baseCol: u32,        // dirty-rect dispatch offset (cells)
   baseRow: u32,
   temporal: u32,       // 1 = prevReduced holds last frame's samples; identical cells skip (spec §21, exact)
+  hysteresisMilli: u32, // chromatic-v1 §C5, in thousandths; 0 = off
 }
 
 fn luma8(r: u32, g: u32, b: u32) -> u32 {
@@ -510,6 +511,9 @@ struct FxParams {
 @group(0) @binding(0) var<uniform> C: CompParams;
 @group(0) @binding(1) var<storage, read> cells: array<vec4<u32>>;
 @group(0) @binding(2) var atlas: texture_2d<f32>;
+// Always bound; a 1x1 placeholder for non-chromatic profiles, since a bind
+// group layout cannot vary per draw.
+@group(0) @binding(6) var atlasRgba: texture_2d<f32>;
 @group(0) @binding(3) var samp: sampler;
 @group(0) @binding(4) var<uniform> FX: FxParams;
 @group(0) @binding(5) var srcTex: texture_2d<f32>;
@@ -603,18 +607,30 @@ fn fs(in: VSOut) -> @location(0) vec4<f32> {
     vec2<f32>(inset),
     vec2<f32>(f32(C.cellW), f32(C.cellH)) - vec2<f32>(inset),
   );
-  let a = textureSampleLevel(atlas, samp, texel / vec2<f32>(C.atlasW, C.atlasH), C.lod).r;
-  let fg = unpack3(cell.y);
+  let uv = texel / vec2<f32>(C.atlasW, C.atlasH);
 
   var outColor: vec4<f32>;
-  if (C.colorMode == 1u && C.useBackdrop == 0u) {
-    outColor = vec4<f32>(fg * a, a); // premultiplied
-  } else {
-    var bg = unpack3(cell.z);
-    if (C.colorMode == 1u) {
-      bg = unpack3(C.backdrop);
+  if (C.colorMode == 3u) {
+    // chromatic-v1: the glyph carries its own colour, so there is nothing to
+    // tint. Sample the RGBA atlas and blend it onto the backdrop.
+    let src = textureSampleLevel(atlasRgba, samp, uv, C.lod);
+    if (C.useBackdrop == 0u) {
+      outColor = vec4<f32>(src.rgb * src.a, src.a); // premultiplied
+    } else {
+      outColor = vec4<f32>(mix(unpack3(C.backdrop), src.rgb, src.a), 1.0);
     }
-    outColor = vec4<f32>(mix(bg, fg, a), 1.0);
+  } else {
+    let a = textureSampleLevel(atlas, samp, uv, C.lod).r;
+    let fg = unpack3(cell.y);
+    if (C.colorMode == 1u && C.useBackdrop == 0u) {
+      outColor = vec4<f32>(fg * a, a); // premultiplied
+    } else {
+      var bg = unpack3(cell.z);
+      if (C.colorMode == 1u) {
+        bg = unpack3(C.backdrop);
+      }
+      outColor = vec4<f32>(mix(bg, fg, a), 1.0);
+    }
   }
 
   // Color-space effects.
@@ -662,5 +678,117 @@ fn vs(@builtin(vertex_index) vi: u32) -> VSOut {
 fn fs(in: VSOut) -> @location(0) vec4<f32> {
   // Bilinear tap at the parent-quad center = exact 2×2 box average.
   return textureSampleLevel(src, samp, in.uv, 0.0);
+}
+`
+
+// chromatic-v1 (ALGORITHM.md §C): one workgroup per cell, but parallel over
+// glyphs rather than over samples. Each thread walks a stride of the glyph
+// table and scores it against all 64 samples held in workgroup memory, which
+// keeps the inner loop barrier-free — the structural matcher's per-sample
+// parallelism buys nothing here because there is no colour to fit and so no
+// per-sample reduction to perform.
+//
+// glyphRgb holds descriptors ALREADY composited over the backdrop (§C3). That
+// composite depends only on the glyph table and the backdrop, so the host
+// uploads it when the backdrop changes rather than the shader redoing it for
+// every candidate of every cell.
+export const chromaticMatchWgsl = (): string => /* wgsl */ `
+${COMMON}
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read> reduced: array<u32>;
+@group(0) @binding(2) var<storage, read> features: array<vec4<u32>>;
+@group(0) @binding(3) var<storage, read> glyphRgb: array<u32>;
+@group(0) @binding(4) var<storage, read_write> cells: array<vec4<u32>>;
+
+var<workgroup> wSrc: array<u32, 64>;
+var<workgroup> wFlags: u32;
+var<workgroup> wPrevId: u32;
+var<workgroup> wBestErr: atomic<u32>;
+var<workgroup> wBestId: atomic<u32>;
+
+fn errOf(g: u32) -> u32 {
+  var err = 0u;
+  let base = g * 64u;
+  for (var k = 0u; k < 64u; k++) {
+    let s = wSrc[k];
+    let c = glyphRgb[base + k];
+    let dr = i32(s & 0xffu) - i32(c & 0xffu);
+    let dg = i32((s >> 8u) & 0xffu) - i32((c >> 8u) & 0xffu);
+    let db = i32((s >> 16u) & 0xffu) - i32((c >> 16u) & 0xffu);
+    err += u32(dr * dr + dg * dg + db * db);
+  }
+  return err;
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k: u32) {
+  let cellX = wg.x + P.baseCol;
+  let cellY = wg.y + P.baseRow;
+  let ci = cellY * P.cols + cellX;
+
+  let sIdx = (cellY * 8u + k / 8u) * (P.cols * 8u) + cellX * 8u + (k % 8u);
+  wSrc[k] = reduced[sIdx];
+  if (k == 0u) {
+    wFlags = features[ci].w;
+    wPrevId = cells[ci].x & 0xffffu;
+    atomicStore(&wBestErr, 0xffffffffu);
+    atomicStore(&wBestId, 0xffffffffu);
+  }
+  workgroupBarrier();
+
+  // Only the transparent bit applies; chromatic-v1 has no flat path (§C2).
+  let flags = workgroupUniformLoad(&wFlags) & 2u;
+  if (flags != 0u) {
+    if (k == 0u) {
+      cells[ci] = vec4<u32>(P.blankId | (flags << 16u), 0u, 0u, 0u);
+    }
+    return;
+  }
+
+  // Pass 1: each thread's own best over its stride of the glyph table.
+  var myErr = 0xffffffffu;
+  var myId = 0xffffffffu;
+  for (var g = k; g < P.glyphCount; g += 64u) {
+    var err = 0u;
+    let base = g * 64u;
+    for (var i = 0u; i < 64u; i++) {
+      let s = wSrc[i];
+      let c = glyphRgb[base + i];
+      let dr = i32(s & 0xffu) - i32(c & 0xffu);
+      let dg = i32((s >> 8u) & 0xffu) - i32((c >> 8u) & 0xffu);
+      let db = i32((s >> 16u) & 0xffu) - i32((c >> 16u) & 0xffu);
+      err += u32(dr * dr + dg * dg + db * db);
+      // Safe early exit: err can only grow, and a glyph that already exceeds
+      // this thread's best cannot become the global minimum through it.
+      if (err >= myErr) { break; }
+    }
+    if (err < myErr) {
+      myErr = err;
+      myId = g;
+    }
+  }
+  atomicMin(&wBestErr, myErr);
+  workgroupBarrier();
+
+  // Pass 2: lowest id among the ties. Splitting the reduction in two keeps the
+  // error exact — packing (err, id) into one u32 would need 24 + 16 bits.
+  let bestErr = atomicLoad(&wBestErr);
+  if (myErr == bestErr) {
+    atomicMin(&wBestId, myId);
+  }
+  workgroupBarrier();
+
+  if (k == 0u) {
+    var id = atomicLoad(&wBestId);
+    // Hysteresis (§C5). The incumbent is scored in full: it may have been
+    // early-exited out of pass 1, and a partial sum would compare unequally.
+    if (P.hysteresisMilli > 0u && wPrevId != id && wPrevId < P.glyphCount) {
+      let incErr = errOf(wPrevId);
+      if (bestErr * 1000u >= incErr * (1000u - P.hysteresisMilli)) {
+        id = wPrevId;
+      }
+    }
+    cells[ci] = vec4<u32>(id, 0u, 0u, 0u);
+  }
 }
 `

@@ -15,13 +15,14 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
 
 <h3 id="run-it-yourself">Run it on your machine</h3>
 <p>
-  The table above is a controlled measurement. This is the same harness — same scene, same grid, same code — run
-  right here in your tab instead.
+  The table above is a controlled measurement taken on one machine. Below is that same harness, with the same
+  scene and grid, running in your tab instead.
 </p>
-<p class="note">
-  Your browser paints in step with your display, so anything that can hold your refresh rate reports much the
-  same frame time. Read it as pass/fail on your own hardware, not as a ranking: the rows that fall below refresh
-  are the ones that cannot keep up here. The ranking is the table above.
+<p>
+  One thing to watch for: your browser paints in step with your display, so anything that can hold your refresh
+  rate will report much the same frame time. Read the result as pass or fail on your own hardware rather than as
+  a ranking. The rows that fall below your refresh rate are the ones that cannot keep up, and the table above is
+  where the ranking lives.
 </p>
 
 <div class="runner" data-bench-runner data-published={JSON.stringify(published)}>
@@ -30,7 +31,7 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
     <span data-progress class="runner-progress">~30 seconds, {published.length} contenders</span>
   </div>
   <p class="runner-hint" data-hint>
-    Loads about 8&nbsp;MB of third-party libraries (three.js, p5, aalib.js, chafa-wasm) on the first run — nothing
+    Loads about 8&nbsp;MB of third-party libraries (three.js, textmode.js, aalib.js, chafa-wasm) on the first run. Nothing
     is fetched until you press the button.
   </p>
   <div class="runner-stage" data-stage hidden></div>
@@ -205,7 +206,7 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
     // Frames only advance while the tab is in front; say so rather than looking
     // like the run has crashed.
     document.addEventListener('visibilitychange', () => {
-      if (running && document.hidden) progress.textContent = 'paused — frames only advance while this tab is visible'
+      if (running && document.hidden) progress.textContent = 'paused, frames only advance while this tab is visible'
     })
 
     button.addEventListener('click', async () => {

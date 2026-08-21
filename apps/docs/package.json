@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node prep.mjs && pnpm --filter @ascii-fx-internal/benchmarks run prep:web && astro dev",
     "build": "node prep.mjs && pnpm --filter @ascii-fx-internal/benchmarks run prep:web && astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "prep:emoji": "node prepEmoji.mjs"
   },
   "dependencies": {
     "@ascii-fx/core": "workspace:*",
@@ -16,8 +17,9 @@
     "shiki": "^4.4.3"
   },
   "devDependencies": {
+    "@ascii-fx/compiler": "workspace:*",
     "@ascii-fx/vite": "workspace:*",
-    "astro": "^7.1.6",
-    "typescript": "^6.0.0"
+    "astro": "^7.2.2",
+    "typescript": "^7.0.2"
   }
 }

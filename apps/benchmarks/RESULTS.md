@@ -60,24 +60,24 @@ visually reasonable while differing from the exact winner; the error deltas abov
 
 ## Cross-library render loop
 
-Generated 2026-08-20T01:34:52.819Z · headless Chromium, vsync disabled · identical 1280×720 animated source, 200 timed frames after 40 warmup, each library at (or as near as it allows) the same 160×42 glyph grid. Each row runs in a fresh page (no cross-library GC/GPU contamination); best of 2 passes. Times are main-thread wall clock per frame and include drawing the source scene — the baseline row is that shared floor.
+Generated 2026-08-21T10:03:25.103Z · headless Chromium, vsync disabled · identical 1280×720 animated source, 200 timed frames after 40 warmup, each library at (or as near as it allows) the same 160×42 glyph grid. Each row runs in a fresh page (no cross-library GC/GPU contamination); best of 2 passes. Times are main-thread wall clock per frame and include drawing the source scene — the baseline row is that shared floor.
 
 | library | glyph grid | p50 ms/frame | p95 ms/frame | ~fps |
 | --- | --- | ---: | ---: | ---: |
-| baseline (no ascii) | — | 2.50 | 2.70 | 400 |
-| ascii-fx webgpu | 160×42 | 2.60 | 2.90 | 385 |
-| ascii-fx cpu | 160×42 | 39.00 | 41.40 | 26 |
-| ascii-fx shape6-lut | 160×42 · match 9.8ms | 38.40 | 40.00 | 26 |
-| ascii-fx ramp matcher | 160×42 · match 9.8ms | 38.10 | 40.50 | 26 |
-| aalib.js mono | 160×42 | 10.00 | 22.10 | 100 |
-| aalib.js colored | 160×42 | 16.20 | 32.30 | 62 |
-| p5.asciify | 106×60 | 3.30 | 4.50 | 303 |
-| chafa-wasm | 160×42 | 47.20 | 51.70 | 21 |
-| ramp reference mono | 160×42 | 2.70 | 2.90 | 370 |
-| ramp reference color | 160×42 | 8.20 | 8.60 | 122 |
-| three.js AsciiEffect | 160×42 | 6.10 | 6.70 | 164 |
+| baseline (no ascii) | — | 2.60 | 2.90 | 385 |
+| ascii-fx webgpu | 160×42 | 2.80 | 3.10 | 357 |
+| ascii-fx cpu | 160×42 | 39.80 | 41.20 | 25 |
+| ascii-fx shape6-lut | 160×42 · match 9.9ms | 38.60 | 40.10 | 26 |
+| ascii-fx ramp matcher | 160×42 · match 9.8ms | 38.00 | 39.60 | 26 |
+| aalib.js mono | 160×42 | 9.10 | 24.70 | 110 |
+| aalib.js colored | 160×42 | 14.70 | 33.30 | 68 |
+| textmode.js | 106×60 | 3.70 | 14.40 | 270 |
+| chafa-wasm | 160×42 | 47.10 | 52.30 | 21 |
+| ramp reference mono | 160×42 | 2.80 | 3.10 | 357 |
+| ramp reference color | 160×42 | 8.60 | 9.10 | 116 |
+| three.js AsciiEffect | 160×42 | 6.00 | 7.20 | 167 |
 
-Method notes: library rows are the real published packages — aalib.js 2.0 (reader → aa() → its canvas renderer), p5.asciify 0.10 on p5 2.x (WebGL textmode add-on, instance mode, redraw-driven), chafa-wasm 0.3 (raw ImageData → imageToHtml, default shape-aware symbol set), three.js AsciiEffect from three 0.185 (CanvasTexture quad, its DOM output). ascii-fx webgpu/cpu rows run the exact structural matcher with per-cell color fitting ('foreground'). The shape6-lut row is the in-repo implementation of Alex Harri's shape-vector approach (a spec-credited influence, published as writing rather than a package) with its 3-bit LUT, and the ramp-matcher row is our cheapest opt-in — both through the real core path (matchFrame → compositeFrame) on the main thread. The "ramp reference" rows are not libraries: the standard brightness-ramp technique hand-optimized with zero library overhead, the technique's floor. What each computes differs: aalib and AsciiEffect map brightness to a ramp (aalib's colored mode adds per-cell color), p5.asciify maps brightness to a colored textmode grid, chafa does shape-aware block/border selection with fg+bg colors — with Harri's descriptor, the two shape-aware influences this project credits. The spec's structural-reconstruction credit ("Ditherlab / chafa-style") is represented here by chafa-wasm: the credited 8×8 mask → Hamming prefilter → exact-rerank pipeline is chafa's documented algorithm, and no separately runnable Ditherlab artifact could be located to bench. Equal speed is not equal output.
+Method notes: library rows are the real published packages — aalib.js 2.0 (reader → aa() → its canvas renderer), textmode.js 0.17 (WebGL, standalone; the successor its author points p5.asciify at), chafa-wasm 0.3 (raw ImageData → imageToHtml, default shape-aware symbol set), three.js AsciiEffect from three 0.185 (CanvasTexture quad, its DOM output). textmode.js is the one row not on the shared grid: it sizes cells from a font size and keeps them square, so fontSize 12 lands it on 106×60 rather than 160×42, about 5% fewer cells. ascii-fx webgpu/cpu rows run the exact structural matcher with per-cell color fitting ('foreground'). The shape6-lut row is the in-repo implementation of Alex Harri's shape-vector approach (a spec-credited influence, published as writing rather than a package) with its 3-bit LUT, and the ramp-matcher row is our cheapest opt-in — both through the real core path (matchFrame → compositeFrame) on the main thread. The "ramp reference" rows are not libraries: the standard brightness-ramp technique hand-optimized with zero library overhead, the technique's floor. What each computes differs: aalib and AsciiEffect map brightness to a ramp (aalib's colored mode adds per-cell color), textmode.js maps brightness to a colored textmode grid, chafa does shape-aware block/border selection with fg+bg colors — with Harri's descriptor, the two shape-aware influences this project credits. The spec's structural-reconstruction credit ("Ditherlab / chafa-style") is represented here by chafa-wasm: the credited 8×8 mask → Hamming prefilter → exact-rerank pipeline is chafa's documented algorithm, and no separately runnable Ditherlab artifact could be located to bench. Equal speed is not equal output.
 
 ## CPU reference (single-threaded)
 
@@ -98,3 +98,16 @@ Generated 2026-08-19T14:56:11.740Z · Node v24.19.0 · 1280×720 procedural sour
 
 This is the fallback path for machines without WebGPU. It is the exact reference implementation the GPU
 compute path is verified against bit-for-bit, so the fallback costs speed and never quality.
+
+## Cross-library render loop (emoji)
+
+Generated 2026-08-21T10:03:25.104Z · same harness, same 1280×720 animated source, 160×90 square cells, best of 2 passes. **Not comparable with the ASCII table above** — different objective, different grid, different cell aspect.
+
+| library | glyph grid | p50 ms/frame | p95 ms/frame | ~fps |
+| --- | --- | ---: | ---: | ---: |
+| ascii-fx emoji webgpu | 160×90 | 2.60 | 2.90 | 385 |
+| ascii-fx emoji cpu | 160×90 | 110.60 | 113.40 | 9 |
+| mean-color reference (scan) | 160×90 | 12.50 | 13.30 | 80 |
+| mean-color reference (cube LUT) | 160×90 | 10.70 | 11.20 | 93 |
+
+Method notes: **no npm package publishes image→emoji rendering.** Every emoji-mosaic project we could find — emoji-mosaic (NYT), Emojifier, the emojicam family — is an application, not a library, so there is nothing to install and bench the way aalib.js or chafa-wasm can be. The `mean-color reference` rows are therefore reference implementations of the technique all of them share: reduce each emoji to one mean colour, reduce each cell to one mean colour, take the nearest. `scan` is the plain linear search; `cube LUT` is the accelerated variant (a precomputed colour cube, as in vjsrinivas' emojicam) at 5 bits per channel. Both draw the chosen emoji's 8×8 descriptor so they pay the same compositing cost as the matcher rows. The ascii-fx rows run `chromatic-v1` — squared error against the emoji's own 64 samples composited over the backdrop — over the same curated palette. Equal speed is not equal output: mean-colour matching is a colour quantiser and cannot see sub-cell structure at all.

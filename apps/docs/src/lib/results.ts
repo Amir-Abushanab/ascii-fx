@@ -10,11 +10,30 @@
 // module is bundled and makes `astro dev` hot-reload a fresh benchmark run.
 import source from '../../../benchmarks/RESULTS.md?raw'
 
-/** Everything under `heading` up to the next `## ` heading. */
+/**
+ * Everything under `heading` up to the next `## ` heading.
+ *
+ * The heading is matched up to its end of line, so "Cross-library render loop"
+ * cannot swallow "Cross-library render loop (emoji)" — a plain indexOf would,
+ * and would then silently parse the wrong table.
+ */
 function section(heading: string): string {
-  const start = source.indexOf(heading)
-  if (start === -1) throw new Error(`RESULTS.md is missing the "${heading}" section — regenerate it with \`pnpm bench:compare\`.`)
-  const rest = source.slice(start + heading.length)
+  const body = findSection(heading)
+  if (body === null) {
+    throw new Error(`RESULTS.md is missing the "${heading}" section — regenerate it with \`pnpm bench:compare\`.`)
+  }
+  return body
+}
+
+function findSection(heading: string): string | null {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // Prefer a heading that IS this line, so "Cross-library render loop" resolves
+  // to itself rather than to "Cross-library render loop (emoji)". Fall back to
+  // a prefix match, because some headings carry their parameters inline
+  // ("## Speed (640×360 source, …)") and are referenced by their stem.
+  const m = new RegExp(`^${escaped}[ \t]*$`, 'm').exec(source) ?? new RegExp(`^${escaped}.*$`, 'm').exec(source)
+  if (!m) return null
+  const rest = source.slice(m.index + m[0].length)
   const end = rest.indexOf('\n## ')
   return end === -1 ? rest : rest.slice(0, end)
 }
@@ -87,6 +106,27 @@ export function lib(name: string): CrossLibraryRow {
 
 /** The shared floor every row includes: drawing the source scene, no ascii. */
 export const baseline = lib('baseline (no ascii)')
+
+// ——— cross-library render loop, emoji ———
+//
+// Optional: the emoji rows need a compiled chromatic palette, which is built by
+// `prep:emoji` from fetched assets and is not in the repo. Absent section means
+// the comparison simply does not render, rather than failing the build on a
+// machine that has never run it.
+
+const EMOJI_CROSS_HEADING = '## Cross-library render loop (emoji)'
+const emojiCrossBody = findSection(EMOJI_CROSS_HEADING)
+
+export const emojiCrossLibrary: CrossLibraryRow[] | null =
+  emojiCrossBody === null
+    ? null
+    : table(emojiCrossBody, EMOJI_CROSS_HEADING).map((cells) => {
+        const [name, grid, p50, p95, fps] = cells
+        return { name, grid, p50: num(p50, name), p95: num(p95, name), fps: num(fps, name) }
+      })
+
+export const emojiCrossGeneratedAt: string | null =
+  emojiCrossBody === null ? null : (emojiCrossBody.match(/Generated (\S+)/)?.[1] ?? null)
 
 // ——— approximate matcher speed ———
 

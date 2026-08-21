@@ -1,9 +1,28 @@
 {
-  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
-  "changelog": "@changesets/cli/changelog",
+  "$schema": "https://unpkg.com/@changesets/config@3.1.4/schema.json",
+  "changelog": [
+    "@changesets/changelog-github",
+    {
+      "repo": "Amir-Abushanab/ascii-fx"
+    }
+  ],
   "commit": false,
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@ascii-fx-internal/*"]
+  "ignore": [
+    "@ascii-fx-internal/*"
+  ],
+  "fixed": [
+    [
+      "@ascii-fx/core",
+      "@ascii-fx/gpu",
+      "@ascii-fx/compiler",
+      "@ascii-fx/react",
+      "@ascii-fx/react-three",
+      "@ascii-fx/three",
+      "@ascii-fx/vite"
+    ]
+  ],
+  "linked": []
 }

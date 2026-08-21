@@ -16,8 +16,7 @@
   "devDependencies": {
     "aalib.js": "^2.0.0",
     "chafa-wasm": "^0.3.3",
-    "p5": "^2.3.2",
-    "p5.asciify": "^0.10.3",
+    "textmode.js": "^0.17.2",
     "three": "0.185.1"
   }
 }

@@ -10,8 +10,7 @@
       #status { padding: 8px; }
     </style>
     <script src="./aalib.js"></script>
-    <script src="./p5.min.js"></script>
-    <script src="./p5.asciify.umd.js"></script>
+    <script src="./textmode.umd.js"></script>
   </head>
   <body>
     <div id="status">booting…</div>
@@ -38,6 +37,11 @@
       const COLS = 160
       const ROWS = 42 // grid-v1 for 1280×720 with the Geist 30×64 cell
       const RAMP = ' .:-=+*#%@'
+      // Emoji cells are square, so grid-v1 lands on a different row count for
+      // the same source and column count as the 30x64 text cell.
+      const EMOJI_COLS = 160
+      const EMOJI_ROWS = 90
+      const BACKDROP = [11, 11, 15]
 
       const status = document.getElementById('status')
       const stage = document.getElementById('stage')
@@ -70,6 +74,140 @@
       }
 
       // ——— contenders: setup() → render() (may return a promise) → teardown() ———
+      // The emoji palette is compiled by `pnpm --filter @ascii-fx-internal/docs
+      // prep:emoji`. It is not checked in (6.8 MB of atlas), so the emoji rows
+      // drop out of the run rather than failing it when it is absent.
+      let emojiProfile
+      let emojiProfileTried = false
+      async function loadEmojiProfile() {
+        if (!emojiProfileTried) {
+          emojiProfileTried = true
+          try {
+            emojiProfile = await loadProfile('./chromatic.asciip')
+          } catch {
+            emojiProfile = undefined
+          }
+        }
+        return emojiProfile
+      }
+
+      /**
+       * The technique every shipping emoji-mosaic tool uses: reduce each emoji
+       * to one mean colour, reduce each cell to one mean colour, take the
+       * nearest. Written here as a reference implementation because no npm
+       * package publishes it — emoji-mosaic, Emojifier and the emojicam family
+       * are all applications, not libraries.
+       *
+       * `lut` picks the accelerated variant: a precomputed colour cube (what
+       * vjsrinivas' emojicam does with a 256^3 table) instead of a linear scan.
+       */
+      async function emojiMeanContender(name, { lut }) {
+        const profile = await loadEmojiProfile()
+        if (!profile) return null
+        const out = document.createElement('canvas')
+        out.width = EMOJI_COLS * 8
+        out.height = EMOJI_ROWS * 8
+        stage.append(out)
+        const ctx = out.getContext('2d')
+        const img = ctx.createImageData(out.width, out.height)
+
+        // Palette means, composited over the backdrop the cells are drawn on.
+        const n = profile.glyphCount
+        const samples = profile.chromatic.samples
+        const pal = new Uint8Array(n * 3)
+        for (let g = 0; g < n; g++) {
+          let sr = 0, sg = 0, sb = 0, sa = 0
+          for (let k = 0; k < 64; k++) {
+            const p = g * 256 + k * 4
+            const a = samples[p + 3]
+            sr += samples[p] * a; sg += samples[p + 1] * a; sb += samples[p + 2] * a; sa += a
+          }
+          const mix = (c, a) => Math.round((c * a + BACKDROP[0] * (255 - a)) / 255)
+          const am = Math.round(sa / 64)
+          pal[g * 3] = mix(sa ? sr / sa : 0, am)
+          pal[g * 3 + 1] = Math.round(((sa ? sg / sa : 0) * am + BACKDROP[1] * (255 - am)) / 255)
+          pal[g * 3 + 2] = Math.round(((sa ? sb / sa : 0) * am + BACKDROP[2] * (255 - am)) / 255)
+        }
+
+        // 5 bits per channel: 32768 entries built once, the practical size of
+        // the "precomputed cube" trick (a full 256^3 is 16M entries).
+        let cube
+        if (lut) {
+          cube = new Uint16Array(32768)
+          for (let i = 0; i < 32768; i++) {
+            const r = ((i >> 10) & 31) * 8 + 4, g8 = ((i >> 5) & 31) * 8 + 4, b = (i & 31) * 8 + 4
+            let best = 0, bestD = Infinity
+            for (let g = 0; g < n; g++) {
+              const dr = r - pal[g * 3], dg = g8 - pal[g * 3 + 1], db = b - pal[g * 3 + 2]
+              const d = dr * dr + dg * dg + db * db
+              if (d < bestD) { bestD = d; best = g }
+            }
+            cube[i] = best
+          }
+        }
+
+        const src = document.createElement('canvas')
+        src.width = EMOJI_COLS
+        src.height = EMOJI_ROWS
+        const sc = src.getContext('2d', { willReadFrequently: true })
+
+        const render = () => {
+          // One mean colour per cell, which is what drawImage's downscale gives.
+          sc.drawImage(scene, 0, 0, EMOJI_COLS, EMOJI_ROWS)
+          const cells = sc.getImageData(0, 0, EMOJI_COLS, EMOJI_ROWS).data
+          for (let cy = 0; cy < EMOJI_ROWS; cy++) {
+            for (let cx = 0; cx < EMOJI_COLS; cx++) {
+              const ci = (cy * EMOJI_COLS + cx) * 4
+              const r = cells[ci], g8 = cells[ci + 1], b = cells[ci + 2]
+              let pick
+              if (cube) {
+                pick = cube[((r >> 3) << 10) | ((g8 >> 3) << 5) | (b >> 3)]
+              } else {
+                let bestD = Infinity
+                pick = 0
+                for (let g = 0; g < n; g++) {
+                  const dr = r - pal[g * 3], dg = g8 - pal[g * 3 + 1], db = b - pal[g * 3 + 2]
+                  const d = dr * dr + dg * dg + db * db
+                  if (d < bestD) { bestD = d; pick = g }
+                }
+              }
+              // Draw the chosen emoji's 8x8 descriptor, so the row pays the
+              // same compositing cost the matcher rows do.
+              for (let j = 0; j < 8; j++) {
+                for (let i = 0; i < 8; i++) {
+                  const sp = pick * 256 + (j * 8 + i) * 4
+                  const a = samples[sp + 3]
+                  const dp = ((cy * 8 + j) * out.width + cx * 8 + i) * 4
+                  img.data[dp] = (samples[sp] * a + BACKDROP[0] * (255 - a)) / 255
+                  img.data[dp + 1] = (samples[sp + 1] * a + BACKDROP[1] * (255 - a)) / 255
+                  img.data[dp + 2] = (samples[sp + 2] * a + BACKDROP[2] * (255 - a)) / 255
+                  img.data[dp + 3] = 255
+                }
+              }
+            }
+          }
+          ctx.putImageData(img, 0, 0)
+        }
+        gridNotes[name] = `${EMOJI_COLS}×${EMOJI_ROWS}`
+        return { render, teardown: () => out.remove() }
+      }
+
+      async function emojiFxContender(name, backend) {
+        const profile = await loadEmojiProfile()
+        if (!profile) return null
+        const canvas = document.createElement('canvas')
+        canvas.width = W
+        canvas.height = H
+        stage.append(canvas)
+        const r = await createAsciiRenderer({
+          canvas, profile, backend,
+          matcher: 'chromatic', columns: EMOJI_COLS, background: BACKDROP, alpha: 'ignore',
+        })
+        r.setSource(scene)
+        gridNotes[name] = `${EMOJI_COLS}×${EMOJI_ROWS}`
+        return { render: () => r.render(), teardown: () => (r.destroy(), canvas.remove()) }
+      }
+
       const CONTENDERS = {
         // Loop floor: draw the scene and present it with zero ascii work.
         // Every other row includes this cost. (It must blit to a visible
@@ -116,48 +254,39 @@
         // called directly (no Rx plumbing between frames beyond its reader).
         'aalib.js mono': async () => aalibContender(false),
         'aalib.js colored': async () => aalibContender(true),
-        // p5.asciify (WebGL textmode add-on for p5): instance-mode sketch, the
-        // shared scene copied into a p5.Graphics each frame, redraw() driven.
-        'p5.asciify': async () => {
-          let inst
-          let g
-          const holder = document.createElement('div')
-          stage.append(holder)
-          await new Promise((resolve) => {
-            inst = new window.p5((p) => {
-              p.setup = () => {
-                p.createCanvas(W, H, p.WEBGL)
-                p.noLoop()
-                g = p.createGraphics(W, H)
-                resolve()
-              }
-              p.draw = () => {
-                p.clear()
-                p.image(g, -W / 2, -H / 2)
-              }
-            }, holder)
-          })
-          // Aim the textmode grid at our cell count. fontSize() is ignored
-          // until the add-on's async font setup finishes, so wait for it.
-          try {
-            const mgr = window.p5.asciify.p5asciify
-            const a = mgr.asciifier(0) ?? mgr.asciifiers?.[0]
-            for (let i = 0; i < 200 && !a?._setupDone; i++) await new Promise((r) => requestAnimationFrame(r))
-            a.fontSize(12)
-            inst.redraw()
-            const grid = a?.grid ?? a?._grid
-            gridNotes['p5.asciify'] = grid ? `${grid.cols}×${grid.rows}` : 'default grid'
-          } catch (err) {
-            gridNotes['p5.asciify'] = `default grid (${err.message})`
+        // textmode.js (WebGL): the maintained successor to p5.asciify, which its
+        // author deprecated in favour of this. Standalone rather than a p5
+        // add-on, so there is no p5 in the page at all. A texture wraps the
+        // shared scene canvas and refreshes itself each frame, and rendering is
+        // redraw() driven so the harness controls the clock.
+        'textmode.js': async () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = W
+          canvas.height = H
+          stage.append(canvas)
+          const tm = window.textmode.create({ canvas, width: W, height: H, fontSize: 12 })
+          const tex = tm.createTexture(scene)
+          tm.draw(() => tm.image(tex))
+          tm.noLoop()
+          tm.redraw()
+          // Font setup is async, so the grid reads back undefined on the first
+          // frame. Wait for it, but race the wait against a timer: rAF does not
+          // fire at all in a background tab, and this harness also runs on the
+          // docs site where that happens.
+          const deadline = performance.now() + 3000
+          while (!tm.grid && performance.now() < deadline) {
+            await new Promise((r) => {
+              const done = () => r()
+              requestAnimationFrame(done)
+              setTimeout(done, 32)
+            })
           }
+          gridNotes['textmode.js'] = tm.grid ? `${tm.grid.cols}×${tm.grid.rows}` : 'default grid'
           return {
-            render: () => {
-              g.drawingContext.drawImage(scene, 0, 0)
-              inst.redraw()
-            },
+            render: () => tm.redraw(),
             teardown: () => {
-              inst.remove()
-              holder.remove()
+              tm.remove?.()
+              canvas.remove()
             },
           }
         },
@@ -330,10 +459,26 @@
         }
       }
 
+      // Emoji rows. Kept in their own group: they match a different objective
+      // on a different grid, so their times are not comparable with the ASCII
+      // rows above and are reported separately.
+      const EMOJI_CONTENDERS = {
+        'ascii-fx emoji webgpu': () => emojiFxContender('ascii-fx emoji webgpu', 'webgpu'),
+        'ascii-fx emoji cpu': () => emojiFxContender('ascii-fx emoji cpu', 'cpu'),
+        'mean-color reference (scan)': () => emojiMeanContender('mean-color reference (scan)', { lut: false }),
+        'mean-color reference (cube LUT)': () => emojiMeanContender('mean-color reference (cube LUT)', { lut: true }),
+      }
+      Object.assign(CONTENDERS, EMOJI_CONTENDERS)
+
       const raf = () => new Promise((r) => requestAnimationFrame(r))
 
       window.runBench = async (name, { warmup = 40, frames = 200 } = {}) => {
         const contender = await CONTENDERS[name]()
+        // Emoji rows return null when the compiled palette is absent.
+        if (!contender) {
+          status.textContent = `skipped: ${name}`
+          return { name, skipped: true }
+        }
         status.textContent = `running: ${name}`
         let f = 0
         for (let i = 0; i < warmup; i++) {
@@ -361,6 +506,9 @@
         return { name, p50: q(0.5), p95: q(0.95), mean, fps: 1000 / q(0.5), frames, grid }
       }
       window.benchNames = Object.keys(CONTENDERS)
+      window.benchKinds = Object.fromEntries(
+        Object.keys(CONTENDERS).map((n) => [n, n in EMOJI_CONTENDERS ? 'emoji' : 'ascii']),
+      )
       status.textContent = 'ready'
     </script>
   </body>

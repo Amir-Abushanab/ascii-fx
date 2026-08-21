@@ -42,7 +42,10 @@ module.exports = {
   ],
   options: {
     doNotFollow: { path: 'node_modules' },
-    exclude: { path: ['\\.astro$'] },
+    // Cross-package type imports resolve to packages/*/dist/*.d.ts. That is build
+    // output, not source, and following it pads the graph with a second copy of
+    // every module the rules are meant to be checking.
+    exclude: { path: ['\\.astro$', '/dist/'] },
     enhancedResolveOptions: {
       exportsFields: ['exports'],
       conditionNames: ['import', 'types', 'default'],

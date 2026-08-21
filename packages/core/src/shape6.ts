@@ -144,6 +144,9 @@ function runApproxMatcher(
 ): AsciiFrame {
   const profile = options.profile
   const color = options.color ?? 'mono'
+  if (color === 'glyph') {
+    throw new Error("color: 'glyph' is produced by matcher: 'chromatic'; shape6 and ramp fit colour to a mask.")
+  }
   const alphaMode = options.alpha ?? 'mask'
   const flatT = options.flatThreshold ?? 15
   const fgOpt = options.foreground ?? ([255, 255, 255] as const)

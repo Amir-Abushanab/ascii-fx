@@ -7,6 +7,7 @@ import { AsciiFrame } from './frame.js'
 import { blankGlyphId } from './blankGlyph.js'
 import { deriveGrid } from './grid.js'
 import { matchFrameRamp, matchFrameShape6 } from './shape6.js'
+import { matchFrameChromatic } from './chromatic.js'
 
 export const ALGORITHM_VERSION = 'structural-v1'
 export { blankGlyphId }
@@ -20,8 +21,14 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
   const profile = options.profile
   if (!profile) throw new Error('matchFrame requires options.profile (build one with @ascii-fx/compiler).')
   const matcher = options.matcher ?? 'structural'
+  if (options.color === 'glyph' && matcher !== 'chromatic') {
+    throw new Error(
+      `color: 'glyph' is produced by matcher: 'chromatic'; ${matcher} fits colour to a mask.`,
+    )
+  }
   if (matcher === 'shape6') return matchFrameShape6(source, options)
   if (matcher === 'ramp') return matchFrameRamp(source, options)
+  if (matcher === 'chromatic') return matchFrameChromatic(source, options)
   const color = options.color ?? 'mono'
   const alphaMode = options.alpha ?? 'mask'
   const flatT = options.flatThreshold ?? 15

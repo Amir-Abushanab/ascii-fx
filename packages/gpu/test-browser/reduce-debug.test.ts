@@ -20,13 +20,14 @@ it('reduce pass roundtrips an 8×8 identity source', async () => {
   }
   device.queue.writeTexture({ texture: tex }, data, { bytesPerRow: 32 }, [8, 8])
 
-  const params = new Uint32Array(16)
+  // Sized from the Params struct in shaders.ts; uniform bindings must cover it.
+  const params = new Uint32Array(20)
   params[0] = 8 // srcW
   params[1] = 8 // srcH
   params[2] = 1 // cols
   params[3] = 1 // rows
   params[8] = 0 // alphaMask off
-  const paramsBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const paramsBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(paramsBuf, 0, params)
 
   const reduced = device.createBuffer({

@@ -25,7 +25,7 @@ export default defineConfig({
         resolve: { alias },
         test: {
           name: 'gpu-browser',
-          include: ['packages/*/test-browser/**/*.test.ts'],
+          include: ['packages/*/test-browser/**/*.test.ts', 'packages/*/test-browser/**/*.test.tsx'],
           testTimeout: 60_000,
           browser: {
             enabled: true,

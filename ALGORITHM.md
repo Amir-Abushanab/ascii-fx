@@ -6,6 +6,7 @@ Versioned identifiers defined by this document:
 
 ```text
 structural-v1   matcher semantics
+chromatic-v1    matcher semantics for glyphs whose colour is baked (§C)
 reduce-v1       source reduction
 grid-v1         grid derivation
 raster-v1       compiler rasterization
@@ -427,3 +428,62 @@ Runtime uses `lut3` when present, else brute-force 6D. `lut3TopK` remains reserv
 ### 19. ramp-v1 (lowest-cost effect matcher)
 
 `matcher: 'ramp'`: every non-transparent cell uses the flat-path coverage mapping (§6) on its mean luma — no structure at all. Colors are fitted from the winning glyph's mask partition exactly as §10 (same rule as shape6). Branded as an effect, not as quality (spec §5).
+
+
+---
+
+## C. chromatic-v1
+
+`matcher: 'chromatic'`. A **separate algorithm**, not an approximation of structural-v1. It exists for glyph sets whose colour is part of the glyph — colour emoji — where structural-v1's central move is unavailable.
+
+structural-v1 matches a 1-bit mask and *fits* colour to it, which is exactly why its rerank is exact: with foreground and background free, the best colours for a given mask are the means of the two sample sets. A colour glyph's colour is baked, so there is nothing to fit, and the objective collapses to direct squared error against the glyph's own samples.
+
+Requires a profile carrying `chromatic` glyph data. Emits `colorMode: 'glyph'` and **no colour planes**; the colour lives in the glyph. `color: 'glyph'` is an output mode only — passing it to any other matcher is an error.
+
+### C1. What carries over unchanged
+
+`grid-v1` (§3), `reduce-v1` (§4), the transparent-cell rule (§5), and output packing (§11) apply exactly as written. Cell aspect comes from the profile, so a square-celled emoji profile derives different rows from a text profile at the same column count; that is §3 doing its job, not a new rule.
+
+### C2. What does not apply
+
+- **§6 flat path** — there is no coverage ramp to fall back to, and no fitted colour that would make flat cells degenerate.
+- **§8 polarity** — nothing is fitted, so there is no orientation to derive.
+- **§9 candidate prefilter** — the search is exhaustive. Over a curated palette a mean-colour shortlist costs more reconstruction quality than it saves time, and a shortlist that agreed with the objective would have to evaluate the objective.
+
+### C3. Glyph descriptor and backdrop composite
+
+Each glyph carries **64 straight-alpha RGBA samples**, row-major, sample index `k = j·8 + i` — the same layout and the same `reduce-v1` rule the source goes through. Straight rather than premultiplied so the composite below stays exact in integers.
+
+A glyph is matched as it will be drawn, so it is composited over the backdrop first. With backdrop `bd` = `options.background` (default `DEFAULT_BG`):
+
+```text
+recon[g][k].r = rdiv(sample[g][k].r · sample[g][k].a + bd.r · (255 − sample[g][k].a), 255)      (same for G, B)
+```
+
+This depends only on the glyph table and the backdrop, never on the source, so it is computed once per backdrop rather than once per cell or once per candidate. Implementations may hoist it as far as they like; the values are fixed by the formula above.
+
+### C4. Objective
+
+For every non-transparent cell, over all 64 samples and all `G` glyphs:
+
+```text
+err(g) = Σ over k:  (r[k] − recon[g][k].r)² + (g[k] − recon[g][k].g)² + (b[k] − recon[g][k].b)²
+```
+
+u32-exact; the maximum is 64 · 3 · 255² = 12,484,800, as in §10. Early exit (`err ≥ best ⇒ break`) is permitted and cannot change the winner. **Winner: strictly smaller error replaces, so ties keep the lowest glyph id.**
+
+### C5. Hysteresis
+
+Optional, default off. Given `options.previous` (the previous frame's glyph ids on the same grid) and `options.hysteresis` = `h`, let `inc = previous[cell]`:
+
+```text
+keep inc  ⇔  inc ≠ winner  ∧  inc < G  ∧  1000 · err(winner) ≥ err(inc) · (1000 − round(h · 1000))
+```
+
+`err(inc)` is evaluated **in full** — the incumbent may have been early-exited out of the search, and a partial sum would compare unequal quantities. The `1000 ·` scaling keeps the comparison in integers; `h` is quantised to a thousandth.
+
+A `previous` whose length does not match the derived grid is an error, not a silently ignored argument.
+
+**Hysteresis must not cross a discontinuity.** It is biased toward the incumbent by construction, so unlike exact temporal reuse it does not self-correct: feeding it glyph ids from a different source leaves that source ghosted into wherever the new one is ambiguous, and at `h = 0.1` a cell keeps its incumbent whenever the challenger is less than ~11% better, which in flat regions is most of them. Callers pass `previous` explicitly and so own this; the WebGPU backend, which keeps the previous frame in its own cells buffer, suppresses hysteresis for one frame after any source, grid, or option change.
+
+Emoji differ far more from one another than text glyphs do, so a near-tie that flips frame to frame reads as a strobe rather than as texture. Measured against structural-v1 on identical animated frames, chromatic-v1 flips **less** often unaided — baked colour is a coarser quantisation than fitted colour, so small input changes cross a palette boundary less readily — and `h = 0.1` removes roughly a third of the residual excess churn for under 1% reconstruction error.

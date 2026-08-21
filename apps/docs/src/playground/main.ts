@@ -1,5 +1,14 @@
 import type { AsciiProfile, ColorMode, AlphaMode, RGB } from '@ascii-fx/core'
 import { createAsciiProfile, decodeProfile, subsetProfile } from '@ascii-fx/core'
+import {
+  activeProfile,
+  defaultSelection,
+  loadFullPalette,
+  paletteReady,
+  selectionSize,
+  setSelection,
+} from './emojiMode.js'
+import { mountPicker, type PickerHandles } from './glyphPicker.js'
 import type {
   AsciiRenderer,
   AsciiRendererRuntimeOptions,
@@ -19,13 +28,17 @@ import {
   ImageDown,
   Package,
   ScanText,
+  Smile,
   Sparkles,
+  ToggleRight,
   TriangleAlert,
   Type,
   createIcons,
 } from 'lucide'
 import { SCENES, type SceneKind } from './scenes'
 import { ExportComponentDialog } from './exportDialog'
+import { buildAgentBrief } from './agentBrief'
+import { createAgentCopyButton } from './agentCopyButton'
 import { refreshExplainer } from './explainer'
 import { renderMath } from './math'
 import { mountSectionIcons } from './sectionIcons'
@@ -33,13 +46,34 @@ import { pointerUV } from './pointer'
 import type { ExportState } from './exportSnippets'
 
 createIcons({
-  icons: { Clapperboard, ClipboardCopy, Component, Cpu, Crop, FileText, ImageDown, Package, ScanText, Sparkles, TriangleAlert, Type },
+  // Every data-lucide name used in index.astro has to be listed here — lucide
+  // warns and leaves the <i> empty for one it was not handed.
+  icons: {
+    Clapperboard,
+    ClipboardCopy,
+    Component,
+    Cpu,
+    Crop,
+    FileText,
+    ImageDown,
+    Package,
+    ScanText,
+    Smile,
+    Sparkles,
+    ToggleRight,
+    TriangleAlert,
+    Type,
+  },
 })
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 let out = $<HTMLCanvasElement>('out')
 const stats = $('stats')
 const els = {
+  emojiMode: $<HTMLInputElement>('emojiMode'),
+  hyst: $<HTMLInputElement>('hyst'),
+  hystOut: $<HTMLOutputElement>('hystOut'),
+  hystLab: $<HTMLElement>('hystLab'),
   source: $<HTMLSelectElement>('source'),
   animate: $<HTMLInputElement>('animate'),
   imageFile: $<HTMLInputElement>('imageFile'),
@@ -93,7 +127,12 @@ function charSubset(): string | null {
   return [...new Set(Array.from(text))].join('')
 }
 
+const emojiOn = (): boolean => els.emojiMode.checked
+
 function loadSelectedProfile(): Promise<AsciiProfile> {
+  // Emoji mode replaces the glyph set wholesale: a chromatic palette is not a
+  // font, so the font/charset controls have nothing to say about it.
+  if (emojiOn()) return activeProfile()
   const value = els.font.value
   const chars = charSubset()
   // Compiled profiles can only narrow (subsetProfile); runtime profiles
@@ -188,10 +227,17 @@ let outputVisible = true
 function matchOptions(): AsciiRendererRuntimeOptions {
   return {
     columns: Number(els.columns.value),
-    color: els.color.value as ColorMode,
+    // chromatic-v1 emits colorMode 'glyph' and ignores fg/flat; passing the
+    // ASCII values through would be silently meaningless rather than wrong,
+    // but leaving them out keeps the option object honest about what applies.
+    ...(emojiOn()
+      ? { matcher: 'chromatic' as const, hysteresis: Number(els.hyst.value) }
+      : {
+          color: els.color.value as ColorMode,
+          flatThreshold: Number(els.flat.value),
+          foreground: hexToRgb(els.fg.value),
+        }),
     alpha: els.alpha.value as AlphaMode,
-    flatThreshold: Number(els.flat.value),
-    foreground: hexToRgb(els.fg.value),
     background: hexToRgb(els.bg.value),
     fit: els.fit.value as FitMode,
     temporal: els.temporal.checked && !els.temporal.disabled,
@@ -216,7 +262,11 @@ function applyInteraction(): void {
 /** Every interaction runs on both backends; temporal/adaptive are WebGPU features. */
 function syncInteractionAvailability(): void {
   const cpu = renderer?.backend === 'cpu'
-  els.temporal.disabled = cpu
+  // Exact temporal reuse skips cells whose samples are unchanged, which only
+  // pays against structural-v1's prefilter — chromatic-v1 never reads the
+  // previous frame's samples, so the control is disabled rather than left
+  // looking effective.
+  els.temporal.disabled = cpu || emojiOn()
   els.adaptive.disabled = cpu
   syncPanel()
 }
@@ -252,11 +302,16 @@ function updateStats(): void {
     fpsSpan.className = ratio >= 0.82 ? 'fps-good' : ratio >= 0.45 ? 'fps-ok' : 'fps-bad'
   }
   fpsSpan.textContent = `${fps.toFixed(0)} fps`
-  const subset = charSubset() ? ` · ${renderer.profile.glyphCount} glyphs` : ''
+  // In emoji mode the palette size is the interesting number, and it changes
+  // with the picker rather than with a charset string.
+  const subset = emojiOn() || charSubset() ? ` · ${renderer.profile.glyphCount} glyphs` : ''
+  const name = emojiOn()
+    ? `chromatic-v1${selectionSize() === null ? ' · curated' : ''}`
+    : (renderer.profile.metadata.fontFamily ?? renderer.profile.id)
   stats.replaceChildren(
     document.createTextNode(`${renderer.backend} · ${grid ? `${grid.columns}×${grid.rows} cells` : '—'} · `),
     fpsSpan,
-    document.createTextNode(` · ${renderer.profile.metadata.fontFamily ?? renderer.profile.id}${subset} · ${active?.kind ?? '—'}`),
+    document.createTextNode(` · ${name}${subset} · ${active?.kind ?? '—'}`),
   )
 }
 
@@ -303,12 +358,46 @@ const resizeObserver = new ResizeObserver(() => {
   if (renderer && active && !active.live) renderer.render()
 })
 
+/**
+ * The GPU went away — memory pressure, a driver reset, a backgrounded tab — and
+ * the renderer could not get a replacement. rebuild() swaps in a fresh <canvas>,
+ * which is what the CPU matcher needs (an element is stuck with its first
+ * context type), so 'auto' can land there instead of leaving a dead surface up.
+ */
+let lastDeviceLossAt = 0
+/**
+ * Set once WebGPU has proved it cannot actually render here. Setup can pass on a
+ * browser whose limits or WGSL support differ and then drop every dispatch, so
+ * 'auto' would keep choosing WebGPU forever; this pins the rebuild to CPU.
+ */
+let forcedBackend: BackendChoice | null = null
+function handleGpuError(error: GPUError): void {
+  if (forcedBackend) return
+  forcedBackend = 'cpu'
+  console.error('[ascii-fx] WebGPU error:', error.message)
+  stats.textContent = `webgpu reported an error — switching to the CPU matcher (${error.message})`
+  void rebuild()
+}
+
+function handleDeviceLost(): void {
+  const now = performance.now()
+  // Two losses in quick succession means rebuilding is not helping.
+  if (now - lastDeviceLossAt < 5000) {
+    stats.textContent = 'gpu lost and could not be restarted — reload the page'
+    return
+  }
+  lastDeviceLossAt = now
+  stats.textContent = 'gpu lost — restarting on the CPU matcher…'
+  void rebuild()
+}
+
 async function rebuild(): Promise<void> {
   renderer?.destroy()
   renderer = undefined
   // A canvas is permanently bound to its first context type (webgpu vs 2d),
   // so switching backends needs a fresh element in the same slot.
   const fresh = out.cloneNode(false) as HTMLCanvasElement
+  fresh.classList.toggle('swapping', out.classList.contains('swapping'))
   out.replaceWith(fresh)
   out = fresh
   outputObserver.disconnect()
@@ -329,7 +418,9 @@ async function rebuild(): Promise<void> {
     renderer = await createAsciiRenderer({
       canvas: out,
       profile,
-      backend: els.backend.value as BackendChoice,
+      backend: forcedBackend ?? (els.backend.value as BackendChoice),
+      onDeviceLost: handleDeviceLost,
+      onError: handleGpuError,
       ...matchOptions(),
     })
   } catch (err) {
@@ -345,7 +436,7 @@ async function rebuild(): Promise<void> {
   // Explainer widgets run the real matcher against whatever font is loaded.
   refreshExplainer(profile)
   // So do the heading icons — swap the font and they change with it.
-  void mountSectionIcons(profile)
+  void mountSectionIcons(profile, emojiOn())
 }
 
 async function switchSource(kind: string): Promise<void> {
@@ -415,14 +506,80 @@ els.fontFile.addEventListener('change', async () => {
   }
 })
 
-els.backend.addEventListener('change', () => void rebuild())
+els.backend.addEventListener('change', () => {
+  forcedBackend = null
+  void rebuild()
+})
 els.chars.addEventListener('change', () => void rebuild())
 
-const optionInputs = [els.columns, els.color, els.alpha, els.flat, els.fg, els.bg, els.fit, els.temporal, els.adaptive]
+// ————— Emoji mode —————
+
+let picker: PickerHandles | undefined
+/** Debounced: the picker's action buttons can fire faster than a rebuild. */
+let paletteTimer: number | undefined
+
+async function mountGlyphPicker(): Promise<void> {
+  if (picker) return
+  const host = $<HTMLElement>('pickerHost')
+  host.textContent = 'loading the full palette…'
+  const [full, initial] = await Promise.all([loadFullPalette(), defaultSelection()])
+  host.textContent = ''
+  picker = mountPicker(host, {
+    profile: full,
+    initial: (glyph) => initial.has(glyph),
+    defaultSelection: initial,
+    onChange: (glyphs) => {
+      window.clearTimeout(paletteTimer)
+      paletteTimer = window.setTimeout(() => {
+        // A selection identical to the default stays null, so the common case
+        // renders straight off the curated profile with no subsetting.
+        setSelection(glyphs.length === initial.size && glyphs.every((g) => initial.has(g)) ? null : glyphs)
+        void rebuild()
+      }, 140)
+    },
+  })
+}
+
+const emojiToggle = $<HTMLElement>('emojiToggle')
+const heroStage = $<HTMLElement>('heroStage')
+const heroBusyLabel = $<HTMLElement>('heroBusyLabel')
+
+els.emojiMode.addEventListener('change', () => {
+  els.hystLab.hidden = !emojiOn()
+  syncPanel()
+  // Flipping the switch fetches and decodes a palette and rebuilds the
+  // renderer, which is visibly not instant on a first flip. The toggle owns the
+  // wait so the pointer never sits on a control that looks idle.
+  emojiToggle.dataset.busy = '1'
+  els.emojiMode.disabled = true
+  out.classList.add('swapping')
+  heroStage.dataset.busy = '1'
+  heroBusyLabel.textContent = emojiOn() && !paletteReady() ? 'loading emoji palette…' : 'switching matcher…'
+  void (async () => {
+    await rebuild()
+    // The full 1301-glyph sheet is 6.8 MB, so it is fetched after the first
+    // emoji frame is already on screen rather than blocking it.
+    if (emojiOn()) await mountGlyphPicker()
+  })()
+    .catch((err: unknown) => {
+      stats.textContent = `emoji mode failed: ${err instanceof Error ? err.message : String(err)}`
+    })
+    .finally(() => {
+      delete emojiToggle.dataset.busy
+      delete heroStage.dataset.busy
+      els.emojiMode.disabled = false
+      // rebuild() swaps in a fresh canvas element, so the class has to be
+      // cleared on whichever one is current, not the one captured above.
+      out.classList.remove('swapping')
+    })
+})
+
+const optionInputs = [els.columns, els.color, els.alpha, els.flat, els.fg, els.bg, els.fit, els.temporal, els.adaptive, els.hyst]
 for (const input of optionInputs) {
   input.addEventListener(input instanceof HTMLSelectElement ? 'change' : 'input', () => {
     els.columnsOut.value = els.columns.value
     els.flatOut.value = els.flat.value
+    els.hystOut.value = Number(els.hyst.value).toFixed(2)
     renderer?.setOptions(matchOptions())
     if (renderer && active && !(active.live && els.animate.checked && outputVisible)) renderer.render()
     syncPanel()
@@ -495,6 +652,14 @@ $('exportComponent').addEventListener('click', () => {
   exportDialog ??= new ExportComponentDialog(getExportState)
   exportDialog.show()
 })
+
+// The handoff lives in the panel too, not only inside the export dialog — it is
+// the one export most people want and the least likely to be found behind a
+// modal. It follows the dialog's framework pick when there is one, so the two
+// can never hand an agent different snippets.
+$('agentRow').append(
+  createAgentCopyButton(() => buildAgentBrief(exportDialog?.currentFramework() ?? 'react', getExportState())),
+)
 
 /** Success/error feedback that keeps the button's icon: swap only the label + pulse. */
 function flash(btn: HTMLButtonElement, text: string, ok = true): void {

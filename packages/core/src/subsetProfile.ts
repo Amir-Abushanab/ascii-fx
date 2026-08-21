@@ -12,6 +12,10 @@ import { idiv } from './util.js'
  * over the parent charset), so shape6 matching falls back to the brute-force
  * 6D path — cheap at subset sizes.
  *
+ * Chromatic samples and the RGBA atlas are carried too, which is what makes a
+ * palette narrowable at runtime: chromatic-v1 searches every glyph it is given,
+ * so removing glyphs is the only way to stop it reaching for them.
+ *
  * Like the compiler: duplicate code points are an error, and so is any
  * character the profile has no glyph for.
  */
@@ -41,16 +45,18 @@ export function subsetProfile(profile: AsciiProfile, characters: string | readon
   })
 
   const n = oldIds.length
-  const { structural, atlas, shape6 } = profile
+  const { structural, atlas, shape6, chromatic } = profile
   const masksLo = new Uint32Array(n)
   const masksHi = new Uint32Array(n)
   const coverage = new Uint16Array(n)
   const vectors6 = shape6 ? new Float32Array(n * 6) : undefined
+  const samples = chromatic ? new Uint8Array(n * 256) : undefined
   oldIds.forEach((oldId, i) => {
     masksLo[i] = structural.masksLo[oldId]
     masksHi[i] = structural.masksHi[oldId]
     coverage[i] = structural.coverage[oldId]
     if (vectors6 && shape6) vectors6.set(shape6.vectors6.subarray(oldId * 6, oldId * 6 + 6), i * 6)
+    if (samples && chromatic) samples.set(chromatic.samples.subarray(oldId * 256, oldId * 256 + 256), i * 256)
   })
 
   // Repack the atlas with the compiler's layout rule (§13): columns from the
@@ -63,6 +69,10 @@ export function subsetProfile(profile: AsciiProfile, characters: string | readon
   const width = columns * pitchW
   const height = rows * pitchH
   const data = new Uint8Array(width * height)
+  // The colour plane is repacked alongside the coverage plane, in lockstep: a
+  // chromatic subset whose atlas and descriptors disagreed would match on one
+  // glyph and draw another.
+  const rgba = atlas.rgba ? new Uint8Array(width * height * 4) : undefined
   oldIds.forEach((oldId, i) => {
     const sx = (oldId % atlas.columns) * pitchW
     const sy = idiv(oldId, atlas.columns) * pitchH
@@ -71,6 +81,10 @@ export function subsetProfile(profile: AsciiProfile, characters: string | readon
     for (let y = 0; y < pitchH; y++) {
       const src = (sy + y) * atlas.width + sx
       data.set(atlas.data.subarray(src, src + pitchW), (dy + y) * width + dx)
+      if (rgba && atlas.rgba) {
+        const src4 = ((sy + y) * atlas.width + sx) * 4
+        rgba.set(atlas.rgba.subarray(src4, src4 + pitchW * 4), ((dy + y) * width + dx) * 4)
+      }
     }
   })
 
@@ -103,8 +117,10 @@ export function subsetProfile(profile: AsciiProfile, characters: string | readon
       padding: atlas.padding,
       columns,
       data,
+      ...(rgba ? { rgba } : {}),
     },
     structural: { masksLo, masksHi, coverage },
+    ...(samples ? { chromatic: { samples } } : {}),
     ...(vectors6 ? { shape6: { vectors6 } } : {}),
     metadata: { ...profile.metadata, id: `${profile.id}#subset${n}`, charset: 'custom' },
   }

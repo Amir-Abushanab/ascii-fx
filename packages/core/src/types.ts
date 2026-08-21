@@ -5,10 +5,19 @@ export interface RawImage {
   data: Uint8Array | Uint8ClampedArray
 }
 
-export type ColorMode = 'mono' | 'foreground' | 'full'
+/**
+ * 'glyph' is chromatic-v1's mode: the glyph carries its own colour, so there is
+ * no foreground or background to fit and none is emitted.
+ */
+export type ColorMode = 'mono' | 'foreground' | 'full' | 'glyph'
 export type AlphaMode = 'ignore' | 'mask'
-/** 'structural' is exact and the default; the others are explicit opt-ins (spec §5, §11). */
-export type MatcherKind = 'structural' | 'shape6' | 'ramp'
+/**
+ * 'structural' is exact and the default; the others are explicit opt-ins
+ * (spec §5, §11). 'chromatic' is a different algorithm rather than an
+ * approximation of structural — it matches baked glyph colour instead of
+ * fitting colour to a binary mask, and needs a profile carrying `chromatic`.
+ */
+export type MatcherKind = 'structural' | 'shape6' | 'ramp' | 'chromatic'
 export type RGB = readonly [number, number, number]
 
 export interface GlyphMetrics {
@@ -34,6 +43,13 @@ export interface GlyphAtlas {
   columns: number
   /** R8 coverage bytes, width · height. */
   data: Uint8Array
+  /**
+   * Straight-alpha RGBA bytes, width · height · 4, in the same tile layout as
+   * `data`. Present only in chromatic profiles — a coverage plane cannot carry
+   * a glyph's own colour, and `data` stays alongside it so a chromatic profile
+   * still works with the mask-fitting matchers.
+   */
+  rgba?: Uint8Array
 }
 
 export interface StructuralGlyphData {
@@ -41,6 +57,15 @@ export interface StructuralGlyphData {
   masksHi: Uint32Array
   /** 0..65535 = coverage 1.0 */
   coverage: Uint16Array
+}
+
+export interface ChromaticGlyphData {
+  /**
+   * 8×8 straight-alpha RGBA per glyph, row-major, glyphCount × 256 bytes.
+   * Straight rather than premultiplied so the backdrop composite stays exact
+   * in integers at match time (ALGORITHM.md chromatic-v1 §C3).
+   */
+  samples: Uint8Array
 }
 
 export interface Shape6GlyphData {
@@ -69,6 +94,8 @@ export interface AsciiProfile {
   metrics: GlyphMetrics
   atlas: GlyphAtlas
   structural: StructuralGlyphData
+  /** Present only in profiles compiled for chromatic-v1. */
+  chromatic?: ChromaticGlyphData
   shape6?: Shape6GlyphData
   metadata: ProfileMetadata
 }
@@ -88,6 +115,20 @@ export interface MatchOptions {
   background?: RGB
   /** Integer luma units; default 15. */
   flatThreshold?: number
+  /**
+   * chromatic-v1 only: the previous frame's glyph ids on the same grid. Enables
+   * hysteresis; ignored without it. Must come from the *same* source — passing
+   * ids from a different one ghosts it into the result, since hysteresis is
+   * biased toward the incumbent and does not self-correct.
+   */
+  previous?: Uint16Array
+  /**
+   * chromatic-v1 only: keep the previous glyph unless a challenger beats it by
+   * this fraction of its error. Default 0 (off). Emoji differ far more from one
+   * another than text glyphs do, so a near-tie that flips frame to frame reads
+   * as a strobe rather than as texture.
+   */
+  hysteresis?: number
 }
 
 export const FLAG_FLAT = 1

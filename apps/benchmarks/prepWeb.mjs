@@ -7,7 +7,13 @@
 import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildShape6Profile, HARNESS_FILES, HARNESS_PACKAGE_DISTS, repoRoot } from './harnessAssets.mjs'
+import {
+  buildShape6Profile,
+  HARNESS_FILES,
+  HARNESS_PACKAGE_DISTS,
+  OPTIONAL_HARNESS_FILES,
+  repoRoot,
+} from './harnessAssets.mjs'
 
 const target = process.argv[2]
   ? join(process.cwd(), process.argv[2])
@@ -17,9 +23,11 @@ const missing = []
 
 mkdirSync(target, { recursive: true })
 
+const skipped = []
 for (const [name, source] of Object.entries(HARNESS_FILES)) {
   if (!existsSync(source)) {
-    missing.push(`${name} (expected at ${source})`)
+    if (OPTIONAL_HARNESS_FILES.has(name)) skipped.push(name)
+    else missing.push(`${name} (expected at ${source})`)
     continue
   }
   const dest = join(target, name)
@@ -36,6 +44,13 @@ for (const pkg of HARNESS_PACKAGE_DISTS) {
     continue
   }
   cpSync(source, join(target, 'packages', pkg, 'dist'), { recursive: true })
+}
+
+if (skipped.length > 0) {
+  console.warn(
+    `[bench] optional asset(s) absent, those rows will skip: ${skipped.join(', ')} ` +
+      '(run `pnpm --filter @ascii-fx-internal/docs prep:emoji` for the emoji comparison)',
+  )
 }
 
 if (missing.length > 0) {

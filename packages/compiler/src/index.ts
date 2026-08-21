@@ -26,3 +26,11 @@ export {
   type AsciiFrameConfig,
   type AsciiProfileConfig,
 } from './config.js'
+export {
+  buildChromaticProfile,
+  CHROMATIC_CELL,
+  CHROMATIC_RASTER_VERSION,
+  type BuildChromaticOptions,
+  type BuiltChromaticProfile,
+  type ChromaticGlyphSource,
+} from './chromatic.js'

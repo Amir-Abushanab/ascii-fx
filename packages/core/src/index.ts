@@ -3,6 +3,7 @@ export type {
   AsciiProfile,
   AsciiSupport,
   CellInfo,
+  ChromaticGlyphData,
   ColorMode,
   MatcherKind,
   GlyphAtlas,
@@ -18,6 +19,7 @@ export { FLAG_FLAT, FLAG_TRANSPARENT } from './types.js'
 
 export { AsciiFrame, type AsciiFrameInit } from './frame.js'
 export { ALGORITHM_VERSION, blankGlyphId, matchFrame } from './match.js'
+export { CHROMATIC_VERSION, matchFrameChromatic } from './chromatic.js'
 export { deriveGrid, type Grid } from './grid.js'
 export {
   computeShape6,

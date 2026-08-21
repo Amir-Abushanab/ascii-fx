@@ -11,8 +11,10 @@ import {
   Gauge,
   Grid3x3,
   Layers,
+  Package,
   Palette,
   Scale,
+  Scissors,
   Search,
   Shrink,
   Sparkles,
@@ -23,6 +25,37 @@ import {
   type IconNode,
 } from 'lucide'
 
+// Brand marks for the usage sections. lucide has no logos, so these are hand
+// authored in the same [tag, attrs] shape its icons use, which means they go
+// through the identical rasterise-then-match path — a React logo drawn by the
+// matcher this page documents, not an <img>.
+const ReactMark: IconNode = [
+  ['circle', { cx: 12, cy: 12, r: 2.2, fill: '#fff', stroke: 'none' }],
+  ['ellipse', { cx: 12, cy: 12, rx: 10.6, ry: 4.1 }],
+  ['ellipse', { cx: 12, cy: 12, rx: 10.6, ry: 4.1, transform: 'rotate(60 12 12)' }],
+  ['ellipse', { cx: 12, cy: 12, rx: 10.6, ry: 4.1, transform: 'rotate(120 12 12)' }],
+]
+
+// Knocked out of a filled tile rather than stroked on an empty one: an outline
+// with hairline letters reduces to a faint box at 8x4, where a solid field with
+// dark letters keeps a difference the matcher can actually see.
+const TypeScriptMark: IconNode = [
+  ['rect', { x: 1.5, y: 1.5, width: 21, height: 21, rx: 3, fill: '#fff', stroke: 'none' }],
+  ['rect', { x: 3.6, y: 9.4, width: 9.2, height: 3.4, fill: '#000', stroke: 'none' }],
+  ['rect', { x: 6.5, y: 9.4, width: 3.4, height: 10.8, fill: '#000', stroke: 'none' }],
+  ['path', {
+    d: 'M20.4 11.2c-1.6-1.2-4.6-.9-4.6 1s4.6 1.3 4.6 3.7-3 2.3-4.7 1.1',
+    stroke: '#000',
+    'stroke-width': 2.8,
+    fill: 'none',
+  }],
+]
+
+const ThreeMark: IconNode = [
+  ['path', { d: 'M12 2.6 21.6 21.2 2.4 21.2Z' }],
+  ['path', { d: 'M12 2.6 15.4 21.2' }],
+]
+
 const COLS = 8
 const ROWS = 4
 /** Matcher samples per cell axis (ALGORITHM.md §5). */
@@ -31,23 +64,38 @@ const W = COLS * SAMPLES
 const H = ROWS * SAMPLES
 
 // Matched against the heading text rather than its position, so reordering a
-// section cannot silently shuffle the icons.
-const ICONS: [RegExp, IconNode][] = [
-  [/what is this/i, Sparkles],
-  [/pipeline/i, Workflow],
-  [/compile the font/i, Type],
-  [/the grid/i, Grid3x3],
-  [/shrink/i, Shrink],
-  [/classify/i, Layers],
-  [/source mask/i, SquareDashed],
-  [/shortlist/i, Search],
-  [/fit colors|winner/i, Palette],
-  [/draw it/i, Brush],
-  [/bit for bit/i, Scale],
-  [/going faster/i, Gauge],
-  [/cheaper matchers/i, TrendingDown],
-  [/performance/i, Activity],
-  [/using it/i, Code],
+// section cannot silently shuffle the icons. The third column is what the
+// heading wears in Emoji mode: a whole emoji says the same thing in one cell
+// that the 8x4 ASCII block says in thirty-two, and re-matching a pictogram into
+// emoji would just produce a coloured smudge at this size.
+const ICONS: [RegExp, IconNode, string][] = [
+  [/what is this/i, Sparkles, '✨'],
+  [/pipeline/i, Workflow, '🔧'],
+  [/compile the font/i, Type, '🔤'],
+  [/the grid/i, Grid3x3, '🔳'],
+  [/shrink/i, Shrink, '🗜️'],
+  [/classify/i, Layers, '🗂️'],
+  [/source mask/i, SquareDashed, '🎭'],
+  [/shortlist/i, Search, '🔍'],
+  [/fit colors|winner/i, Palette, '🎨'],
+  [/draw it/i, Brush, '🖌️'],
+  [/bit for bit/i, Scale, '⚖️'],
+  [/going faster/i, Gauge, '🚀'],
+  [/cheaper matchers/i, TrendingDown, '📉'],
+  [/performance/i, Activity, '📈'],
+  [/using it/i, Code, '💻'],
+]
+
+// Sub-sections, matched the same way. The third column is the Emoji-mode face.
+const SUB_ICONS: [RegExp, IconNode, string][] = [
+  [/^react$/i, ReactMark, '⚛️'],
+  [/three\.?js/i, ThreeMark, '🔺'],
+  // The framework-agnostic entry point, so the language mark rather than a logo.
+  [/anything else/i, TypeScriptMark, '📘'],
+  // A profile is compiled up front and shipped as a small binary.
+  [/ahead-of-time/i, Package, '📦'],
+  // Subsetting cuts glyphs out of a profile that already exists.
+  [/narrowing/i, Scissors, '✂️'],
 ]
 
 /** Lucide ships icons as node trees; turn one into a standalone SVG document. */
@@ -94,15 +142,17 @@ const rasters = new Map<IconNode, RawImage>()
  * Put an icon on every section heading. Safe to call again when the profile
  * changes: rasters are cached, so only the (cheap) matching re-runs.
  */
-export async function mountSectionIcons(profile: AsciiProfile): Promise<void> {
-  for (const heading of document.querySelectorAll<HTMLElement>('#explainer h2')) {
+export async function mountSectionIcons(profile: AsciiProfile, emojiMode = false): Promise<void> {
+  for (const heading of document.querySelectorAll<HTMLElement>('#explainer h2, #explainer h3')) {
     const existing = heading.querySelector<HTMLElement>('.hicon')
     // Read the heading without its own icon, or the glyphs would match the regex.
-    const label = existing ? (heading.lastChild?.textContent ?? '') : (heading.textContent ?? '')
-    const node = ICONS.find(([pattern]) => pattern.test(label))?.[1]
-    if (!node) continue
+    const label = (existing ? (heading.lastChild?.textContent ?? '') : (heading.textContent ?? '')).trim()
+    const table = heading.tagName === 'H3' ? SUB_ICONS : ICONS
+    const entry = table.find(([pattern]) => pattern.test(label))
+    if (!entry) continue
+    const [, node, emoji] = entry
 
-    if (!rasters.has(node)) rasters.set(node, await rasterise(node))
+    if (!emojiMode && !rasters.has(node)) rasters.set(node, await rasterise(node))
 
     const el = existing ?? document.createElement('span')
     if (!existing) {
@@ -111,11 +161,9 @@ export async function mountSectionIcons(profile: AsciiProfile): Promise<void> {
       el.setAttribute('aria-hidden', 'true')
       heading.prepend(el)
     }
-    el.textContent = matchFrame(rasters.get(node)!, {
-      profile,
-      columns: COLS,
-      rows: ROWS,
-      color: 'mono',
-    }).toText()
+    el.classList.toggle('hicon-emoji', emojiMode)
+    el.textContent = emojiMode
+      ? emoji
+      : matchFrame(rasters.get(node)!, { profile, columns: COLS, rows: ROWS, color: 'mono' }).toText()
   }
 }

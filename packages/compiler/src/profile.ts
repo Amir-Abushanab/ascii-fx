@@ -37,7 +37,7 @@ export interface BuiltProfile {
   binary: Uint8Array
 }
 
-const sha256 = (data: Uint8Array | string): string => createHash('sha256').update(data).digest('hex')
+export const sha256 = (data: Uint8Array | string): string => createHash('sha256').update(data).digest('hex')
 
 /** Glyph-side shape6 vector (ALGORITHM.md §18): float64 means over mask-cell lumas. */
 function glyphShape6(lumas: Float64Array, out: Float32Array, at: number): void {

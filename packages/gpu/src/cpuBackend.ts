@@ -40,6 +40,12 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private source?: RenderSource
   private sourceLive = false
   private lastFrame?: AsciiFrame
+  /**
+   * Whether lastFrame belongs to the current source and options. Hysteresis is
+   * biased toward the incumbent and does not self-correct, so feeding it a
+   * frame from anything else ghosts that into the result (§C5).
+   */
+  private hysteresisPrimed = false
   private matchDirty = true
   private running = false
   private loopGeneration = 0
@@ -101,11 +107,13 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.source = source
     this.sourceLive = isLiveSource(source)
     this.matchDirty = true
+    this.hysteresisPrimed = false
     this.srcFxFor = undefined
     if (restart) this.start()
   }
 
   setOptions(options: AsciiRendererRuntimeOptions): void {
+    this.hysteresisPrimed = false
     this.opts = { ...this.opts, ...options }
     this.matchDirty = true
   }
@@ -167,15 +175,30 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   private matchOptions(): MatchOptions {
-    return {
+    const base = {
       profile: this.profile,
       columns: this.opts.columns,
       rows: this.opts.rows,
-      color: this.opts.color,
       alpha: this.opts.alpha,
-      foreground: this.opts.foreground,
       background: this.opts.background,
-      flatThreshold: this.opts.flatThreshold,
+    }
+    if (this.opts.matcher !== 'chromatic') {
+      return {
+        ...base,
+        color: this.opts.color,
+        foreground: this.opts.foreground,
+        flatThreshold: this.opts.flatThreshold,
+      }
+    }
+    // chromatic-v1 fits no colour, so foreground/flat have nothing to act on.
+    // Hysteresis needs the previous frame, and only when it describes the same
+    // grid and the same source — see ALGORITHM.md §C5 on discontinuities.
+    const previous =
+      this.hysteresisPrimed && this.lastFrame?.colorMode === 'glyph' ? this.lastFrame.glyphIds : undefined
+    return {
+      ...base,
+      matcher: 'chromatic' as const,
+      ...(previous ? { previous, hysteresis: this.opts.hysteresis } : {}),
     }
   }
 
@@ -209,7 +232,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   /** Render the frame into the native-cell-size composite canvas (cached per frame). */
   private ensureBase(frame: AsciiFrame): void {
     if (frame === this.lastComposited && this.compositeCanvas) return
-    const color = this.opts.color ?? 'mono'
+    const color = frame.colorMode
     const img = compositeFrame(
       frame,
       color === 'foreground'
@@ -492,6 +515,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (this.destroyed || !this.source) return
     if (this.matchDirty || this.sourceLive || !this.lastFrame) {
       this.lastFrame = matchFrame(this.extract(), this.matchOptions())
+      this.hysteresisPrimed = true
       this.matchDirty = false
     }
     this.present(this.lastFrame)
@@ -549,6 +573,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (!this.source) throw new Error('captureFrame() requires a source — call setSource() first.')
     if (this.matchDirty || !this.lastFrame) {
       this.lastFrame = matchFrame(this.extract(), this.matchOptions())
+      this.hysteresisPrimed = true
       this.matchDirty = false
     }
     return this.lastFrame

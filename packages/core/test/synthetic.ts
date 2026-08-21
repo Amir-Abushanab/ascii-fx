@@ -152,3 +152,68 @@ export function randomImage(width: number, height: number, seed: number, withAlp
   }
   return { width, height, data }
 }
+
+export interface ChromaticGlyph {
+  char: string
+  /** Per-sample straight-alpha RGBA; alpha defaults to 255. */
+  at: (i: number, j: number) => [number, number, number, number?]
+}
+
+/** Solid-colour glyph, the simplest thing chromatic-v1 can match against. */
+export function solid(char: string, r: number, g: number, b: number, a = 255): ChromaticGlyph {
+  return { char, at: () => [r, g, b, a] }
+}
+
+/**
+ * Profile carrying both structural and chromatic data. The structural masks are
+ * derived from alpha, which is what a real chromatic compile does — it keeps
+ * blankGlyphId and every structural consumer working on a chromatic profile.
+ */
+export function makeChromaticProfile(glyphs: ChromaticGlyph[]): AsciiProfile {
+  const n = glyphs.length
+  const samples = new Uint8Array(n * 256)
+  const synth: SynthGlyph[] = glyphs.map((g) => {
+    const rows: string[] = []
+    for (let j = 0; j < 8; j++) {
+      let row = ''
+      for (let i = 0; i < 8; i++) {
+        const [, , , a = 255] = g.at(i, j)
+        row += a >= 128 ? '1' : '0'
+      }
+      rows.push(row)
+    }
+    return { char: g.char, rows }
+  })
+  glyphs.forEach((g, gi) => {
+    for (let j = 0; j < 8; j++) {
+      for (let i = 0; i < 8; i++) {
+        const [r, gg, b, a = 255] = g.at(i, j)
+        const p = gi * 256 + (j * 8 + i) * 4
+        samples[p] = r
+        samples[p + 1] = gg
+        samples[p + 2] = b
+        samples[p + 3] = a
+      }
+    }
+  })
+  const base = makeProfile(synth)
+  // The RGBA atlas mirrors the 8x8 descriptors exactly, so a composited cell is
+  // directly comparable with the samples the matcher scored.
+  const { width, pitchWidth, pitchHeight, padding, columns } = base.atlas
+  const rgba = new Uint8Array(width * base.atlas.height * 4)
+  glyphs.forEach((g, gi) => {
+    const tileX = (gi % columns) * pitchWidth + padding
+    const tileY = Math.floor(gi / columns) * pitchHeight + padding
+    for (let j = 0; j < 8; j++) {
+      for (let i = 0; i < 8; i++) {
+        const [r, gg, b, a = 255] = g.at(i, j)
+        const dst = ((tileY + j) * width + tileX + i) * 4
+        rgba[dst] = r
+        rgba[dst + 1] = gg
+        rgba[dst + 2] = b
+        rgba[dst + 3] = a
+      }
+    }
+  })
+  return { ...base, atlas: { ...base.atlas, rgba }, chromatic: { samples } }
+}

@@ -14,7 +14,7 @@ interface Entry {
   id: string
   /** Row label in RESULTS.md — the join key for the measured numbers. */
   results: string
-  logo: 'fx' | 'p5' | 'three' | 'aa' | 'ch'
+  logo: 'fx' | 'tm' | 'three' | 'aa' | 'ch'
   name: string
   detail: string
   shape: boolean
@@ -23,16 +23,16 @@ interface Entry {
 }
 
 const ENTRIES: Entry[] = [
-  { id: 'fx-gpu', results: 'ascii-fx webgpu', logo: 'fx', name: 'ascii-fx · WebGPU', detail: 'exact structural + fitted color', shape: true, color: '#7c9cff', us: true },
-  { id: 'p5', results: 'p5.asciify', logo: 'p5', name: 'p5.asciify 0.10', detail: 'brightness + color · WebGL', shape: false, color: '#ed225d' },
+  { id: 'fx-gpu', results: 'ascii-fx webgpu', logo: 'fx', name: 'ascii-fx · WebGPU', detail: 'exact structural + fitted color', shape: true, color: '#45e845', us: true },
+  { id: 'tm', results: 'textmode.js', logo: 'tm', name: 'textmode.js 0.17', detail: 'brightness + color · WebGL', shape: false, color: '#ed225d' },
   { id: 'three', results: 'three.js AsciiEffect', logo: 'three', name: 'three.js AsciiEffect', detail: 'brightness · DOM', shape: false, color: '#049ef4' },
   { id: 'aa-mono', results: 'aalib.js mono', logo: 'aa', name: 'aalib.js 2.0 · mono', detail: 'brightness · canvas', shape: false, color: '#8a8a99' },
   { id: 'aa-color', results: 'aalib.js colored', logo: 'aa', name: 'aalib.js 2.0 · colored', detail: 'brightness + color · canvas', shape: false, color: '#8a8a99' },
-  { id: 'fx-cpu', results: 'ascii-fx cpu', logo: 'fx', name: 'ascii-fx · CPU fallback', detail: 'same exact output, no GPU needed', shape: true, color: '#54608a', us: true },
+  { id: 'fx-cpu', results: 'ascii-fx cpu', logo: 'fx', name: 'ascii-fx · CPU fallback', detail: 'same exact output, no GPU needed', shape: true, color: '#4d7d59', us: true },
   { id: 'chafa', results: 'chafa-wasm', logo: 'ch', name: 'chafa-wasm 0.3', detail: 'shape-aware blocks · wasm', shape: true, color: '#654ff0' },
 ]
 
-const COMPACT_IDS = ['fx-gpu', 'p5', 'three', 'aa-mono', 'chafa']
+const COMPACT_IDS = ['fx-gpu', 'tm', 'three', 'aa-mono', 'chafa']
 
 const rows = ENTRIES.filter((e) => !compact || COMPACT_IDS.includes(e.id))
   .map((e) => ({ ...e, ...lib(e.results) }))
@@ -45,7 +45,7 @@ const maxFps = Math.max(...rows.map((r) => r.fps))
     <div class="bench-row" data-us={r.us || undefined} role="row">
       <div class="bench-logo" style={`color:${r.color}`} aria-hidden="true">
         {r.logo === 'fx' && <svg viewBox="0 0 20 20"><rect x="1" y="1" width="18" height="18" rx="4" fill="none" stroke="currentColor" stroke-width="1.6" /><text x="10" y="14.2" text-anchor="middle" font-size="9.5" font-weight="700" font-family="Geist Mono, monospace" fill="currentColor">fx</text></svg>}
-        {r.logo === 'p5' && <svg viewBox="0 0 20 20"><g stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="10" y1="2.5" x2="10" y2="17.5" /><line x1="3.5" y1="6.25" x2="16.5" y2="13.75" /><line x1="3.5" y1="13.75" x2="16.5" y2="6.25" /></g></svg>}
+        {r.logo === 'tm' && <svg viewBox="0 0 20 20"><g stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="10" y1="2.5" x2="10" y2="17.5" /><line x1="3.5" y1="6.25" x2="16.5" y2="13.75" /><line x1="3.5" y1="13.75" x2="16.5" y2="6.25" /></g></svg>}
         {r.logo === 'three' && <svg viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2.5 2.5 L17.5 6.8 L6.6 17.5 Z" /><path d="M10 4.65 L12.05 12.15 L4.55 10.0" /></g></svg>}
         {r.logo === 'aa' && <svg viewBox="0 0 20 20"><text x="10" y="14.5" text-anchor="middle" font-size="10" font-weight="700" font-family="Geist Mono, monospace" fill="currentColor">aa</text></svg>}
         {r.logo === 'ch' && <svg viewBox="0 0 20 20"><g fill="currentColor"><rect x="2.4" y="2.4" width="7" height="7" rx="1.2" /><rect x="10.6" y="10.6" width="7" height="7" rx="1.2" /><rect x="10.6" y="2.4" width="7" height="7" rx="1.2" opacity="0.45" /><rect x="2.4" y="10.6" width="7" height="7" rx="1.2" opacity="0.45" /></g></svg>}

@@ -49,10 +49,18 @@ export interface AsciiRendererOptions {
   columns?: number
   rows?: number
   color?: ColorMode
+  /**
+   * Default 'structural'. 'chromatic' needs a profile carrying chromatic glyph
+   * data and ignores `color`/`foreground`, since the glyph carries its own
+   * (ALGORITHM.md §C). The approximate CPU matchers are not offered here.
+   */
+  matcher?: 'structural' | 'chromatic'
   alpha?: AlphaMode
   foreground?: RGB
   background?: RGB
   flatThreshold?: number
+  /** chromatic-v1 only (§C5): keep the previous glyph unless a challenger beats it by this fraction. */
+  hysteresis?: number
   /** How the ASCII grid maps onto the canvas. Default 'contain'. */
   fit?: FitMode
   /** Letterbox/clear color (rgba 0..1). Default opaque black; transparent for 'foreground'. */
@@ -66,9 +74,32 @@ export interface AsciiRendererOptions {
    * grid(). Explicit resolution stays the upper bound.
    */
   adaptiveResolution?: boolean
+  /**
+   * Called when the GPU device is lost and the renderer could not rebuild on a
+   * new one. A device can go at any time — a browser under memory pressure will
+   * drop it, and WebKit does this readily — and once it does, every submit is
+   * silently discarded, so a renderer that ignores it keeps reporting a healthy
+   * frame rate while the canvas shows a stale frame.
+   *
+   * The renderer tries to recover by itself first and only calls this when that
+   * fails. Recovery cannot cross backends: the canvas is bound to its 'webgpu'
+   * context for good, so falling back to the CPU matcher needs a fresh <canvas>
+   * element, which only the caller can swap in. WebGPU backend only.
+   */
+  onDeviceLost?: (info: GPUDeviceLostInfo) => void
+  /**
+   * Called when the GPU reports an error the renderer did not catch — a resource
+   * or dispatch that failed validation at run time. WebGPU never throws for
+   * these, it drops the work, so without a handler the canvas quietly stops
+   * being correct and there is no signal anywhere that anything went wrong.
+   * Defaults to logging. WebGPU backend only.
+   */
+  onError?: (error: GPUError) => void
 }
 
-export type AsciiRendererRuntimeOptions = Partial<Omit<AsciiRendererOptions, 'canvas' | 'profile' | 'backend'>>
+export type AsciiRendererRuntimeOptions = Partial<
+  Omit<AsciiRendererOptions, 'canvas' | 'profile' | 'backend' | 'onDeviceLost' | 'onError'>
+>
 
 export interface AsciiRenderer {
   readonly backend: 'webgpu' | 'cpu'

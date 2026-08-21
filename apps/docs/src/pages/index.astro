@@ -5,7 +5,17 @@
 import { Code } from 'astro:components'
 import BenchChart from '../components/BenchChart.astro'
 import BenchRunner from '../components/BenchRunner.astro'
-import { baseline, cpuReference, crossLibrary, crossLibraryGeneratedAt, lib, matcher, worstRecall } from '../lib/results'
+import {
+  baseline,
+  cpuReference,
+  crossLibrary,
+  crossLibraryGeneratedAt,
+  emojiCrossGeneratedAt,
+  emojiCrossLibrary,
+  lib,
+  matcher,
+  worstRecall,
+} from '../lib/results'
 
 const base = import.meta.env.BASE_URL
 
@@ -38,18 +48,48 @@ interface RowMeta {
 
 const TABLE_META: Record<string, RowMeta> = {
   'baseline (no ascii)': { label: 'baseline · scene only, no ascii', picks: '—', kind: 'none', color: '#565668' },
-  'ascii-fx webgpu': { label: 'ascii-fx · WebGPU', picks: 'shape, exact', kind: 'exact', color: '#7c9cff', us: true, emphasis: true },
+  'ascii-fx webgpu': { label: 'ascii-fx · WebGPU', picks: 'shape, exact', kind: 'exact', color: '#45e845', us: true, emphasis: true },
   'ramp reference mono': { label: 'ramp reference · mono', picks: 'brightness', kind: 'brightness', color: '#565668', marker: '*' },
-  'p5.asciify': { label: 'p5.asciify 0.10 (WebGL)', picks: 'brightness + color', kind: 'brightness', color: '#ed225d' },
+  'textmode.js': { label: 'textmode.js 0.17 (WebGL)', picks: 'brightness + color', kind: 'brightness', color: '#ed225d' },
   'three.js AsciiEffect': { label: 'three.js AsciiEffect (0.185)', picks: 'brightness', kind: 'brightness', color: '#049ef4' },
   'ramp reference color': { label: 'ramp reference · color', picks: 'brightness + color', kind: 'brightness', color: '#565668', marker: '*' },
   'aalib.js mono': { label: 'aalib.js 2.0 · mono', picks: 'brightness', kind: 'brightness', color: '#8a8a99' },
   'aalib.js colored': { label: 'aalib.js 2.0 · colored', picks: 'brightness + color', kind: 'brightness', color: '#8a8a99' },
-  'ascii-fx ramp matcher': { label: 'ascii-fx ramp matcher', picks: 'brightness', kind: 'brightness', color: '#54608a', us: true, marker: '†' },
-  'ascii-fx shape6-lut': { label: 'ascii-fx shape6-lut (Harri-style)', picks: '6-D shape vector', kind: 'shape', color: '#54608a', us: true, marker: '†' },
-  'ascii-fx cpu': { label: 'ascii-fx · CPU fallback', picks: 'shape, exact', kind: 'exact', color: '#54608a', us: true, marker: '†' },
+  'ascii-fx ramp matcher': { label: 'ascii-fx ramp matcher', picks: 'brightness', kind: 'brightness', color: '#4d7d59', us: true, marker: '†' },
+  'ascii-fx shape6-lut': { label: 'ascii-fx shape6-lut (Harri-style)', picks: '6-D shape vector', kind: 'shape', color: '#4d7d59', us: true, marker: '†' },
+  'ascii-fx cpu': { label: 'ascii-fx · CPU fallback', picks: 'shape, exact', kind: 'exact', color: '#4d7d59', us: true, marker: '†' },
   'chafa-wasm': { label: 'chafa-wasm 0.3', picks: 'shape-aware blocks', kind: 'shape', color: '#654ff0' },
 }
+
+interface EmojiRowMeta {
+  label: string
+  picks: string
+  kind: 'exact' | 'brightness'
+  us?: boolean
+  emphasis?: boolean
+}
+
+const EMOJI_TABLE_META: Record<string, EmojiRowMeta> = {
+  'ascii-fx emoji webgpu': { label: 'ascii-fx · WebGPU', picks: 'shape + baked colour', kind: 'exact', us: true, emphasis: true },
+  'mean-color reference (cube LUT)': { label: 'mean-colour reference · cube LUT', picks: 'mean colour', kind: 'brightness' },
+  'mean-color reference (scan)': { label: 'mean-colour reference · linear scan', picks: 'mean colour', kind: 'brightness' },
+  'ascii-fx emoji cpu': { label: 'ascii-fx · CPU fallback', picks: 'shape + baked colour', kind: 'exact', us: true },
+}
+
+const emojiRows = (emojiCrossLibrary ?? [])
+  .map((r) => {
+    const meta = EMOJI_TABLE_META[r.name]
+    if (!meta) {
+      throw new Error(
+        `index.astro has no presentation entry for the emoji benchmark row "${r.name}". ` +
+          `Add it to EMOJI_TABLE_META (or drop the row from the harness).`,
+      )
+    }
+    return { ...r, ...meta }
+  })
+  .sort((a, b) => a.p50 - b.p50)
+
+const emojiMeasuredOn = emojiCrossGeneratedAt ? new Date(emojiCrossGeneratedAt).toISOString().slice(0, 10) : null
 
 const rows = crossLibrary
   .map((r) => {
@@ -86,7 +126,7 @@ const webgpu = lib('ascii-fx webgpu')
 const APPROX = [
   { results: 'shape6 + LUT', quality: `small error deltas in full color; structural recall collapses on dense texture (worst corpus case ${worstRecall('shape6-lut').recall}%)` },
   { results: 'shape6 brute', quality: 'similar; no 512KiB LUT payload' },
-  { results: 'ramp', quality: 'brightness only — an effect, not a fidelity mode' },
+  { results: 'ramp', quality: 'brightness only. An effect, not a fidelity mode' },
 ].map((a) => ({ ...a, ...matcher(a.results) }))
 
 const measuredOn = new Date(crossLibraryGeneratedAt).toISOString().slice(0, 10)
@@ -137,7 +177,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ASCII FX — structural ASCII rendering for the web</title>
+    <title>ASCII FX · structural ASCII rendering for the web</title>
     <meta name="description" content="High-fidelity structural ASCII rendering for the web." />
     <link rel="icon" href={base + 'favicon.svg'} type="image/svg+xml" />
     <style is:global set:html={fontFace}></style>
@@ -151,9 +191,13 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         --border: #23232f;
         --text: #d6d6de;
         --muted: #8a8a99;
-        --accent: #7c9cff;
+        --accent: #45e845;
         --accent2: #2fa869;
         --code-bg: #14141d;
+        /* Inherited, so this tints every native control at once — checkboxes and
+           range sliders alike. Set per-element it is easy to miss one, which is
+           how the sliders stayed browser-blue. */
+        accent-color: var(--accent);
       }
       body {
         margin: 0;
@@ -201,7 +245,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         max-width: 100%;
       }
       legend {
-        color: #7c9cff;
+        color: #45e845;
         padding: 0 6px;
         font-size: 0.78rem;
         letter-spacing: 0.06em;
@@ -286,6 +330,14 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         border-radius: 6px;
         padding: 3px 7px;
       }
+      /* One ring for every control. The browser default is blue, which passed
+         unnoticed against the old periwinkle accent and does not against this
+         one. :where() keeps specificity at zero so the component-level focus
+         styles further down still win. */
+      :where(a, button, select, summary, input, [tabindex]):focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
       input[type='range'] {
         width: 90px;
         max-width: 100%;
@@ -295,9 +347,6 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         width: 34px;
         height: 24px;
         padding: 1px;
-      }
-      input[type='checkbox'] {
-        accent-color: #7c9cff;
       }
       input:disabled,
       select:disabled {
@@ -325,11 +374,11 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         gap: 6px;
       }
       button:hover {
-        border-color: #7c9cff;
+        border-color: #45e845;
       }
       button.flash-ok {
-        border-color: #4ade80 !important;
-        color: #4ade80;
+        border-color: var(--accent) !important;
+        color: var(--accent);
         animation: pop 0.3s ease;
       }
       button.flash-err {
@@ -351,8 +400,8 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         }
       }
       button.primary {
-        background: #7c9cff;
-        border-color: #7c9cff;
+        background: #45e845;
+        border-color: #45e845;
         color: #0b0b0f;
         font-weight: 600;
       }
@@ -369,8 +418,15 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         height: 1px;
         opacity: 0;
       }
-      #out {
+      /* The canvas is replaced wholesale on a matcher change, so the overlay is
+         a sibling inside a stable stage rather than a child of the canvas. */
+      .hero-stage {
+        position: relative;
         width: min(1024px, 100%);
+        display: flex;
+      }
+      #out {
+        width: 100%;
         aspect-ratio: 16 / 9;
         border: 1px solid #1d1d28;
         border-radius: 8px;
@@ -383,7 +439,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         max-width: 1024px;
       }
       #stats .fps-good {
-        color: #4ade80;
+        color: var(--accent);
       }
       #stats .fps-ok {
         color: #facc15;
@@ -402,10 +458,18 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
          on the heading's own cap height. */
       /* Heading icon: an 8×4 block of glyphs, so the heading becomes a row with
          the pictogram beside its text rather than a taller line of type. */
-      #explainer h2:has(.hicon) {
+      #explainer h2:has(.hicon),
+      #explainer h3:has(.hicon) {
         display: flex;
         align-items: center;
         gap: 0.55em;
+      }
+      #explainer h3 .hicon { font-size: 0.62em; }
+      #explainer h3 .hicon.hicon-emoji { font-size: 1em; }
+      .hicon.hicon-emoji {
+        font-size: 0.85em;
+        line-height: 1;
+        opacity: 1;
       }
       .hicon {
         white-space: pre;
@@ -414,12 +478,12 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
            1.2 line-height to come out square over 4 rows. */
         line-height: 1.2;
         letter-spacing: 0;
-        color: #7c9cff;
+        color: #45e845;
         opacity: 0.95;
         flex: 0 0 auto;
       }
       #explainer h2 {
-        color: #7c9cff;
+        color: #45e845;
         font-size: 1rem;
         letter-spacing: 0.05em;
         text-transform: uppercase;
@@ -480,14 +544,6 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       #explainer .lead {
         color: var(--muted);
         max-width: 46rem;
-      }
-      #explainer .note {
-        border-left: 3px solid var(--accent2);
-        background: var(--panel);
-        border-radius: 0 8px 8px 0;
-        padding: 0.7rem 1rem;
-        color: var(--muted);
-        font-size: 0.9rem;
       }
       #explainer table {
         border-collapse: collapse;
@@ -644,7 +700,32 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         color: #6b6b7d;
         font-size: 0.8rem;
         line-height: 1.7;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.6rem 1.5rem;
       }
+      body > footer p { margin: 0; flex: 1 1 26rem; }
+      .ps-link {
+        color: #8a8a99;
+        text-decoration: none;
+        white-space: nowrap;
+        transition: color 0.15s;
+      }
+      .ps-link:hover { color: #d6d6de; }
+      .ps-mark {
+        display: inline-block;
+        height: 1.32em;
+        width: auto;
+        margin-right: 0.05em;
+        vertical-align: baseline;
+        /* The mark ships cream, which is brighter than this footer's text, so
+           it is dimmed to sit level with the letters it stands in for. */
+        opacity: 0.72;
+        transition: opacity 0.15s;
+      }
+      .ps-link:hover .ps-mark { opacity: 1; }
 
       /* Wide tables scroll in their own box rather than widening the page. */
       #explainer .table-scroll {
@@ -708,7 +789,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         max-width: 100%;
       }
       .wtitle {
-        color: #7c9cff;
+        color: #45e845;
         font-size: 11px;
         letter-spacing: 0.05em;
         text-transform: uppercase;
@@ -789,7 +870,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         border: 1px solid transparent;
       }
       .cand.win {
-        color: #4ade80;
+        color: var(--accent);
         border-color: #274233;
         background: #11181299;
       }
@@ -887,13 +968,252 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         image-rendering: pixelated;
         margin-bottom: 10px;
       }
+      /* ————— Emoji mode toggle ————— */
+      .emoji-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+        user-select: none;
+        font-size: 13px;
+        color: var(--muted);
+        padding: 5px 13px 5px 6px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #0e0e15;
+        align-self: flex-start;
+        transition: color 0.2s, border-color 0.2s;
+      }
+      .emoji-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+      .emoji-toggle .track {
+        position: relative;
+        width: 46px;
+        height: 26px;
+        border-radius: 999px;
+        background: #1b1c24;
+        border: 1px solid var(--border);
+        flex: none;
+        transition: background 0.3s ease, border-color 0.3s ease;
+      }
+      /* The knob is sized to hold an emoji rather than to be a dot: a 15px
+         circle clipped the glyph, because an emoji's ink fills more of its em
+         box than a text glyph's does. */
+      .emoji-toggle .knob {
+        position: absolute;
+        top: 50%;
+        left: 3px;
+        width: 20px;
+        height: 20px;
+        margin-top: -10px;
+        border-radius: 50%;
+        background: #565668;
+        display: grid;
+        place-items: center;
+        overflow: visible;
+        transition: transform 0.34s cubic-bezier(0.34, 1.32, 0.64, 1), background 0.3s ease;
+      }
+      .emoji-toggle .knob::after {
+        content: '';
+        font-size: 15px;
+        line-height: 1;
+        opacity: 0;
+        transform: scale(0.4) rotate(-45deg);
+        transition: opacity 0.22s ease, transform 0.34s cubic-bezier(0.34, 1.5, 0.64, 1);
+      }
+      .emoji-toggle:hover { color: var(--text); border-color: #33344a; }
+      .emoji-toggle input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+      .emoji-toggle input:checked ~ .emoji-label { color: var(--text); }
+      .emoji-toggle input:checked + .track {
+        /* border-box for BOTH origin and clip. The default is origin
+           padding-box + clip border-box, which sizes the gradient to the
+           padding box but paints it across the border box — and since gradients
+           repeat, the 1px left over on each side shows the wrapped far end of
+           the ramp, putting orange on the purple edge. */
+        background: linear-gradient(90deg, #45e845, #ff4d9d 55%, #ff8a3d) border-box;
+        border-color: transparent;
+      }
+      .emoji-toggle input:checked + .track .knob { transform: translateX(20px); background: #fff; }
+      /* The knob wears an emoji once it is on, and the chip picks up the
+         gradient — the control should look like what it switches to. */
+      .emoji-toggle input:checked + .track .knob::after {
+        content: '\1F604';
+        opacity: 1;
+        transform: scale(1) rotate(0deg);
+      }
+      body:has(#emojiMode:checked) .emoji-toggle {
+        border-color: transparent;
+        background:
+          linear-gradient(#0e0e15, #0e0e15) padding-box,
+          linear-gradient(90deg, #45e845, #ff4d9d 55%, #ff8a3d) border-box;
+        border: 1px solid transparent;
+      }
+
+      /* Loading: the first flip fetches and decodes a palette, which is not
+         instant, so the knob becomes the spinner rather than adding a second
+         thing to look at. */
+      .emoji-toggle[data-busy] { cursor: progress; }
+      .emoji-toggle[data-busy] .knob {
+        background: transparent;
+        border: 2px solid rgba(255, 255, 255, 0.28);
+        border-top-color: #fff;
+        animation: emojiSpin 0.7s linear infinite;
+      }
+      .emoji-toggle[data-busy] .knob::after { opacity: 0; }
+      @keyframes emojiSpin { to { transform: translateX(var(--knob-x, 0)) rotate(360deg); } }
+      .emoji-toggle[data-busy] input:checked + .track .knob { --knob-x: 20px; }
+
+      /* The canvas is replaced wholesale on a matcher change, so it fades
+         rather than cutting between two unrelated images. */
+      #out { transition: opacity 0.22s ease; }
+      #out.swapping { opacity: 0.15; }
+
+      .hero-busy {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      .hero-stage[data-busy] .hero-busy { opacity: 1; }
+      /* A soft scrim so the label stays readable over whatever the dimmed
+         canvas happens to be showing underneath. */
+      .hero-busy::before {
+        content: '';
+        position: absolute;
+        width: 260px;
+        height: 260px;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, rgba(11, 11, 15, 0.94), rgba(11, 11, 15, 0));
+      }
+      .hero-busy-label {
+        position: relative;
+        color: var(--text);
+        font-size: 12px;
+      }
+      .hero-ring {
+        position: relative;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        /* Same gradient as the toggle, so the wait reads as the same action. */
+        background: conic-gradient(from 0deg, #45e845, #ff4d9d 35%, #ff8a3d 65%, rgba(255, 138, 61, 0) 78%);
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+        mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+        animation: heroSpin 0.8s linear infinite;
+      }
+      @keyframes heroSpin { to { transform: rotate(360deg); } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .emoji-toggle .track,
+        .emoji-toggle .knob,
+        .emoji-toggle .knob::after,
+        .hero-busy,
+        #out { transition: none; }
+        .emoji-toggle[data-busy] .knob,
+        .hero-ring { animation-duration: 1.6s; }
+      }
+
+      /* ————— Glyph palette (emoji mode only) ————— */
+      #paletteBox { display: none; }
+      body:has(#emojiMode:checked) #paletteBox { display: block; }
+      .glyph-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 9px; }
+      .glyph-actions button { font-size: 12px; padding: 4px 9px; }
+      .glyph-count { font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; margin-left: auto; }
+      .glyph-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, 34px);
+        justify-content: space-between;
+        gap: 4px;
+        max-height: 232px;
+        overflow-y: auto;
+        /* The pointer paints a selection across cells, so the browser must not
+           claim the gesture for scrolling or text selection first. */
+        touch-action: none;
+        user-select: none;
+      }
+      .glyph-cell {
+        padding: 0;
+        aspect-ratio: 1;
+        display: grid;
+        place-items: center;
+        background: #0e0e15;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        opacity: 0.26;
+        filter: grayscale(1);
+        transition: opacity 0.1s, filter 0.1s;
+      }
+      .glyph-cell.on { opacity: 1; filter: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+      .glyph-art { width: 28px; height: 28px; background-repeat: no-repeat; pointer-events: none; }
+
+      /* A full-width flex row, so the handoff sits under the export formats
+         rather than reading as a fifth one. */
+      .agent-row {
+        flex: 1 0 100%;
+        display: flex;
+        margin-top: 2px;
+        padding-top: 9px;
+        border-top: 1px solid #1d1d28;
+      }
+      .agent-row .agent-copy { width: 100%; justify-content: center; }
+      .palette-note { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 9px 0 0; max-width: 60ch; }
+      /* The two comparison tables measure different objectives on different
+         grids, so only the one matching the current mode is shown — side by
+         side they invite a comparison that does not hold. */
+      #emojiBench { display: none; }
+      body:has(#emojiMode:checked) #emojiBench { display: block; }
+      body:has(#emojiMode:checked) #asciiBench { display: none; }
+
+      /* Asides marking where Emoji mode leaves the path this section describes.
+         Hidden until the mode is on: with the switch off they are answering a
+         question nobody asked. */
+      /* Where Emoji mode leaves the path a section describes. These read as
+         ordinary paragraphs rather than callouts: each one already opens by
+         naming the mode, so a rule and a tint would only be saying it twice.
+         They appear only when the mode is on, since with it off they answer a
+         question nobody has asked. */
+      .emoji-aside { display: none; }
+      body:has(#emojiMode:checked) .emoji-aside { display: block; }
+      /* Controls the chromatic matcher has no use for: it fits no colour, has
+         no flat path, and its glyph set is a palette rather than a font. */
+      body:has(#emojiMode:checked) #fontBox,
+      body:has(#emojiMode:checked) #colorLab,
+      body:has(#emojiMode:checked) #flatLab,
+      body:has(#emojiMode:checked) #fgLab { display: none; }
     </style>
   </head>
   <body>
     <h1>ASCII FX playground</h1>
-    <canvas id="out"></canvas>
+    <div id="heroStage" class="hero-stage">
+      <canvas id="out"></canvas>
+      <div class="hero-busy" role="status" aria-live="polite">
+        <span class="hero-ring"></span>
+        <span id="heroBusyLabel" class="hero-busy-label">switching…</span>
+      </div>
+    </div>
     <div id="stats">loading profile…</div>
     <div id="panel">
+      <fieldset id="matcherBox">
+        <legend><i data-lucide="toggle-right"></i> Matcher</legend>
+        <label id="emojiToggle" class="emoji-toggle" title="Switch the matcher from structural-v1 (shape, fitted colour) to chromatic-v1 (baked colour emoji)">
+          <input id="emojiMode" type="checkbox" />
+          <span class="track"><span class="knob"></span></span>
+          <span class="emoji-label">Emoji mode</span>
+        </label>
+      </fieldset>
+      <fieldset id="paletteBox">
+        <legend><i data-lucide="smile"></i> Emoji palette</legend>
+        <div id="pickerHost"></div>
+        <p class="palette-note">
+          chromatic-v1 takes the lowest error over whatever glyphs it is given, and a flat swatch is the best possible reconstruction of a flat cell. So solid blocks win constantly. Removing a glyph is the only way to stop it being picked. 100 of 1301 start selected: the usage-curated set, within 1% of the whole pool at a thirteenth of the per-cell work.
+        </p>
+      </fieldset>
       <fieldset>
         <legend><i data-lucide="clapperboard"></i> Source</legend>
         <select id="source" aria-label="Source" title="What gets turned into ASCII: scenes, your webcam, or your own files (all client-side)">
@@ -912,7 +1232,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         <input id="imageFile" class="file-input" type="file" accept="image/*" tabindex="-1" aria-label="Choose an image file" />
         <input id="videoFile" class="file-input" type="file" accept="video/*" tabindex="-1" aria-label="Choose a video file" />
       </fieldset>
-      <fieldset>
+      <fieldset id="fontBox">
         <legend><i data-lucide="type"></i> Font</legend>
         <select id="font" aria-label="Font" title="The glyph set. Compiled profiles render identically everywhere; system fonts are profiled at runtime in your browser">
           <option value="geist" selected>Geist Mono (compiled)</option>
@@ -938,7 +1258,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       <fieldset>
         <legend><i data-lucide="scan-text"></i> Matching</legend>
         <label><span class="hint" tabindex="0" data-hint="Characters per row. More columns = finer detail but more work per frame">columns</span> <input id="columns" type="range" min="24" max="240" step="4" value="120" /><output id="columnsOut">120</output></label>
-        <label><span class="hint" tabindex="0" data-hint="mono: one ink color · foreground: a fitted color per glyph · full: fitted glyph AND background color per cell (closest to the original image)">color</span>
+        <label id="colorLab"><span class="hint" tabindex="0" data-hint="mono: one ink color · foreground: a fitted color per glyph · full: fitted glyph AND background color per cell (closest to the original image)">color</span>
           <select id="color">
             <option value="foreground" selected>foreground</option>
             <option value="full">full</option>
@@ -951,9 +1271,10 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
             <option value="ignore">ignore</option>
           </select>
         </label>
-        <label><span class="hint" tabindex="0" data-hint="Cells with less light/dark contrast than this render as a single tone instead of a shape. Higher = smoother, lower = busier">flat</span> <input id="flat" type="range" min="0" max="48" step="1" value="15" /><output id="flatOut">15</output></label>
+        <label id="flatLab"><span class="hint" tabindex="0" data-hint="Cells with less light/dark contrast than this render as a single tone instead of a shape. Higher = smoother, lower = busier">flat</span> <input id="flat" type="range" min="0" max="48" step="1" value="15" /><output id="flatOut">15</output></label>
         <label id="fgLab" hidden><span class="hint" tabindex="0" data-hint="Ink color used for matching in mono mode. Swap fg/bg to invert (dark-on-light vs light-on-dark)">fg</span> <input id="fg" type="color" value="#ffffff" /></label>
         <label id="bgLab"><span class="hint" tabindex="0" data-hint="Backdrop color the glyph colors are fitted against (mono and foreground modes)">bg</span> <input id="bg" type="color" value="#000000" /></label>
+        <label id="hystLab" hidden><span class="hint" tabindex="0" data-hint="Emoji mode only. Keep last frame's emoji unless a challenger beats it by this margin, which stops near-ties strobing on video. 0 is off">hysteresis</span> <input id="hyst" type="range" min="0" max="0.4" step="0.02" value="0" /><output id="hystOut">0.00</output></label>
         <span id="colWarn" class="warn" hidden><i data-lucide="triangle-alert"></i>past ~120 columns you'll want webgpu</span>
       </fieldset>
       <fieldset>
@@ -990,30 +1311,33 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         <button id="copyText"><i data-lucide="clipboard-copy"></i><span class="btn-label">copy text</span></button>
         <button id="savePng"><i data-lucide="image-down"></i><span class="btn-label">save .png</span></button>
         <button id="saveText"><i data-lucide="file-text"></i><span class="btn-label">save .txt</span></button>
+        <div id="agentRow" class="agent-row"></div>
       </fieldset>
     </div>
     <section id="explainer">
       <h2>What is this?</h2>
       <p>
-        Most ASCII filters map brightness to a character ramp like <code>.:-=+*#%@</code>. That works, but it
-        throws away shape: a diagonal edge and a flat gray patch of the same brightness get the same character.
+        Most ASCII filters measure how bright a cell is and pick a character off a ramp
+        like <code>.:-=+*#%@</code>. That gets you surprisingly far, but brightness is the only thing it looks at,
+        so a diagonal edge and a flat gray patch of the same brightness end up as the same character. Whatever
+        shape was in the cell is gone before any glyph is chosen.
       </p>
       <p>
-        ASCII FX matches shape. Each cell is compared against the actual pixel shapes of the font's glyphs, and
-        the glyph that reconstructs the cell best wins. Color is fitted per cell on top. Two rules shaped the
-        design:
+        ASCII FX compares each cell against the pixel shapes of the font's glyphs and keeps whichever one rebuilds
+        that cell most closely, then fits a color to it. Two constraints shaped everything below:
       </p>
       <ul>
-        <li><strong>Deterministic.</strong> Same input, same characters, everywhere. GPU and CPU agree byte for byte.</li>
-        <li><strong>No startup analysis.</strong> A compiler measures the font once and ships a small binary profile.</li>
+        <li><strong>Deterministic.</strong> The same input has to produce the same characters on every machine, which means the GPU and the CPU have to agree byte for byte.</li>
+        <li><strong>No startup analysis.</strong> Nothing measures the font at page load. A compiler does that ahead of time and ships a small binary profile.</li>
       </ul>
 
       <h2>The pipeline</h2>
       <p>
-        Once per font, a compiler builds a profile: an 8×8 mask, a coverage value, and an atlas tile per glyph.
-        Then every frame runs four stages. Here is a real frame going through the real code. Hover any stage to
-        follow one cell all the way; drag the columns slider and watch the grid, the samples, and every
-        decision recompute.
+        Some of the work only has to happen once. A compiler measures the font ahead of time and writes a profile:
+        an 8×8 mask, a coverage value, and an atlas tile per glyph.
+        The rest happens every frame, in four stages. What follows is one frame of that, running the same code the
+        playground above is running. Hover any stage to follow a single cell through it, or drag the columns slider
+        and watch the grid, the samples and every decision recompute.
       </p>
       <div id="wPipe" class="widget"></div>
       <p>
@@ -1023,8 +1347,8 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
 
       <h2>Compile the font</h2>
       <p>
-        System rasterizers (browser canvas, CoreText, FreeType) all anti-alias differently, and determinism dies
-        there. So the compiler brings its own: integer scanline rasterization into a 64 px cell, 4×4 subsamples
+        Ask a browser to draw a glyph and the shape you get depends on the machine. System rasterizers (browser
+        canvas, CoreText, FreeType) all anti-alias differently, and determinism dies right there. So the compiler brings its own: integer scanline rasterization into a 64 px cell, 4×4 subsamples
         per pixel, fixed Bézier flattening, nonzero winding. Same font bytes, same profile bytes, always.
       </p>
       <p>Per glyph it stores:</p>
@@ -1041,13 +1365,19 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       <div id="wAtlas" class="widget"></div>
       <p>
         What can go in a charset? Any code point the font has outlines for. The
-        built-in <code>ascii-blocks</code> set adds half-blocks and quadrants (▀ ▄ ▌ ▚ ▓), and braille patterns
+        built-in <code>ascii-blocks</code> set adds half-blocks and quadrants (▀ ▄ ▌ ▚ ▓). Braille patterns
         (⠏ ⣠ ⣿) are a classic trick: each glyph is a 2×4 dot grid, which hands the matcher 256 distinct
         shapes. The compiler refuses characters the font lacks, so a compiled profile never contains tofu.
-        Runtime profiles cannot check that; a missing glyph quietly profiles the fallback box. Color emoji are
-        out on three counts: most emoji fonts are bitmap-only with no outlines to rasterize, emoji advance two
-        cells wide so the monospace check fails, and the pipeline fits one ink color per cell, which would
-        repaint them anyway.
+        Runtime profiles cannot check that; a missing glyph quietly profiles the fallback box. Color emoji fail
+        all three of this page's assumptions at once. Most emoji fonts are bitmap-only with no outlines to
+        rasterize, emoji advance two cells wide so the monospace check fails, and fitting one ink color per cell
+        would repaint them anyway. That is why <strong>Emoji mode</strong> is a different algorithm rather than a
+        bigger charset.
+      </p>
+      <p class="emoji-aside">
+        None of this applies in <strong>Emoji mode</strong>, because there is no font to rasterize. Colour emoji
+        ship as PNG assets, so the compiler decodes them and box-filters straight down to the 8×8 descriptor and a
+        square-celled RGBA atlas.
       </p>
       <p>
         The profile records SHA-256 hashes of the font, charset, and parameters. Frames reference profiles by
@@ -1055,23 +1385,37 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       </p>
 
       <h2>The grid</h2>
-      <p>Cells are not square, so the cell aspect enters the row count. For source W×H and cell cw×ch:</p>
+      <p>
+        Before anything is matched, the source has to be carved into cells. Text cells are taller than they are
+        wide, so the cell aspect enters the row count. For source W×H and cell cw×ch:
+      </p>
       <div class="formula" data-tex="\textsf{columns} = C \qquad \textsf{rows} = \max\bigl(1,\ \operatorname{rdiv}(H \cdot C \cdot c_w,\ W \cdot c_h)\bigr)"></div>
       <div class="formula" data-tex="\operatorname{rdiv}(n, d) = \left\lfloor \frac{2n + d}{2d} \right\rfloor"></div>
-      <p class="wnote formula-note">Round half up — used everywhere in the pipeline.</p>
+      <p class="wnote formula-note">Round half up, used everywhere in the pipeline.</p>
       <p>The pipeline explorer above prints this exact formula with live numbers as you drag its slider.</p>
+      <p class="emoji-aside">
+        <strong>Emoji mode</strong> changes nothing here. An emoji cell is square rather than tall, so the same
+        formula simply lands on a different row count.
+      </p>
 
       <h2>Shrink the source</h2>
-      <p>Each cell gets exactly 8×8 = 64 samples: an alpha-weighted box filter over the pixels under each sample.</p>
+      <p>
+        Now every cell is boiled down to the same tiny fixed size, whatever the source resolution was. Each one
+        gets exactly 8×8 = 64 samples, an alpha-weighted box filter over the pixels underneath.
+      </p>
       <div class="formula" data-tex="\textsf{sample} = \bigl(\operatorname{rdiv}(\textstyle\sum ra,\ \sum a),\ \operatorname{rdiv}(\sum ga,\ \sum a),\ \operatorname{rdiv}(\sum ba,\ \sum a),\ \operatorname{rdiv}(\sum a,\ n)\bigr)"></div>
       <p>
         GPU texture filtering is banned here: bilinear taps round differently per vendor. The compute shader
         does the same integer sums, one workgroup per cell, one lane per sample.
       </p>
 
+      <p class="emoji-aside">
+        <strong>Emoji mode</strong> shares this step exactly. Both matchers work from the same 64 reduced samples,
+        and the only thing that differs is what they compare them <em>against</em>.
+      </p>
       <h2>Classify each cell</h2>
       <div class="formula" data-tex="\textsf{luma} = \left\lfloor \frac{77r + 150g + 29b + 128}{256} \right\rfloor"></div>
-      <p class="wnote formula-note">Integer only — in the code that floor is a <code>&gt;&gt; 8</code>.</p>
+      <p class="wnote formula-note">Integer only. In the code that floor is a <code>&gt;&gt; 8</code>.</p>
       <ul>
         <li><strong>Transparent.</strong> Mean alpha below 128 (with <code>alpha: mask</code>): blank glyph, done.</li>
         <li>
@@ -1085,14 +1429,20 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         <li><strong>Structured.</strong> Everything else, below.</li>
       </ul>
 
+      <p class="emoji-aside">
+        There is no flat path in <strong>Emoji mode</strong>. Nothing would be gained by one, since there is no
+        coverage ramp to fall back to and no fitted colour that could degenerate, so every non-transparent cell
+        takes the same route.
+      </p>
       <h2>The source mask</h2>
       <p>
-        The darkest and brightest samples become two color endpoints. Each sample joins the nearer one by
-        squared RGB distance. That is a color comparison, not luma: a red stroke on equally bright green still
-        masks cleanly.
+        Comparing a cell against 95 glyphs would be expensive if you compared pixels, so the cell is reduced to one
+        bit per sample first. The darkest and brightest samples become two color endpoints, and every sample joins
+        whichever one it sits nearer to by squared RGB distance. Because that comparison uses color rather than
+        luma, a red stroke on equally bright green still masks cleanly.
       </p>
       <p>
-        Try it. Paint an 8×8 cell below and the real matcher runs on every stroke: endpoint classification,
+        Paint an 8×8 cell below and the matcher runs on every stroke: endpoint classification,
         polarity, the Hamming shortlist over the whole charset, and the exact rerank from the next two
         sections. The preloaded stroke is a soft-edged diagonal. Its gray edge samples join whichever endpoint
         is nearer, which is why anti-aliased strokes still mask cleanly.
@@ -1105,11 +1455,17 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         orientations.
       </p>
 
+      <p class="emoji-aside">
+        <strong>Emoji mode</strong> never builds a mask at all, and has no polarity to derive. An emoji's colour
+        is baked in, so there is nothing to fit, and the objective becomes squared error against the emoji's own 64
+        samples composited over the backdrop it will be drawn on.
+      </p>
       <h2>Shortlist by shape</h2>
       <div class="formula" data-tex="d(g) = \operatorname{popcount}(\textsf{mask}_{lo} \oplus g_{lo}) + \operatorname{popcount}(\textsf{mask}_{hi} \oplus g_{hi})"></div>
       <p>
-        Keep the 8 smallest, ties to the lower glyph id. Hamming is two XORs and two popcounts. The exact error
-        below costs about 64 multiplies per glyph, so: cheap filter over the whole charset, exact score over 8.
+        Keep the 8 smallest, ties to the lower glyph id. Hamming is two XORs and two popcounts. Scoring a glyph
+        exactly costs about 64 multiplies, so the split pays for itself: cheap filter over the whole charset,
+        exact score over 8.
         Same winner, a fraction of the cost. In <code>full</code> mode the score is <code>min(d, 64−d)</code>,
         because free colors can flip orientation.
       </p>
@@ -1132,14 +1488,18 @@ mono: both colors fixed by the palette</code></pre>
 
       <h2>Draw it</h2>
       <p>
-        Each cell samples its glyph's atlas tile and blends fg over bg by coverage. The atlas is mipmapped so
-        strokes keep their weight at any scale. The CPU backend builds the same mip chain in Canvas2D.
+        Drawing is the easy part by now. Each cell samples its glyph's atlas tile and blends fg over bg by
+        coverage. The atlas is mipmapped so strokes keep their weight at any scale. The CPU backend builds the same mip chain in Canvas2D.
       </p>
       <p>
         Pointer effects (reveal, push, wave, magnify, glyph rotation) warp this composite. They never re-run
         matching. The GPU evaluates them per pixel, the CPU per cell, same formulas.
       </p>
 
+      <p class="emoji-aside">
+        <strong>Emoji mode</strong> samples an RGBA atlas instead of tinting a coverage plane. The colour is
+        already in the glyph, so there is nothing to mix it with but the backdrop.
+      </p>
       <h2>Bit for bit on GPU and CPU</h2>
       <ul>
         <li>Integer arithmetic only, one rounding rule. No floats to disagree over.</li>
@@ -1150,7 +1510,7 @@ mono: both colors fixed by the palette</code></pre>
 
       <h2>Going faster</h2>
       <ul>
-        <li><strong>Temporal.</strong> A cell whose 64 samples did not change re-uses its result. Exact, not approximate.</li>
+        <li><strong>Temporal.</strong> A cell whose 64 samples did not change re-uses its previous result, which is exact rather than an approximation.</li>
         <li><strong>Dirty rectangles.</strong> Invalidate a region, re-match only that.</li>
         <li><strong>Adaptive resolution.</strong> Columns drop when the frame rate sags, recover when it is smooth.</li>
       </ul>
@@ -1166,17 +1526,69 @@ mono: both colors fixed by the palette</code></pre>
           <strong>shape6</strong>: a cell as 6 numbers (mean, vertical, horizontal, diagonal, center vs ring,
           detail), nearest glyph in that space, optional 262,144-entry LUT for O(1) lookups.
         </li>
-        <li><strong>ramp</strong>: coverage only, the classic brightness ramp. A cheap effect, not quality.</li>
+        <li><strong>ramp</strong>: coverage only, the classic brightness ramp. Cheap enough to be worth having as an effect, but nobody should reach for it when they want fidelity.</li>
       </ul>
-      <p>Both are opt-in, never a silent fallback, and measurably worse than exact. The repo benchmarks say how much.</p>
+      <p>
+        Both are opt-in and never chosen for you, because both are measurably worse than exact matching. The repo
+        benchmarks say by how much.
+      </p>
 
+      <p class="emoji-aside">
+        <strong>Emoji mode</strong> has no prefilter at all. Over a curated palette of about 100 glyphs an
+        exhaustive search costs roughly what structural-v1's shortlist and rerank cost together, and every
+        shortlist measured lost more quality than it saved in time.
+      </p>
       <h2 id="performance">Performance</h2>
       <p class="lead">
-        Numbers, not adjectives. Picking glyphs by shape costs less main-thread time than every brightness ramp
-        measured here — and these figures regenerate from a real harness, so they cannot drift from what ran.
+        Picking glyphs by shape turns out to cost less main-thread time than every brightness ramp measured here,
+        which is not the result you would expect. Every figure below is read out of a harness that regenerates
+        them, so none of it can drift from what actually ran.
       </p>
 
       <h3>Versus other libraries</h3>
+      {emojiRows.length > 0 && (
+        <div id="emojiBench" class="emoji-bench">
+          <p>
+            No npm package publishes image→emoji rendering. Every emoji-mosaic project we could find is an
+            application, not a library, so there is nothing to install and bench. The comparison rows are
+            reference implementations of the technique all of them share instead: one mean colour per emoji, one
+            per cell, nearest wins. They run on the same source at the same square{' '}160×90 grid with the same
+            curated palette.
+          </p>
+          <div class="table-scroll">
+            <table class="libs">
+              <thead>
+                <tr>
+                  <th>approach</th>
+                  <th>picks glyphs by</th>
+                  <th>grid</th>
+                  <th class="num">p50 ms</th>
+                  <th class="num p95">p95 ms</th>
+                  <th class="num">~fps</th>
+                </tr>
+              </thead>
+              <tbody>
+                {emojiRows.map((r) => (
+                  <tr data-us={r.us || undefined}>
+                    <td class="approach">{r.emphasis ? <b>{r.label}</b> : r.label}</td>
+                    <td><span class="tag" data-kind={r.kind}>{r.picks}</span></td>
+                    <td class="grid">{r.grid}</td>
+                    <td class="num">{r.p50.toFixed(1)}</td>
+                    <td class="num p95">{r.p95.toFixed(1)}</td>
+                    <td class="num">{r.fps.toFixed(0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Speed is only half of it though. Mean-colour matching is a colour quantiser, and cannot see sub-cell
+            structure at all, so the two are not doing the same amount of work for their time. Measured
+            {' '}{emojiMeasuredOn}, and regenerated with <code>pnpm bench:compare</code>.
+          </p>
+        </div>
+      )}
+      <div id="asciiBench">
       <BenchChart />
       <p>
         Real published packages, plus the two techniques this project credits as influences, all fed the same
@@ -1217,24 +1629,25 @@ mono: both colors fixed by the palette</code></pre>
           </tbody>
         </table>
       </div>
-      <p class="note">
+      <p>
         Exact structural matching with a fitted colour per cell adds
-        {' '}{(webgpu.p50 - baseline.p50).toFixed(1)}ms — matching and compositing overlap on the GPU, so it lands
+        {' '}{(webgpu.p50 - baseline.p50).toFixed(1)}ms. Matching and compositing overlap on the GPU, so it lands
         below every brightness ramp in the table while doing considerably more.
       </p>
       <p class="fine">
         Measured {measuredOn} on one Apple-silicon laptop: headless Chromium, vsync off, 200 timed frames after 40
         warmup, each library alone in a fresh page, best of two passes.
-        {' '}* Not libraries — the brightness-ramp technique hand-written with zero overhead, marking the floor any
+        {' '}* Not libraries. The brightness-ramp technique hand-written with zero overhead, marking the floor any
         ramp library could reach. † Main-thread JavaScript, composite-bound at this glyph size: matching alone is
         {' '}~{matchMs('ascii-fx shape6-lut')}ms against ~{exactMs.toFixed(0)}ms for exact structural.
       </p>
+      </div>
 
       <BenchRunner />
 
       <h3>What the fallback costs</h3>
       <p>
-        Same matcher, same output, no GPU required. A still image is a one-off
+        The fallback runs the same matcher and produces the same output without a GPU. A still image is a one-off
         {' '}~{cpu160 ? cpu160.p50.toFixed(0) : '30'}ms at 160 columns; live video stays comfortable to about 120.
       </p>
       <div class="table-scroll">
@@ -1274,7 +1687,8 @@ mono: both colors fixed by the palette</code></pre>
 
       <h2 id="using-it">Using it</h2>
       <p class="lead">
-        Compile a font once, hand the renderer a source, and everything above happens on its own. Three ways in.
+        Compile a font once, hand the renderer a source, and everything above happens on its own. There are three
+        ways in, depending on what you are building.
       </p>
 
       <h3>React</h3>
@@ -1282,7 +1696,7 @@ mono: both colors fixed by the palette</code></pre>
       <ul>
         <li>Server-rendered and layout-stable: the original media shows first, the canvas swaps in with no flash or shift.</li>
         <li><code>alt</code> is required, and the fallback stays in the accessibility tree.</li>
-        <li>Pauses offscreen, on hidden tabs, and under <code>prefers-reduced-motion</code> — each one opt-out.</li>
+        <li>Pauses offscreen, on hidden tabs, and under <code>prefers-reduced-motion</code>. Each one is opt-out.</li>
       </ul>
 
       <h3>Anything else</h3>
@@ -1295,14 +1709,14 @@ mono: both colors fixed by the palette</code></pre>
       <h3>Three.js</h3>
       <Code code={threeSample} lang="tsx" theme="github-dark" />
       <p>
-        Matching runs on Three's own device, so nothing is ever read back. WebGL is unsupported on purpose — exact
-        matching there would need a GPU→CPU copy every frame.
+        Matching runs on Three's own device, so nothing is ever read back. WebGL is unsupported on purpose:
+        exact matching there would need a GPU→CPU copy every frame.
       </p>
 
       <h3>Ahead-of-time profiles</h3>
       <Code code={configSample} lang="ts" theme="github-dark" />
       <p>
-        Profiles compile once, cache by content, and hot-reload in dev — about 13KB over the wire. Frames go
+        Profiles compile once, cache by content, and hot-reload in dev, at about 13KB over the wire. Frames go
         further and precompute the matching itself, so hero art costs nothing at runtime. There is a CLI if you are
         not on Vite. This page eats its own cooking: the playground above loaded a build-time profile.
       </p>
@@ -1311,13 +1725,21 @@ mono: both colors fixed by the palette</code></pre>
       <Code code={charsetSample} lang="ts" theme="github-dark" />
       <p>
         Subsetting carries each glyph's raster data over exactly, so a narrowed profile matches identically to one
-        compiled that way — no recompile, no drift.
+        compiled that way. You do not have to recompile anything, and there is nothing for the two to drift apart on.
       </p>
     </section>
     <footer>
-      ASCII FX — shape, not brightness. Exact structural matching on WebGPU with a bit-identical CPU reference.
-      Geist Mono under the SIL Open Font License. The structural approach follows the Ditherlab/chafa lineage —
-      chafa-wasm is in the table above — and the shape-vector matcher follows Alex Harri's work.
+      <p>
+        ASCII FX matches glyphs by shape rather than brightness, exactly, on WebGPU, with a bit-identical CPU
+        reference underneath.
+        Geist Mono under the SIL Open Font License. The structural approach follows the Ditherlab/chafa lineage,
+        and chafa-wasm is in the table above. The shape-vector matcher follows Alex Harri's work.
+      </p>
+      <a class="ps-link" href="https://principlestash.com" rel="noopener">
+        {/* The mascot stands in for the capital P, which is how Principle Stash
+            sets its own wordmark. */}
+        <img class="ps-mark" src={`${base}principle-stash.svg`} alt="P" width="13" height="18" />rinciple&nbsp;Stash
+      </a>
     </footer>
     <script>
       import '../playground/main'

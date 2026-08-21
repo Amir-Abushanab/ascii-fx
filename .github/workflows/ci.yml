@@ -1,0 +1,78 @@
+# The gate every push and PR goes through, and the only path that publishes the docs.
+#
+# The docs deploy hangs off `check` rather than living in its own workflow, so a red
+# suite cannot ship a broken showcase — two independent workflows would race, and the
+# Pages one would win about half the time.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The gpu-browser project drives real Chromium. Its WebGPU tests self-skip when
+      # no adapter is available, which is the normal case on a GPU-less runner — the
+      # rest of that project (canvas, CPU fallback, codecs) still runs.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm check
+      - run: pnpm build
+
+  deploy-docs:
+    name: Deploy docs → GitHub Pages
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Pages allows one deploy at a time; a queued run should wait, not be cancelled,
+    # or main can end up published from an older commit.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm docs:build
+        env:
+          # Project pages live under /<repo>/ — user/organization pages
+          # (<user>.github.io repos) should drop DOCS_BASE.
+          DOCS_BASE: /${{ github.event.repository.name }}/
+          DOCS_SITE: https://${{ github.repository_owner }}.github.io
+          PUBLIC_REPOSITORY_URL: https://github.com/${{ github.repository }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/docs/dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

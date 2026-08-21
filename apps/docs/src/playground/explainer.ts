@@ -282,7 +282,7 @@ function buildCellWidget(host: HTMLElement, p: AsciiProfile): void {
       note.textContent = `contrast < ${FLAT_THRESHOLD}: flat cell. No mask, no shortlist. The glyph with coverage nearest mean luma ${t.meanLuma} wins directly.`
       maskCol.append(note)
     } else {
-      maskCol.append(grid8Canvas((k) => (t.maskBits![k] ? '#7c9cff' : '#14141d'), 112))
+      maskCol.append(grid8Canvas((k) => (t.maskBits![k] ? '#45e845' : '#14141d'), 112))
     }
 
     listCol.replaceChildren(label('shortlist · Hamming d, then exact err'))
@@ -759,7 +759,7 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
       clsNote.textContent = `Δluma ${d.deltaLuma} ≥ ${FLAT_THRESHOLD} → structured`
       parts.push(
         col(label('classify'), clsNote),
-        col(label('mask · 1 = ink'), grid8Canvas((k) => (d.mask![k] ? '#7c9cff' : '#14141d'), 88, cellAspect(p))),
+        col(label('mask · 1 = ink'), grid8Canvas((k) => (d.mask![k] ? '#45e845' : '#14141d'), 88, cellAspect(p))),
       )
     }
     const ci = cy * columns + cx

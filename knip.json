@@ -16,8 +16,7 @@
       "ignoreDependencies": [
         "three",
         "aalib.js",
-        "p5",
-        "p5.asciify",
+        "textmode.js",
         "chafa-wasm"
       ]
     },

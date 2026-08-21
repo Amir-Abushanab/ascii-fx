@@ -12,6 +12,8 @@ const SECTION = {
   shape6Vectors: 7,
   shape6Lut: 8,
   metadata: 9,
+  chromaticSamples: 10,
+  atlasRgba: 11,
 } as const
 
 interface Section {
@@ -111,6 +113,9 @@ export function encodeProfile(profile: AsciiProfile): Uint8Array {
 
   sections.push({ type: SECTION.atlas, bytes: profile.atlas.data })
 
+  if (profile.atlas.rgba) sections.push({ type: SECTION.atlasRgba, bytes: profile.atlas.rgba })
+  if (profile.chromatic) sections.push({ type: SECTION.chromaticSamples, bytes: profile.chromatic.samples })
+
   if (profile.shape6) {
     const v = profile.shape6.vectors6
     const bytes = new Uint8Array(v.length * 4)
@@ -197,7 +202,7 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
   if (glyphCount === 0 || glyphCount > 0x10000) {
     throw corruptProfile(`glyph count ${glyphCount} is outside the supported range 1..65536.`)
   }
-  const atlas = {
+  const atlas: AsciiProfile['atlas'] = {
     width: view.getUint32(16, true),
     height: view.getUint32(20, true),
     pitchWidth: view.getUint32(24, true),
@@ -256,6 +261,8 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
   let coverage: Uint16Array | undefined
   let vectors6: Float32Array | undefined
   let lut3: Uint16Array | undefined
+  let atlasRgba: Uint8Array | undefined
+  let chromaticSamples: Uint8Array | undefined
   let metadata: AsciiProfile['metadata'] | undefined
 
   const dec = new TextDecoder('utf-8', { fatal: true })
@@ -310,6 +317,18 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
         if (data.byteLength !== expectedAtlasBytes) throw corruptProfile('atlas section has the wrong length.')
         atlas.data = new Uint8Array(data)
         break
+      case SECTION.atlasRgba:
+        if (data.byteLength !== expectedAtlasBytes * 4) {
+          throw corruptProfile('RGBA atlas section has the wrong length.')
+        }
+        atlasRgba = new Uint8Array(data)
+        break
+      case SECTION.chromaticSamples:
+        if (data.byteLength !== glyphCount * 256) {
+          throw corruptProfile('chromatic sample section has the wrong length.')
+        }
+        chromaticSamples = new Uint8Array(data)
+        break
       case SECTION.shape6Vectors: {
         if (data.byteLength !== glyphCount * 6 * 4) {
           throw corruptProfile('shape6 vector section has the wrong length.')
@@ -355,6 +374,16 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
     throw new Error('Profile is missing required sections; the .asciip file is corrupt or truncated.')
   }
   if (lut3 && !vectors6) throw corruptProfile('shape6 LUT is present without shape6 vectors.')
+  // The two halves of a chromatic profile are useless apart: samples drive the
+  // match, the RGBA atlas draws the result. A profile carrying one without the
+  // other would match correctly and then render as blank tiles.
+  if (chromaticSamples && !atlasRgba) {
+    throw corruptProfile('chromatic samples are present without the RGBA atlas needed to draw them.')
+  }
+  if (atlasRgba && !chromaticSamples) {
+    throw corruptProfile('an RGBA atlas is present without the chromatic samples needed to match it.')
+  }
+  if (atlasRgba) atlas.rgba = atlasRgba
   return {
     version: formatVersion,
     id: metadata.id,
@@ -366,6 +395,7 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
     metrics,
     atlas,
     structural: { masksLo, masksHi, coverage },
+    chromatic: chromaticSamples ? { samples: chromaticSamples } : undefined,
     shape6: vectors6 ? { vectors6, lut3 } : undefined,
     metadata,
   }

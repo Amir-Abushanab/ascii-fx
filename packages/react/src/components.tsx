@@ -215,7 +215,7 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const [ready, setReady] = useState(false)
-  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
+  const { renderer, canvasKey } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
 
   useEffect(() => {
     const img = imgRef.current
@@ -243,8 +243,9 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
   return (
     <div ref={wrapperRef} className={className} style={wrapperStyle(style)}>
       <img ref={imgRef} src={src} alt={alt} crossOrigin={crossOrigin} style={fallbackStyle(ready)} />
-      {/* keyed by backend: a canvas is locked to its first context type, so a backend switch needs a fresh element */}
-      <canvas key={backend ?? "auto"} ref={canvasRef} aria-hidden style={canvasStyle} />
+      {/* keyed: a canvas is locked to its first context type, so both a backend switch and an
+          unrecoverable GPU device loss need a fresh element rather than a new renderer */}
+      <canvas key={canvasKey} ref={canvasRef} aria-hidden style={canvasStyle} />
     </div>
   )
 })
@@ -279,7 +280,7 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [ready, setReady] = useState(false)
-  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
+  const { renderer, canvasKey } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
 
   useEffect(() => {
     const video = videoRef.current
@@ -326,7 +327,7 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
         playsInline={playsInline}
         style={fallbackStyle(ready)}
       />
-      <canvas key={backend ?? "auto"} ref={canvasRef} aria-hidden style={canvasStyle} />
+      <canvas key={canvasKey} ref={canvasRef} aria-hidden style={canvasStyle} />
     </div>
   )
 })
@@ -355,7 +356,7 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(function As
   } = props
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const { renderer } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
+  const { renderer, canvasKey } = useAscii(canvasRef, { profile, backend, interaction, respectReducedMotion, ...options })
 
   useEffect(() => {
     if (!renderer || !source) return
@@ -379,7 +380,7 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(function As
   return (
     <div ref={wrapperRef} className={className} style={wrapperStyle(style)}>
       {children}
-      <canvas key={backend ?? "auto"} ref={canvasRef} aria-hidden style={canvasStyle} />
+      <canvas key={canvasKey} ref={canvasRef} aria-hidden style={canvasStyle} />
     </div>
   )
 })
