@@ -389,7 +389,9 @@ function handleGpuError(error: GPUError): void {
   if (forcedBackend) return
   forcedBackend = 'cpu'
   console.error('[ascii-fx] WebGPU error:', error.message)
-  stats.textContent = `webgpu reported an error — switching to the CPU matcher (${error.message})`
+  // Persistent, not a one-shot stats write: the fps ticker re-renders the
+  // status every 500ms and would erase a plain textContent within a beat.
+  backendNote = `webgpu failed, fell back: ${error.message}`
   void rebuild()
 }
 
@@ -397,10 +399,13 @@ function handleDeviceLost(): void {
   const now = performance.now()
   // Two losses in quick succession means rebuilding is not helping.
   if (now - lastDeviceLossAt < 5000) {
-    stats.textContent = 'gpu lost and could not be restarted — reload the page'
+    backendNote = 'gpu lost repeatedly and could not be restarted — reload the page'
+    stats.textContent = backendNote
     return
   }
   lastDeviceLossAt = now
+  backendNote = 'gpu device lost, fell back'
+  forcedBackend = 'cpu'
   stats.textContent = 'gpu lost — restarting on the CPU matcher…'
   void rebuild()
 }
@@ -429,7 +434,9 @@ async function rebuild(): Promise<void> {
     return
   }
   const backend = forcedBackend ?? (els.backend.value as BackendChoice)
-  backendNote = null
+  // A forced rebuild carries its note (why we are on CPU); a user-initiated
+  // one starts clean.
+  if (!forcedBackend) backendNote = null
   try {
     renderer = await createAsciiRenderer({
       canvas: out,
