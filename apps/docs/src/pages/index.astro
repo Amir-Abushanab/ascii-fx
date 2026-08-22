@@ -1381,7 +1381,8 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       </p>
       <p>
         The profile records SHA-256 hashes of the font, charset, and parameters. Frames reference profiles by
-        fingerprint, so a frame can never decode against the wrong font.
+        <strong>fingerprint</strong> — a short content hash that names this exact profile — so a frame can never
+        decode against the wrong font.
       </p>
 
       <h2>The grid</h2>
@@ -1401,7 +1402,8 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       <h2>Shrink the source</h2>
       <p>
         Now every cell is boiled down to the same tiny fixed size, whatever the source resolution was. Each one
-        gets exactly 8×8 = 64 samples, an alpha-weighted box filter over the pixels underneath.
+        gets exactly 8×8 = 64 samples, a box filter over the pixels underneath — a plain average of every source
+        pixel under the sample, with transparent pixels weighing less (that is the alpha weighting below).
       </p>
       <div class="formula" data-tex="\textsf{sample} = \bigl(\operatorname{rdiv}(\textstyle\sum ra,\ \sum a),\ \operatorname{rdiv}(\sum ga,\ \sum a),\ \operatorname{rdiv}(\sum ba,\ \sum a),\ \operatorname{rdiv}(\sum a,\ n)\bigr)"></div>
       <p>
@@ -1414,6 +1416,11 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         and the only thing that differs is what they compare them <em>against</em>.
       </p>
       <h2>Classify each cell</h2>
+      <p>
+        The decisions from here on work on each sample's <strong>luma</strong>: its brightness collapsed to one
+        0–255 number, a weighted mix of red, green and blue. Green carries the most weight because eyes are most
+        sensitive to it — pure green reads far brighter than pure blue at the same intensity:
+      </p>
       <div class="formula" data-tex="\textsf{luma} = \left\lfloor \frac{77r + 150g + 29b + 128}{256} \right\rfloor"></div>
       <p class="wnote formula-note">Integer only. In the code that floor is a <code>&gt;&gt; 8</code>.</p>
       <ul>
@@ -1463,9 +1470,11 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       <h2>Shortlist by shape</h2>
       <div class="formula" data-tex="d(g) = \operatorname{popcount}(\textsf{mask}_{lo} \oplus g_{lo}) + \operatorname{popcount}(\textsf{mask}_{hi} \oplus g_{hi})"></div>
       <p>
-        Keep the 8 smallest, ties to the lower glyph id. Hamming is two XORs and two popcounts. Scoring a glyph
-        exactly costs about 64 multiplies, so the split pays for itself: cheap filter over the whole charset,
-        exact score over 8.
+        The <strong>Hamming distance</strong> between two masks is simply how many of their 64 bits disagree —
+        computed as two XORs and two <strong>popcounts</strong> (count-the-1-bits, one instruction on either
+        backend). Keep the 8 smallest, ties to the lower glyph id; that shortlist is what the exact scorer
+        <strong>reranks</strong> next. Scoring a glyph exactly costs about 64 multiplies, so the split pays for
+        itself: cheap filter over the whole charset, exact score over 8.
         Same winner, a fraction of the cost. In <code>full</code> mode the score is <code>min(d, 64−d)</code>,
         because free colors can flip orientation.
       </p>
@@ -1538,6 +1547,27 @@ mono: both colors fixed by the palette</code></pre>
         exhaustive search costs roughly what structural-v1's shortlist and rerank cost together, and every
         shortlist measured lost more quality than it saved in time.
       </p>
+      <h2 id="glossary">Glossary</h2>
+      <p>The terms this page leans on, in one place. Each is also explained where it first appears above.</p>
+      <ul>
+        <li><strong>Glyph.</strong> One character the font can draw — the things cells get matched to.</li>
+        <li><strong>Charset.</strong> The set of glyphs a profile carries; the matcher never picks outside it.</li>
+        <li><strong>Profile.</strong> The compiled binary the matcher loads: per-glyph masks, coverage, the atlas, and identifying hashes. Built once, ahead of time.</li>
+        <li><strong>Atlas.</strong> One image holding every glyph's rendered tile, like a sprite sheet. Cells are drawn by sampling it; the matcher never looks at it.</li>
+        <li><strong>Mask.</strong> A glyph's 8×8 shape as 64 bits, 1 = ink. The only thing shape matching compares.</li>
+        <li><strong>Coverage.</strong> How much of a glyph's cell is ink, from empty (space) to solid (█). What flat cells are matched by.</li>
+        <li><strong>Luma.</strong> A sample's brightness as a single 0–255 number — a weighted mix of red, green and blue, green weighted highest because eyes are most sensitive to it.</li>
+        <li><strong>Flat cell.</strong> A cell whose brightest and darkest luma are closer than the <code>flat</code> threshold: no structure worth matching, so coverage picks the glyph.</li>
+        <li><strong>Polarity.</strong> Which side of a cell counts as ink — bright-on-dark or dark-on-bright. Derived from the palette, never a flag.</li>
+        <li><strong>Hamming distance.</strong> How many bits two masks disagree in. The cheap shape comparison behind the shortlist.</li>
+        <li><strong>Popcount.</strong> Count of 1-bits in a word — how a Hamming distance is actually computed, one instruction per half-mask.</li>
+        <li><strong>Shortlist / rerank.</strong> A cheap Hamming pass keeps the 8 nearest shapes; the exact color-fitting scorer then reranks those 8. Same winner as scoring everything, a fraction of the cost.</li>
+        <li><strong>Fingerprint.</strong> A content hash that names one exact profile. Frames carry it so they can never decode against the wrong font.</li>
+        <li><strong>Temporal reuse.</strong> A cell whose 64 samples are byte-identical to last frame keeps last frame's result — exact, not an approximation.</li>
+        <li><strong>Hysteresis</strong> (Emoji mode). Keep the previous frame's emoji unless a challenger beats it by a set fraction, so near-ties stop strobing on video.</li>
+        <li><strong>structural-v1 / chromatic-v1.</strong> The two matchers: text glyphs matched by shape with colors fitted per cell, and emoji matched by squared error against the glyph's own baked-in colors.</li>
+      </ul>
+
       <h2 id="performance">Performance</h2>
       <p class="lead">
         Picking glyphs by shape turns out to cost less main-thread time than every brightness ramp measured here,
