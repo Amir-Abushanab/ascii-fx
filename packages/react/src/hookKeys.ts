@@ -17,7 +17,8 @@ export const profileSourceKey = (source: ProfileSource | null | undefined): stri
   if (source == null) return 'null'
   if (typeof source === 'string') return `url:${source}`
   if (source instanceof URL) return `url:${source.href}`
-  if (source instanceof Uint8Array || source instanceof ArrayBuffer) return `bytes:${binaryId(source)}`
+  if (source instanceof Uint8Array || source instanceof ArrayBuffer)
+    return `bytes:${binaryId(source)}`
   if ('url' in source && !('glyphs' in source)) return `url:${(source as { url: string }).url}`
   return `profile:${(source as AsciiProfile).fingerprint}`
 }

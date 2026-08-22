@@ -12,7 +12,9 @@ import { useAscii } from '../src/hooks.js'
 import { G_FULL, G_SPACE, G_TOP, makeProfile, STANDARD_SIX } from '../../core/test/synthetic.js'
 
 const gpuAvailable =
-  typeof navigator !== 'undefined' && 'gpu' in navigator ? (await navigator.gpu.requestAdapter()) !== null : false
+  typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (await navigator.gpu.requestAdapter()) !== null
+    : false
 
 let root: Root | undefined
 let host: HTMLElement | undefined
@@ -45,7 +47,9 @@ describe.skipIf(!gpuAvailable)('useAscii device loss', () => {
 
     // Capture devices, and let us cut off the supply of new ones so the
     // renderer's own rebuild fails and the React path has to take over.
-    const adapterProto = GPUAdapter.prototype as unknown as { requestDevice: GPUAdapter['requestDevice'] }
+    const adapterProto = GPUAdapter.prototype as unknown as {
+      requestDevice: GPUAdapter['requestDevice']
+    }
     const originalRequestDevice = adapterProto.requestDevice
     const originalRequestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu)
     let gpuIsGone = false
@@ -55,7 +59,8 @@ describe.skipIf(!gpuAvailable)('useAscii device loss', () => {
       devices.push(device)
       return device
     }
-    navigator.gpu.requestAdapter = async (...args) => (gpuIsGone ? null : originalRequestAdapter(...args))
+    navigator.gpu.requestAdapter = async (...args) =>
+      gpuIsGone ? null : originalRequestAdapter(...args)
 
     try {
       host = document.createElement('div')
@@ -63,14 +68,19 @@ describe.skipIf(!gpuAvailable)('useAscii device loss', () => {
       root = createRoot(host)
       root.render(<Probe profile={makeProfile(STANDARD_SIX)} />)
 
-      expect(await until(() => seen.renderer?.backend === 'webgpu'), 'should start on WebGPU').toBe(true)
+      expect(await until(() => seen.renderer?.backend === 'webgpu'), 'should start on WebGPU').toBe(
+        true,
+      )
       const first = host.querySelector('canvas')
       expect(devices).toHaveLength(1)
 
       gpuIsGone = true
       devices[0].destroy()
 
-      expect(await until(() => seen.renderer?.backend === 'cpu'), 'should end up on the CPU matcher').toBe(true)
+      expect(
+        await until(() => seen.renderer?.backend === 'cpu'),
+        'should end up on the CPU matcher',
+      ).toBe(true)
       // A new element, not the old one reconfigured: that is the whole point.
       expect(host.querySelector('canvas')).not.toBe(first)
     } finally {
@@ -90,7 +100,9 @@ describe.skipIf(!gpuAvailable)('useAscii overlapping inits', () => {
   // the production React build these tests run under). Delaying only the
   // first requestDevice forces the losing resolution order deterministically.
   it('the surviving renderer keeps a configured context when the superseded init resolves last', async () => {
-    const adapterProto = GPUAdapter.prototype as unknown as { requestDevice: GPUAdapter['requestDevice'] }
+    const adapterProto = GPUAdapter.prototype as unknown as {
+      requestDevice: GPUAdapter['requestDevice']
+    }
     const original = adapterProto.requestDevice
     let call = 0
     let firstDevice: GPUDevice | undefined
@@ -120,7 +132,10 @@ describe.skipIf(!gpuAvailable)('useAscii overlapping inits', () => {
       // profile (useAsciiProfile keys by fingerprint, so an equal rebuild
       // would not re-run the effect): init #2 starts while #1 is in flight.
       root.render(<Probe profile={makeProfile([G_SPACE, G_FULL, G_TOP])} />)
-      expect(await until(() => seen.renderer !== null && call >= 2), 'swapped init should complete').toBe(true)
+      expect(
+        await until(() => seen.renderer !== null && call >= 2),
+        'swapped init should complete',
+      ).toBe(true)
       // The superseded renderer's destroy is the moment it used to unconfigure
       // the survivor's context; its device's `lost` resolves right then.
       await Promise.race([firstDevice!.lost, new Promise((r) => setTimeout(r, 4000))])
