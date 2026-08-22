@@ -6,6 +6,7 @@ import { cpus } from 'node:os'
 import { performance } from 'node:perf_hooks'
 import { FLAG_TRANSPARENT, matchFrame, reduceSource } from '@ascii-fx/core'
 import { buildProfile } from '@ascii-fx/compiler'
+import { upsertSection } from './resultsFile.mjs'
 
 const font = new Uint8Array(await readFile(new URL('../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url)))
 console.log('building profile with shape6 LUT (one-time)…')
@@ -182,8 +183,10 @@ for (const r of rows) {
 const worst = rows.filter((r) => r.matcher === 'shape6-lut').sort((a, b) => a.recall - b.recall)[0]
 md += `
 Worst shape6-lut case: **${worst.image} / ${worst.color}** at ${worst.recall.toFixed(1)}% recall.
+`
 
-## Speed (640×360 source, 160 columns, full color, p50 of 9 runs)
+const SPEED_HEADING = '## Speed (640×360 source, 160 columns, full color, p50 of 9 runs)'
+const speed = `${SPEED_HEADING}
 
 | matcher | ms | speedup vs exact |
 | --- | ---: | ---: |
@@ -196,5 +199,21 @@ Per spec §5/§11 the approximate matchers are explicit opt-ins (\`matcher: 'sha
 selected automatically. shape6 recall is structural agreement, not a quality score — its winners can be
 visually reasonable while differing from the exact winner; the error deltas above are the quality measure.
 `
-await writeFile(new URL('./RESULTS.md', import.meta.url), md)
-console.log(md)
+
+// This harness owns the document preamble (title through the quality table)
+// and the Speed section — and nothing else. Overwriting the whole file here
+// used to silently drop every section the other harnesses had written, so the
+// benches only composed when this one ran first. Replace the preamble bounded
+// at the first `## ` heading, then upsert Speed like everyone else.
+const resultsPath = new URL('./RESULTS.md', import.meta.url)
+let existing = ''
+try {
+  existing = await readFile(resultsPath, 'utf8')
+} catch {
+  // First run: no file yet.
+}
+const firstSection = existing.indexOf('\n## ')
+const tail = firstSection === -1 ? '' : existing.slice(firstSection + 1)
+await writeFile(resultsPath, `${md.trimEnd()}\n${tail ? `\n${tail}` : ''}`)
+await upsertSection(SPEED_HEADING, speed)
+console.log(md + '\n' + speed)

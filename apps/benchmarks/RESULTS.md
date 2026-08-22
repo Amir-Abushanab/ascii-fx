@@ -1,6 +1,6 @@
 # Approximate matcher quality (spec §36)
 
-Generated 2026-08-22T00:43:46.986Z · Node v24.19.0 · Apple M3 Pro
+Generated 2026-08-22T00:52:48.616Z · Node v24.19.0 · Apple M3 Pro
 Reference: `structural-v1` (exact). Corpus: procedural 192×128 images at 32 columns, Geist Mono ascii profile.
 Deltas are per-sample squared-RGB reconstruction error increases vs exact (lower is better, 0 = identical quality).
 
@@ -49,10 +49,10 @@ Worst shape6-lut case: **rings / mono** at 0.3% recall.
 
 | matcher | ms | speedup vs exact |
 | --- | ---: | ---: |
-| structural (exact) | 29.73 | 1.0× |
-| shape6 + LUT | 9.80 | 3.0× |
-| shape6 brute | 13.85 | 2.1× |
-| ramp | 8.72 | 3.4× |
+| structural (exact) | 32.78 | 1.0× |
+| shape6 + LUT | 9.94 | 3.3× |
+| shape6 brute | 13.99 | 2.3× |
+| ramp | 8.66 | 3.8× |
 
 Per spec §5/§11 the approximate matchers are explicit opt-ins (`matcher: 'shape6' | 'ramp'`) and are never
 selected automatically. shape6 recall is structural agreement, not a quality score — its winners can be
