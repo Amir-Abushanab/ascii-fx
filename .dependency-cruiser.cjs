@@ -11,17 +11,32 @@ module.exports = {
     {
       name: 'no-unresolvable',
       severity: 'error',
-      comment: 'Imports must resolve (Vite virtual modules excepted — they exist only inside the bundler).',
+      comment:
+        'Imports must resolve (Vite virtual modules excepted — they exist only inside the bundler).',
       from: {},
       to: { couldNotResolve: true, dependencyTypesNot: ['npm-unknown'], pathNot: ['^virtual:'] },
     },
     {
+      name: 'no-undeclared-dependencies',
+      severity: 'error',
+      comment:
+        "Every runtime import must be declared in its own package.json. pnpm's flat-ish store and the workspace root can make an undeclared import resolve here and fail for everyone who installs the published tarball.",
+      from: { path: '^packages/' },
+      to: { dependencyTypes: ['npm-no-pkg', 'npm-unknown'] },
+    },
+    {
       name: 'no-orphans',
-      severity: 'warn',
+      severity: 'error',
       comment: 'Modules nothing imports are dead weight (ambient .d.ts and entry points excepted).',
       from: {
         orphan: true,
-        pathNot: ['\\.d\\.ts$', '(^|/)src/index\\.tsx?$', '(^|/)src/cli\\.ts$', '(^|/)src/canvas2d\\.ts$', '(^|/)src/main\\.ts$'],
+        pathNot: [
+          '\\.d\\.ts$',
+          '(^|/)src/index\\.tsx?$',
+          '(^|/)src/cli\\.ts$',
+          '(^|/)src/canvas2d\\.ts$',
+          '(^|/)src/main\\.ts$',
+        ],
       },
       to: {},
     },
@@ -35,7 +50,8 @@ module.exports = {
     {
       name: 'no-compiler-in-browser-packages',
       severity: 'error',
-      comment: 'Spec §1: the compiler is build-time only and must never reach browser runtime packages.',
+      comment:
+        'Spec §1: the compiler is build-time only and must never reach browser runtime packages.',
       from: { path: '^packages/(gpu|three|react|react-three)/src' },
       to: { path: '^packages/compiler/' },
     },

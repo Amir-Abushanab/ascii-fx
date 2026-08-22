@@ -2,6 +2,18 @@ packages:
   - packages/*
   - apps/*
 
+# Never install a version published less than 7 days ago (10080 minutes). Compromised
+# releases are typically yanked within hours-to-days, so a week's lag lets the ecosystem
+# find the bad ones first, at the cost of adopting genuine fixes a week late. This is the
+# install-time gate and it covers transitive dependencies too; the matching `cooldown` in
+# `.ncurc.json` only governs what npm-check-updates proposes for direct deps.
+#
+# `pnpm install --frozen-lockfile` re-applies this to every lockfile entry, so a lockfile
+# has to be resolved under the policy to stay installable. It stays green over time —
+# versions only get older — but a lockfile rebuilt without the policy will fail CI until
+# it is re-resolved with it.
+minimumReleaseAge: 10080
+
 allowBuilds:
   esbuild: true
   sharp: true

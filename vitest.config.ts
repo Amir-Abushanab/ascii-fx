@@ -11,6 +11,20 @@ const alias = {
 
 export default defineConfig({
   test: {
+    // Measured over the `node` project only, so it covers exactly the packages whose
+    // tests run there: core, compiler, vite. @ascii-fx/{gpu,react,three,react-three} are
+    // tested by the `gpu-browser` project instead — a separate vitest run that reports no
+    // coverage here — so including them would read as ~2% and mean nothing. `pnpm
+    // test:gpu` is what holds those to account; this number is about the CPU matcher,
+    // the compiler, and the codecs.
+    coverage: {
+      provider: 'v8',
+      include: ['packages/{core,compiler,vite}/src/**/*.ts'],
+      reporter: ['text-summary', 'lcov'],
+      // A floor, not a target: set just under where the suite actually sits so it catches
+      // coverage falling off a cliff, not so it has to be chased upward on every PR.
+      thresholds: { statements: 80, lines: 80, functions: 75, branches: 65 },
+    },
     projects: [
       {
         resolve: { alias },
@@ -25,7 +39,10 @@ export default defineConfig({
         resolve: { alias },
         test: {
           name: 'gpu-browser',
-          include: ['packages/*/test-browser/**/*.test.ts', 'packages/*/test-browser/**/*.test.tsx'],
+          include: [
+            'packages/*/test-browser/**/*.test.ts',
+            'packages/*/test-browser/**/*.test.tsx',
+          ],
           testTimeout: 60_000,
           browser: {
             enabled: true,

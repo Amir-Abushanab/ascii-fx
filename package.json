@@ -1,28 +1,34 @@
 {
   "name": "ascii-fx-monorepo",
   "private": true,
-  "type": "module",
-  "packageManager": "pnpm@11.21.0",
-  "engines": {
-    "node": ">=22"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git"
   },
+  "type": "module",
   "scripts": {
     "bench": "pnpm --filter @ascii-fx-internal/benchmarks run bench",
     "bench:compare": "pnpm --filter @ascii-fx-internal/benchmarks run compare",
     "bench:quality": "pnpm --filter @ascii-fx-internal/benchmarks run quality",
+    "attw": "pnpm -r --filter \"./packages/*\" exec attw --pack . --profile esm-only",
     "build": "pnpm -r --filter \"./packages/*\" run build",
-    "check": "pnpm typecheck && pnpm test && pnpm test:gpu && pnpm knip && pnpm depcruise && pnpm skill:validate",
-    "depcruise": "depcruise \"packages/*/src/**/*.{ts,tsx}\" \"apps/docs/src/**/*.{ts,tsx}\"",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:gpu && pnpm knip && pnpm depcruise && pnpm skill:validate && pnpm skill:stale",
+    "depcruise": "depcruise \"packages/*/src/**/*.{ts,tsx}\" \"apps/docs/src/**/*.{ts,tsx}\" \"apps/benchmarks/**/*.mjs\" \"scripts/**/*.mjs\"",
     "dev": "pnpm --filter @ascii-fx-internal/docs run dev",
     "docs:build": "pnpm --filter @ascii-fx-internal/docs run build",
+    "format": "oxfmt .",
+    "format:check": "oxfmt . --check",
     "golden:update": "UPDATE_GOLDEN=1 vitest run --project node",
     "hooks:install": "git config core.hooksPath .githooks",
     "knip": "knip",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
     "ncu": "ncu --workspaces --root",
     "prepare": "git config core.hooksPath .githooks",
+    "package:check": "pnpm publint && pnpm attw && pnpm smoke",
     "publint": "pnpm -r --filter \"./packages/*\" exec publint --strict",
     "quality": "pnpm check && pnpm audit --audit-level low",
-    "release": "pnpm build && pnpm publint && node scripts/publish-if-needed.mjs",
+    "release": "pnpm build && pnpm package:check && node scripts/publish-if-needed.mjs",
     "skill:stale": "pnpm --filter @ascii-fx/core skill:stale",
     "skill:validate": "pnpm --filter @ascii-fx/core skill:validate",
     "test": "vitest run --project node",
@@ -30,23 +36,29 @@
     "test:gpu": "vitest run --project gpu-browser",
     "test:watch": "vitest --project node",
     "typecheck": "pnpm -r --filter \"./packages/*\" run typecheck",
-    "version": "changeset version && node scripts/sync-skill-version.mjs"
+    "version": "changeset version && node scripts/sync-skill-version.mjs",
+    "smoke": "node scripts/smoke-packages.mjs",
+    "test:coverage": "vitest run --project node --coverage"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@changesets/changelog-github": "^0.5.1",
     "@changesets/cli": "^3.0.0",
     "@types/node": "^26.2.0",
     "@vitest/browser-playwright": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.10",
     "dependency-cruiser": "^18.2.0",
     "knip": "^6.32.2",
     "npm-check-updates": "^23.0.2",
+    "oxfmt": "^0.63.0",
+    "oxlint": "^1.78.0",
     "playwright": "^1.62.1",
-    "publint": "^0.3.24",
+    "publint": "^0.3.23",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git"
-  }
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.21.0"
 }

@@ -8,3 +8,4 @@ apps/benchmarks/results/
 .astro/
 apps/docs/public/bench/
 apps/docs/public/emoji/
+coverage/
