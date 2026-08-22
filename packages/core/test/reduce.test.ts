@@ -73,7 +73,9 @@ describe('reduce-v1 (ALGORITHM.md §4)', () => {
   })
 
   it('upscales by sample duplication (min 1px rects)', () => {
-    const data = new Uint8Array([10, 20, 30, 255, 200, 210, 220, 255, 50, 60, 70, 255, 90, 100, 110, 255])
+    const data = new Uint8Array([
+      10, 20, 30, 255, 200, 210, 220, 255, 50, 60, 70, 255, 90, 100, 110, 255,
+    ])
     const out = reduceSource({ width: 2, height: 2, data }, 1, 1, true)
     expect(out[0]).toBe(10) // top-left quadrant of samples reads pixel (0,0)
     expect(out[(7 * 8 + 7) * 4]).toBe(90)

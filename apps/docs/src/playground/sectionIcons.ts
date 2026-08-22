@@ -43,12 +43,15 @@ const TypeScriptMark: IconNode = [
   ['rect', { x: 1.5, y: 1.5, width: 21, height: 21, rx: 3, fill: '#fff', stroke: 'none' }],
   ['rect', { x: 3.6, y: 9.4, width: 9.2, height: 3.4, fill: '#000', stroke: 'none' }],
   ['rect', { x: 6.5, y: 9.4, width: 3.4, height: 10.8, fill: '#000', stroke: 'none' }],
-  ['path', {
-    d: 'M20.4 11.2c-1.6-1.2-4.6-.9-4.6 1s4.6 1.3 4.6 3.7-3 2.3-4.7 1.1',
-    stroke: '#000',
-    'stroke-width': 2.8,
-    fill: 'none',
-  }],
+  [
+    'path',
+    {
+      d: 'M20.4 11.2c-1.6-1.2-4.6-.9-4.6 1s4.6 1.3 4.6 3.7-3 2.3-4.7 1.1',
+      stroke: '#000',
+      'stroke-width': 2.8,
+      fill: 'none',
+    },
+  ],
 ]
 
 const ThreeMark: IconNode = [
@@ -146,7 +149,9 @@ export async function mountSectionIcons(profile: AsciiProfile, emojiMode = false
   for (const heading of document.querySelectorAll<HTMLElement>('#explainer h2, #explainer h3')) {
     const existing = heading.querySelector<HTMLElement>('.hicon')
     // Read the heading without its own icon, or the glyphs would match the regex.
-    const label = (existing ? (heading.lastChild?.textContent ?? '') : (heading.textContent ?? '')).trim()
+    const label = (
+      existing ? (heading.lastChild?.textContent ?? '') : (heading.textContent ?? '')
+    ).trim()
     const table = heading.tagName === 'H3' ? SUB_ICONS : ICONS
     const entry = table.find(([pattern]) => pattern.test(label))
     if (!entry) continue
@@ -164,6 +169,11 @@ export async function mountSectionIcons(profile: AsciiProfile, emojiMode = false
     el.classList.toggle('hicon-emoji', emojiMode)
     el.textContent = emojiMode
       ? emoji
-      : matchFrame(rasters.get(node)!, { profile, columns: COLS, rows: ROWS, color: 'mono' }).toText()
+      : matchFrame(rasters.get(node)!, {
+          profile,
+          columns: COLS,
+          rows: ROWS,
+          color: 'mono',
+        }).toText()
   }
 }

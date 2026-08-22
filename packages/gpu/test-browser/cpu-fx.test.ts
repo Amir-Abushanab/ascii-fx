@@ -21,11 +21,17 @@ const diffCount = (a: Uint8ClampedArray, b: Uint8ClampedArray): number => {
 }
 
 /** Exact per-pixel diff restricted to columns x ≥ x0. */
-const regionDiffCount = (a: Uint8ClampedArray, b: Uint8ClampedArray, width: number, x0: number): number => {
+const regionDiffCount = (
+  a: Uint8ClampedArray,
+  b: Uint8ClampedArray,
+  width: number,
+  x0: number,
+): number => {
   let d = 0
   for (let i = 0; i < a.length; i += 4) {
     if ((i >> 2) % width < x0) continue
-    if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) d++
+    if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3])
+      d++
   }
   return d
 }
@@ -126,7 +132,13 @@ describe('cpu backend interactions', () => {
       // pointer at x=80; influence radius (0.25 + 0.05) · 180 = 54px, and the
       // cell engine may redraw one extra cell of margin → x ≥ 168 is far.
       const FAR_X = 168
-      for (const type of ['push', 'resolution', 'displace', 'glyph-scale', 'glyph-rotate'] as const) {
+      for (const type of [
+        'push',
+        'resolution',
+        'displace',
+        'glyph-scale',
+        'glyph-rotate',
+      ] as const) {
         renderer.setInteraction({ type, radius: 0.25, feather: 0.05, intensity: 2 })
         renderer.pointer.set(0.25, 0.5)
         await frame2()

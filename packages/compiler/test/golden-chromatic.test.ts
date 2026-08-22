@@ -16,9 +16,14 @@ import { GOLDEN_IMAGES } from './images.js'
 
 const UPDATE = process.env.UPDATE_GOLDEN === '1'
 const GOLDEN_DIR = fileURLToPath(new URL('../../../fixtures/golden/', import.meta.url))
-const PROFILE_PATH = fileURLToPath(new URL('../../../fixtures/profiles/chromatic.asciip', import.meta.url))
+const PROFILE_PATH = fileURLToPath(
+  new URL('../../../fixtures/profiles/chromatic.asciip', import.meta.url),
+)
 
-const lcg = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0), seed / 4294967296)
+const lcg = (seed: number) => () => (
+  (seed = (seed * 1664525 + 1013904223) >>> 0),
+  seed / 4294967296
+)
 
 /**
  * A 24-glyph synthetic palette: flat swatches, vertical splits, and diagonal
@@ -73,7 +78,12 @@ describe('golden corpus (chromatic-v1 × synthetic palette)', () => {
       writeFileSync(PROFILE_PATH, built.binary)
       for (const [name, image] of Object.entries(GOLDEN_IMAGES)) {
         for (const [bdName, background] of BACKDROPS) {
-          const frame = matchFrame(image, { profile, columns: COLUMNS, matcher: 'chromatic', background })
+          const frame = matchFrame(image, {
+            profile,
+            columns: COLUMNS,
+            matcher: 'chromatic',
+            background,
+          })
           writeFileSync(`${GOLDEN_DIR}${name}-chromatic-${bdName}.asciif`, encodeFrame(frame))
           writeFileSync(`${GOLDEN_DIR}${name}-chromatic-${bdName}.txt`, frame.toText() + '\n')
         }
@@ -98,10 +108,16 @@ describe('golden corpus (chromatic-v1 × synthetic palette)', () => {
     for (const [bdName, background] of BACKDROPS) {
       it(`${name} / ${bdName}`, () => {
         const goldenPath = `${GOLDEN_DIR}${name}-chromatic-${bdName}.asciif`
-        expect(existsSync(goldenPath), `missing golden ${name}-chromatic-${bdName} — run \`pnpm golden:update\``).toBe(
-          true,
-        )
-        const frame = matchFrame(image, { profile, columns: COLUMNS, matcher: 'chromatic', background })
+        expect(
+          existsSync(goldenPath),
+          `missing golden ${name}-chromatic-${bdName} — run \`pnpm golden:update\``,
+        ).toBe(true)
+        const frame = matchFrame(image, {
+          profile,
+          columns: COLUMNS,
+          matcher: 'chromatic',
+          background,
+        })
         const bytes = encodeFrame(frame)
         expect(bytes).toEqual(new Uint8Array(readFileSync(goldenPath)))
         const decoded = decodeFrame(bytes, profile)

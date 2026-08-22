@@ -8,8 +8,8 @@ import { buildProfile, buildFrame, decodePng } from '@ascii-fx/compiler'
 
 const { profile, binary } = buildProfile({
   font: await readFile('./GeistMono-Regular.ttf'),
-  charset: 'ascii',          // or characters: '@#*+. '
-  shape6: { lut: true },     // optional approximate-matcher data (adds ~514KiB raw)
+  charset: 'ascii', // or characters: '@#*+. '
+  shape6: { lut: true }, // optional approximate-matcher data (adds ~514KiB raw)
 })
 
 const frame = buildFrame({ image: decodePng(pngBytes), profile, columns: 140, color: 'full' })

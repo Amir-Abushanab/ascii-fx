@@ -8,7 +8,9 @@ import { FLAG_TRANSPARENT, matchFrame, reduceSource } from '@ascii-fx/core'
 import { buildProfile } from '@ascii-fx/compiler'
 import { upsertSection } from './resultsFile.mjs'
 
-const font = new Uint8Array(await readFile(new URL('../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url)))
+const font = new Uint8Array(
+  await readFile(new URL('../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url)),
+)
 console.log('building profile with shape6 LUT (one-time)…')
 const { profile } = buildProfile({ font, shape6: { lut: true } })
 const profileNoLut = { ...profile, shape6: { vectors6: profile.shape6.vectors6 } }
@@ -65,8 +67,7 @@ const corpus = {
 }
 
 // ————— reconstruction error (per ALGORITHM.md §10 objective) —————
-const luma8 = (r, g, b) => (77 * r + 150 * g + 29 * b + 128) >> 8
-function cellErrors(frame, source, columns) {
+function cellErrors(frame, source) {
   const reduced = reduceSource(source, frame.columns, frame.rows, true)
   const SW = frame.columns * 8
   const { masksLo, masksHi } = frame.profile.structural
@@ -108,7 +109,8 @@ function cellErrors(frame, source, columns) {
   return errors
 }
 
-const pctl = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))]
+const pctl = (sorted, p) =>
+  sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))]
 
 // ————— quality sweep —————
 const COLUMNS = 32
@@ -137,7 +139,10 @@ for (const [name, image] of Object.entries(corpus)) {
       })
     }
     report('shape6-lut', matchFrame(image, { profile, columns: COLUMNS, color, matcher: 'shape6' }))
-    report('shape6-brute', matchFrame(image, { profile: profileNoLut, columns: COLUMNS, color, matcher: 'shape6' }))
+    report(
+      'shape6-brute',
+      matchFrame(image, { profile: profileNoLut, columns: COLUMNS, color, matcher: 'shape6' }),
+    )
     report('ramp', matchFrame(image, { profile, columns: COLUMNS, color, matcher: 'ramp' }))
   }
 }
@@ -167,7 +172,6 @@ const tBrute = time({ profile: profileNoLut, matcher: 'shape6' })
 const tRamp = time({ profile, matcher: 'ramp' })
 
 // ————— report —————
-const fmt = (v, d = 2) => v.toFixed(d).padStart(9)
 let md = `# Approximate matcher quality (spec §36)
 
 Generated ${new Date().toISOString()} · Node ${process.version} · ${cpus()[0].model}
@@ -180,7 +184,9 @@ Deltas are per-sample squared-RGB reconstruction error increases vs exact (lower
 for (const r of rows) {
   md += `| ${r.image} | ${r.color} | ${r.matcher} | ${r.recall.toFixed(1)} | ${r.meanDelta.toFixed(1)} | ${r.p95Delta.toFixed(1)} |\n`
 }
-const worst = rows.filter((r) => r.matcher === 'shape6-lut').sort((a, b) => a.recall - b.recall)[0]
+const worst = rows
+  .filter((r) => r.matcher === 'shape6-lut')
+  .toSorted((a, b) => a.recall - b.recall)[0]
 md += `
 Worst shape6-lut case: **${worst.image} / ${worst.color}** at ${worst.recall.toFixed(1)}% recall.
 `

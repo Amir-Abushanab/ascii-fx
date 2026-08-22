@@ -2,10 +2,29 @@
   "name": "@ascii-fx/three",
   "version": "0.1.0",
   "description": "Three.js adapter for ASCII FX: AsciiPass postprocessing for WebGPURenderer and an instanced AsciiGlyphs renderer.",
-  "license": "MIT",
-  "engines": {
-    "node": ">=22"
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "ascii-fx",
+    "postprocessing",
+    "three",
+    "threejs",
+    "webgpu"
+  ],
+  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
+  "bugs": {
+    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
   },
+  "license": "MIT",
+  "author": "Amir Abushanab (https://github.com/Amir-Abushanab)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
+    "directory": "packages/three"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -14,15 +33,12 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
-  },
-  "peerDependencies": {
-    "three": ">=0.170.0"
   },
   "dependencies": {
     "@ascii-fx/core": "workspace:*",
@@ -35,13 +51,10 @@
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
-    "directory": "packages/three"
+  "peerDependencies": {
+    "three": ">=0.170.0"
   },
-  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
-  "bugs": {
-    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
+  "engines": {
+    "node": ">=22"
   }
 }

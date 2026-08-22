@@ -9,18 +9,18 @@ import { loadProfile } from '@ascii-fx/core'
 const ascii = await createAsciiRenderer({
   canvas,
   profile: await loadProfile('/default.asciip'),
-  backend: 'auto',          // webgpu → exact cpu fallback
+  backend: 'auto', // webgpu → exact cpu fallback
   columns: 160,
   color: 'full',
 })
 
 ascii.setSource(video)
-ascii.start()               // requestVideoFrameCallback for videos, rAF otherwise
+ascii.start() // requestVideoFrameCallback for videos, rAF otherwise
 
 ascii.setInteraction({ type: 'reveal', radius: 0.18, feather: 0.08 })
 canvas.addEventListener('pointermove', (e) => ascii.pointer.set(x01, y01))
 
-const frame = await ascii.captureFrame()   // the only GPU→CPU readback path
+const frame = await ascii.captureFrame() // the only GPU→CPU readback path
 ascii.destroy()
 ```
 

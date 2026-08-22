@@ -1,7 +1,11 @@
 import type { RawImage } from '@ascii-fx/core'
 import { idiv, rdiv } from '@ascii-fx/core'
 
-const make = (width: number, height: number, fn: (x: number, y: number) => [number, number, number]): RawImage => {
+const make = (
+  width: number,
+  height: number,
+  fn: (x: number, y: number) => [number, number, number],
+): RawImage => {
   const data = new Uint8Array(width * height * 4)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {

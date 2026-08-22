@@ -7,13 +7,16 @@ import { createAsciiRenderer } from '@ascii-fx/gpu'
 import { makeChromaticProfile, solid } from '../../core/test/synthetic.js'
 
 const gpuAvailable =
-  typeof navigator !== 'undefined' && 'gpu' in navigator ? (await navigator.gpu.requestAdapter()) !== null : false
+  typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (await navigator.gpu.requestAdapter()) !== null
+    : false
 
 const GLYPH = [200, 40, 40, 128] as const // straight-alpha red, half transparent
 const BACKDROP = [40, 80, 120] as const
 
 /** The §C3 integer rule compositeFrame uses; GPU float math may differ by ~1. */
-const over = (c: number, b: number): number => Math.round((c * GLYPH[3] + b * (255 - GLYPH[3])) / 255)
+const over = (c: number, b: number): number =>
+  Math.round((c * GLYPH[3] + b * (255 - GLYPH[3])) / 255)
 
 function grayImage(): { width: number; height: number; data: Uint8Array } {
   const data = new Uint8Array(32 * 32 * 4)
@@ -44,7 +47,10 @@ const px = (img: ImageData, x: number, y: number): number[] => {
 
 const expectNear = (got: number[], want: number[], tol: number, label: string): void => {
   for (let c = 0; c < 3; c++) {
-    expect(Math.abs(got[c] - want[c]), `${label} channel ${c}: got ${got}, want ${want}`).toBeLessThanOrEqual(tol)
+    expect(
+      Math.abs(got[c] - want[c]),
+      `${label} channel ${c}: got ${got}, want ${want}`,
+    ).toBeLessThanOrEqual(tol)
   }
 }
 
@@ -69,7 +75,11 @@ describe.runIf(gpuAvailable)('chromatic compositing draws the backdrop it matche
       renderer.render()
       await (renderer as unknown as { device: GPUDevice }).device.queue.onSubmittedWorkDone()
       const img = await probePixels(canvas)
-      const want = [over(GLYPH[0], BACKDROP[0]), over(GLYPH[1], BACKDROP[1]), over(GLYPH[2], BACKDROP[2])]
+      const want = [
+        over(GLYPH[0], BACKDROP[0]),
+        over(GLYPH[1], BACKDROP[1]),
+        over(GLYPH[2], BACKDROP[2]),
+      ]
       expectNear(px(img, 32, 16), want, 3, 'cell interior')
       expectNear(px(img, 4, 16), [...BACKDROP], 2, 'letterbox')
     } finally {

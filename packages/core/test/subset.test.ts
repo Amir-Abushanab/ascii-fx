@@ -2,7 +2,19 @@
 // exactly and match identically to a profile built directly from the subset.
 import { describe, expect, it } from 'vitest'
 import { matchFrame, subsetProfile } from '@ascii-fx/core'
-import { G_BOTTOM, G_FULL, G_LEFT, G_RIGHT, G_SPACE, G_TOP, STANDARD_SIX, makeChromaticProfile, makeProfile, randomImage, solid } from './synthetic.js'
+import {
+  G_BOTTOM,
+  G_FULL,
+  G_LEFT,
+  G_RIGHT,
+  G_SPACE,
+  G_TOP,
+  STANDARD_SIX,
+  makeChromaticProfile,
+  makeProfile,
+  randomImage,
+  solid,
+} from './synthetic.js'
 
 const tile = (p: ReturnType<typeof makeProfile>, id: number): Uint8Array => {
   const { atlas } = p
@@ -10,7 +22,13 @@ const tile = (p: ReturnType<typeof makeProfile>, id: number): Uint8Array => {
   const sx = (id % atlas.columns) * atlas.pitchWidth
   const sy = Math.floor(id / atlas.columns) * atlas.pitchHeight
   for (let y = 0; y < atlas.pitchHeight; y++) {
-    out.set(atlas.data.subarray((sy + y) * atlas.width + sx, (sy + y) * atlas.width + sx + atlas.pitchWidth), y * atlas.pitchWidth)
+    out.set(
+      atlas.data.subarray(
+        (sy + y) * atlas.width + sx,
+        (sy + y) * atlas.width + sx + atlas.pitchWidth,
+      ),
+      y * atlas.pitchWidth,
+    )
   }
   return out
 }
@@ -48,7 +66,11 @@ describe('subsetProfile', () => {
 
   it('only emits allowed glyphs', () => {
     const sub = subsetProfile(full, [G_FULL.char, G_LEFT.char, G_RIGHT.char].join(''))
-    const frame = matchFrame(randomImage(96, 48, 3), { profile: sub, columns: 12, color: 'foreground' })
+    const frame = matchFrame(randomImage(96, 48, 3), {
+      profile: sub,
+      columns: 12,
+      color: 'foreground',
+    })
     for (const id of frame.glyphIds) expect(id).toBeLessThan(3)
   })
 
@@ -69,6 +91,9 @@ describe('subsetProfile string form (grapheme glyphs)', () => {
   const SUN = '☀️' // U+2600 U+FE0F
   const WAVE = '🌊'
   const FAMILY = '👨‍👩‍👧' // ZWJ sequence, 8 code units
+  // Fixture shorthand, kept beside the glyph table it builds so the masks stay
+  // readable as a block.
+  // eslint-disable-next-line unicorn/consistent-function-scoping
   const row = (bits: string): string[] => Array(8).fill(bits)
   const emoji = makeProfile([
     { char: ' ', rows: row('00000000') },
@@ -126,7 +151,11 @@ describe('subsetProfile string form (grapheme glyphs)', () => {
   })
 
   it('narrows a chromatic palette via the string form, samples in lockstep', () => {
-    const p = makeChromaticProfile([solid(HEART, 200, 30, 30), solid(WAVE, 30, 90, 200), solid(' ', 0, 0, 0, 0)])
+    const p = makeChromaticProfile([
+      solid(HEART, 200, 30, 30),
+      solid(WAVE, 30, 90, 200),
+      solid(' ', 0, 0, 0, 0),
+    ])
     const sub = subsetProfile(p, `${WAVE}${HEART}`)
     expect(sub.glyphs).toEqual([WAVE, HEART])
     const idOf = (g: string): number => p.glyphs.indexOf(g)

@@ -2,10 +2,31 @@
   "name": "@ascii-fx/react-three",
   "version": "0.1.0",
   "description": "React Three Fiber bindings for ASCII FX: <AsciiEffect>, <AsciiGlyphs>, useAsciiEffect (WebGPURenderer only).",
-  "license": "MIT",
-  "engines": {
-    "node": ">=22"
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "ascii-fx",
+    "postprocessing",
+    "react",
+    "react-three-fiber",
+    "three",
+    "threejs",
+    "webgpu"
+  ],
+  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
+  "bugs": {
+    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
   },
+  "license": "MIT",
+  "author": "Amir Abushanab (https://github.com/Amir-Abushanab)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
+    "directory": "packages/react-three"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -14,17 +35,12 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
-  },
-  "peerDependencies": {
-    "@react-three/fiber": "^9.0.0",
-    "react": "^19.0.0",
-    "three": ">=0.170.0"
   },
   "dependencies": {
     "@ascii-fx/core": "workspace:*",
@@ -41,13 +57,12 @@
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
-    "directory": "packages/react-three"
+  "peerDependencies": {
+    "@react-three/fiber": "^9.0.0",
+    "react": "^19.0.0",
+    "three": ">=0.170.0"
   },
-  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
-  "bugs": {
-    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
+  "engines": {
+    "node": ">=22"
   }
 }

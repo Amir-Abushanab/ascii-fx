@@ -67,16 +67,19 @@ describe('buildChromaticProfile', () => {
     ] as const) {
       for (let k = 0; k < 64; k++) {
         const p = id * 256 + k * 4
-        expect([profile.chromatic!.samples[p], profile.chromatic!.samples[p + 1], profile.chromatic!.samples[p + 2]]).toEqual([
-          ...rgb,
-        ])
+        expect([
+          profile.chromatic!.samples[p],
+          profile.chromatic!.samples[p + 1],
+          profile.chromatic!.samples[p + 2],
+        ]).toEqual([...rgb])
       }
     }
   })
 
   it('keeps sub-cell structure in the descriptor', () => {
     const { profile } = build()
-    const at = (k: number) => profile.chromatic!.samples.subarray(3 * 256 + k * 4, 3 * 256 + k * 4 + 3)
+    const at = (k: number) =>
+      profile.chromatic!.samples.subarray(3 * 256 + k * 4, 3 * 256 + k * 4 + 3)
     expect([...at(0)]).toEqual([200, 20, 20]) // top-left
     expect([...at(7)]).toEqual([20, 20, 200]) // top-right
   })
@@ -96,14 +99,23 @@ describe('buildChromaticProfile', () => {
 
   it('rejects duplicate graphemes and malformed images', () => {
     const img = solidImage(8, 8, 1, 2, 3)
-    expect(() => buildChromaticProfile({ glyphs: [{ char: 'a', image: img }, { char: 'a', image: img }] })).toThrow(
-      /Duplicate/,
-    )
+    expect(() =>
+      buildChromaticProfile({
+        glyphs: [
+          { char: 'a', image: img },
+          { char: 'a', image: img },
+        ],
+      }),
+    ).toThrow(/Duplicate/)
     expect(() => buildChromaticProfile({ glyphs: [] })).toThrow(/at least one glyph/)
     expect(() =>
-      buildChromaticProfile({ glyphs: [{ char: 'a', image: { width: 4, height: 4, data: new Uint8Array(3) } }] }),
+      buildChromaticProfile({
+        glyphs: [{ char: 'a', image: { width: 4, height: 4, data: new Uint8Array(3) } }],
+      }),
     ).toThrow(/width \* height \* 4/)
-    expect(() => buildChromaticProfile({ glyphs: [{ char: 'a', image: img }], cellSize: 4 })).toThrow(/cellSize/)
+    expect(() =>
+      buildChromaticProfile({ glyphs: [{ char: 'a', image: img }], cellSize: 4 }),
+    ).toThrow(/cellSize/)
   })
 })
 
@@ -123,7 +135,12 @@ describe('chromatic profile binary round-trip', () => {
     const { profile, binary } = build()
     const source = solidImage(16, 16, 190, 30, 30)
     const before = matchFrame(source, { profile, columns: 2, rows: 2, matcher: 'chromatic' })
-    const after = matchFrame(source, { profile: decodeProfile(binary), columns: 2, rows: 2, matcher: 'chromatic' })
+    const after = matchFrame(source, {
+      profile: decodeProfile(binary),
+      columns: 2,
+      rows: 2,
+      matcher: 'chromatic',
+    })
     expect([...after.glyphIds]).toEqual([...before.glyphIds])
   })
 

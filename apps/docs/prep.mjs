@@ -9,7 +9,9 @@ const font = fileURLToPath(new URL('../../fixtures/fonts/GeistMono-Regular.ttf',
 const dstDir = fileURLToPath(new URL('./public/', import.meta.url))
 
 if (!existsSync(profile)) {
-  console.error('fixtures/profiles/default.asciip missing — run `pnpm golden:update` at the repo root first.')
+  console.error(
+    'fixtures/profiles/default.asciip missing — run `pnpm golden:update` at the repo root first.',
+  )
   process.exit(1)
 }
 mkdirSync(dstDir, { recursive: true })

@@ -9,7 +9,10 @@ it('reduce pass roundtrips an 8×8 identity source', async () => {
   const tex = device.createTexture({
     size: [8, 8],
     format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    usage:
+      GPUTextureUsage.TEXTURE_BINDING |
+      GPUTextureUsage.COPY_DST |
+      GPUTextureUsage.RENDER_ATTACHMENT,
   })
   const data = new Uint8Array(8 * 8 * 4)
   for (let i = 0; i < 64; i++) {
@@ -27,14 +30,20 @@ it('reduce pass roundtrips an 8×8 identity source', async () => {
   params[2] = 1 // cols
   params[3] = 1 // rows
   params[8] = 0 // alphaMask off
-  const paramsBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const paramsBuf = device.createBuffer({
+    size: 80,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  })
   device.queue.writeBuffer(paramsBuf, 0, params)
 
   const reduced = device.createBuffer({
     size: 64 * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   })
-  const staging = device.createBuffer({ size: 64 * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST })
+  const staging = device.createBuffer({
+    size: 64 * 4,
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+  })
 
   const pipeline = await device.createComputePipelineAsync({
     layout: 'auto',

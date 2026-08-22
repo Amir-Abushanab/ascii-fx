@@ -88,7 +88,8 @@ function fitColors(
   fgOpt: readonly [number, number, number],
   bgOpt: readonly [number, number, number],
 ): [number, number] {
-  if (color === 'mono') return [packRGBA(fgOpt[0], fgOpt[1], fgOpt[2]), packRGBA(bgOpt[0], bgOpt[1], bgOpt[2])]
+  if (color === 'mono')
+    return [packRGBA(fgOpt[0], fgOpt[1], fgOpt[2]), packRGBA(bgOpt[0], bgOpt[1], bgOpt[2])]
   let iR = 0
   let iG = 0
   let iB = 0
@@ -134,18 +135,14 @@ function fitColors(
 function runApproxMatcher(
   source: RawImage,
   options: MatchOptions,
-  pick: (
-    pl: Uint8Array,
-    sr: Uint8Array,
-    sg: Uint8Array,
-    sb: Uint8Array,
-    meanL: number,
-  ) => number,
+  pick: (pl: Uint8Array, sr: Uint8Array, sg: Uint8Array, sb: Uint8Array, meanL: number) => number,
 ): AsciiFrame {
   const profile = options.profile
   const color = options.color ?? 'mono'
   if (color === 'glyph') {
-    throw new Error("color: 'glyph' is produced by matcher: 'chromatic'; shape6 and ramp fit colour to a mask.")
+    throw new Error(
+      "color: 'glyph' is produced by matcher: 'chromatic'; shape6 and ramp fit colour to a mask.",
+    )
   }
   const alphaMode = options.alpha ?? 'mask'
   const flatT = options.flatThreshold ?? 15
@@ -158,7 +155,13 @@ function runApproxMatcher(
         ? luma8(fgOpt[0], fgOpt[1], fgOpt[2]) >= luma8(bgOpt[0], bgOpt[1], bgOpt[2])
         : luma8(bgOpt[0], bgOpt[1], bgOpt[2]) < 128
 
-  const { columns, rows } = deriveGrid(source.width, source.height, profile, options.columns, options.rows)
+  const { columns, rows } = deriveGrid(
+    source.width,
+    source.height,
+    profile,
+    options.columns,
+    options.rows,
+  )
   const SW = columns * 8
   const reduced = reduceSource(source, columns, rows, alphaMode === 'ignore')
   const n = columns * rows

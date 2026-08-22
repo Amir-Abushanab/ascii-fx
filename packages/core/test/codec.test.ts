@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { decodeFrame, decodeProfile, encodeFrame, encodeProfile, matchFrame, peekFrame } from '@ascii-fx/core'
+import {
+  decodeFrame,
+  decodeProfile,
+  encodeFrame,
+  encodeProfile,
+  matchFrame,
+  peekFrame,
+} from '@ascii-fx/core'
 import { STANDARD_SIX, makeProfile, randomImage, randomProfile } from './synthetic.js'
 
-const sectionBase = (bytes: Uint8Array, headerSize: number, countOffset: number, type: number): number => {
+const sectionBase = (
+  bytes: Uint8Array,
+  headerSize: number,
+  countOffset: number,
+  type: number,
+): number => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const count = view.getUint32(countOffset, true)
   for (let i = 0; i < count; i++) {

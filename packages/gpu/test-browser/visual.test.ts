@@ -7,7 +7,9 @@ import { createAsciiRenderer } from '@ascii-fx/gpu'
 import profileUrl from '../../../fixtures/profiles/default.asciip?url'
 
 const gpuAvailable =
-  typeof navigator !== 'undefined' && 'gpu' in navigator ? (await navigator.gpu.requestAdapter()) !== null : false
+  typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (await navigator.gpu.requestAdapter()) !== null
+    : false
 
 describe.runIf(gpuAvailable)('composite renders glyph shapes (not blocks)', () => {
   it('mono cells show partial ink coverage and internal structure', async () => {
@@ -97,7 +99,13 @@ describe.runIf(gpuAvailable)('composite renders glyph shapes (not blocks)', () =
       data: new Uint8Array(32 * 16 * 4).fill(255),
     }
     const canvas = new OffscreenCanvas(480, 256)
-    const renderer = await createAsciiRenderer({ canvas, profile, backend: 'webgpu', columns: 4, color: 'mono' })
+    const renderer = await createAsciiRenderer({
+      canvas,
+      profile,
+      backend: 'webgpu',
+      columns: 4,
+      color: 'mono',
+    })
     try {
       renderer.setSource(white)
       renderer.render()

@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest'
 import { decodeProfile } from '@ascii-fx/core'
 import { buildProfile } from '@ascii-fx/compiler'
 
-const FONT_PATH = fileURLToPath(new URL('../../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url))
+const FONT_PATH = fileURLToPath(
+  new URL('../../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url),
+)
 const FONT_SHA256 = '42d8ad2e610238e64e8abfcde3037c63f7850a73928742b7ab7229d897bcb155'
 
 const fontBytes = new Uint8Array(readFileSync(FONT_PATH))
@@ -121,7 +123,10 @@ describe('profile compilation (Geist Mono fixture)', () => {
         data[p + 3] = 255
       }
     }
-    const frame = matchFrame({ width: 32, height: 16, data }, { profile, columns: 4, color: 'mono' })
+    const frame = matchFrame(
+      { width: 32, height: 16, data },
+      { profile, columns: 4, color: 'mono' },
+    )
     const img = compositeFrame(frame)
     const cw = profile.atlas.cellWidth
     const litFraction = (cell: number): number => {

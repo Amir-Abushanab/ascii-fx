@@ -27,7 +27,9 @@ export function getDevice(renderer: WebGPURenderer): GPUDevice {
 export function getCanvasContext(renderer: WebGPURenderer): GPUCanvasContext {
   const context = backendOf(renderer)?.context
   if (!context) {
-    throw new Error('Could not access the WebGPU canvas context via renderer.backend (supported: three r170–r185).')
+    throw new Error(
+      'Could not access the WebGPU canvas context via renderer.backend (supported: three r170–r185).',
+    )
   }
   return context
 }

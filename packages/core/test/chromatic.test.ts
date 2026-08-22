@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { compositeFrame, FLAG_TRANSPARENT, matchFrame, matchFrameChromatic, subsetProfile } from '@ascii-fx/core'
+import {
+  compositeFrame,
+  FLAG_TRANSPARENT,
+  matchFrame,
+  matchFrameChromatic,
+  subsetProfile,
+} from '@ascii-fx/core'
 import { STANDARD_SIX, makeCell, makeChromaticProfile, makeProfile, solid } from './synthetic.js'
 
 // Deliberately not equally spaced: red sits nearer black than green does, so a
@@ -33,7 +39,12 @@ describe('chromatic-v1 matcher', () => {
   })
 
   it('emits colorMode "glyph" and no colour planes — the colour is in the glyph', () => {
-    const frame = matchFrame(flat(190, 30, 30), { profile: palette, columns: 1, rows: 1, matcher: 'chromatic' })
+    const frame = matchFrame(flat(190, 30, 30), {
+      profile: palette,
+      columns: 1,
+      rows: 1,
+      matcher: 'chromatic',
+    })
     expect(frame.colorMode).toBe('glyph')
     expect(frame.foreground).toBeUndefined()
     expect(frame.background).toBeUndefined()
@@ -65,12 +76,22 @@ describe('chromatic-v1 matcher', () => {
 
   it('ties keep the lower glyph id', () => {
     const p = makeChromaticProfile([solid('a', 100, 100, 100), solid('b', 100, 100, 100)])
-    const frame = matchFrame(flat(100, 100, 100), { profile: p, columns: 1, rows: 1, matcher: 'chromatic' })
+    const frame = matchFrame(flat(100, 100, 100), {
+      profile: p,
+      columns: 1,
+      rows: 1,
+      matcher: 'chromatic',
+    })
     expect(frame.getCell(0, 0).glyphId).toBe(0)
   })
 
   it('flags a transparent cell and emits the blank glyph', () => {
-    const frame = matchFrame(flat(200, 20, 20, 0), { profile: palette, columns: 1, rows: 1, matcher: 'chromatic' })
+    const frame = matchFrame(flat(200, 20, 20, 0), {
+      profile: palette,
+      columns: 1,
+      rows: 1,
+      matcher: 'chromatic',
+    })
     const cell = frame.getCell(0, 0)
     expect(cell.flags & FLAG_TRANSPARENT).toBe(FLAG_TRANSPARENT)
     expect(cell.glyphId).toBe(0)
@@ -106,7 +127,12 @@ describe('chromatic-v1 matcher', () => {
     const source = flat(103, 103, 103) // 'b' wins outright
 
     it('is off by default', () => {
-      const frame = matchFrame(source, { profile: nearTie, columns: 1, rows: 1, matcher: 'chromatic' })
+      const frame = matchFrame(source, {
+        profile: nearTie,
+        columns: 1,
+        rows: 1,
+        matcher: 'chromatic',
+      })
       expect(frame.getCell(0, 0).glyphId).toBe(1)
     })
 
@@ -151,16 +177,27 @@ describe('chromatic-v1 matcher', () => {
   describe('guards', () => {
     it('refuses a profile with no chromatic data', () => {
       expect(() =>
-        matchFrame(flat(10, 10, 10), { profile: makeProfile(STANDARD_SIX), columns: 1, rows: 1, matcher: 'chromatic' }),
+        matchFrame(flat(10, 10, 10), {
+          profile: makeProfile(STANDARD_SIX),
+          columns: 1,
+          rows: 1,
+          matcher: 'chromatic',
+        }),
       ).toThrow(/no chromatic glyph data/)
     })
 
     it("refuses color: 'glyph' on the mask-fitting matchers", () => {
       const p = makeProfile(STANDARD_SIX)
       for (const matcher of ['structural', 'shape6', 'ramp'] as const) {
-        expect(() => matchFrame(flat(10, 10, 10), { profile: p, columns: 1, rows: 1, color: 'glyph', matcher })).toThrow(
-          /chromatic/,
-        )
+        expect(() =>
+          matchFrame(flat(10, 10, 10), {
+            profile: p,
+            columns: 1,
+            rows: 1,
+            color: 'glyph',
+            matcher,
+          }),
+        ).toThrow(/chromatic/)
       }
     })
   })
@@ -174,10 +211,19 @@ describe('chromatic-v1 matcher', () => {
 })
 
 describe('compositing chromatic-v1 frames', () => {
-  const p = makeChromaticProfile([solid('r', 200, 20, 20), solid('b', 20, 20, 200), solid('h', 255, 255, 255, 128)])
+  const p = makeChromaticProfile([
+    solid('r', 200, 20, 20),
+    solid('b', 20, 20, 200),
+    solid('h', 255, 255, 255, 128),
+  ])
 
   it('draws the glyph colour rather than tinting coverage', () => {
-    const frame = matchFrame(flat(190, 30, 30), { profile: p, columns: 1, rows: 1, matcher: 'chromatic' })
+    const frame = matchFrame(flat(190, 30, 30), {
+      profile: p,
+      columns: 1,
+      rows: 1,
+      matcher: 'chromatic',
+    })
     const img = compositeFrame(frame, { background: [0, 0, 0] })
     expect([img.data[0], img.data[1], img.data[2], img.data[3]]).toEqual([200, 20, 20, 255])
   })
@@ -210,7 +256,12 @@ describe('compositing chromatic-v1 frames', () => {
 
   it('refuses to draw a chromatic frame whose profile has no RGBA atlas', () => {
     const stripped = { ...p, atlas: { ...p.atlas, rgba: undefined } }
-    const frame = matchFrame(flat(190, 30, 30), { profile: stripped, columns: 1, rows: 1, matcher: 'chromatic' })
+    const frame = matchFrame(flat(190, 30, 30), {
+      profile: stripped,
+      columns: 1,
+      rows: 1,
+      matcher: 'chromatic',
+    })
     expect(() => compositeFrame(frame)).toThrow(/no RGBA atlas/)
   })
 })
@@ -229,7 +280,9 @@ describe('narrowing a chromatic palette', () => {
     expect(sub.atlas.rgba).toBeDefined()
     // Order follows the requested list, so ids are remapped, not preserved.
     expect(sub.glyphs).toEqual(['b', 'r'])
-    expect(sub.chromatic!.samples.subarray(0, 3)).toEqual(p.chromatic!.samples.subarray(2 * 256, 2 * 256 + 3))
+    expect(sub.chromatic!.samples.subarray(0, 3)).toEqual(
+      p.chromatic!.samples.subarray(2 * 256, 2 * 256 + 3),
+    )
     expect(sub.chromatic!.samples.subarray(256, 259)).toEqual(p.chromatic!.samples.subarray(0, 3))
   })
 
@@ -257,9 +310,17 @@ describe('narrowing a chromatic palette', () => {
 
   it('stops the matcher reaching for a glyph that was removed', () => {
     const white = flat(240, 240, 240)
-    expect(matchFrame(white, { profile: p, columns: 1, rows: 1, matcher: 'chromatic' }).getCell(0, 0).glyph).toBe('w')
+    expect(
+      matchFrame(white, { profile: p, columns: 1, rows: 1, matcher: 'chromatic' }).getCell(0, 0)
+        .glyph,
+    ).toBe('w')
     const narrowed = subsetProfile(p, ['r', 'g', 'b'])
-    const picked = matchFrame(white, { profile: narrowed, columns: 1, rows: 1, matcher: 'chromatic' }).getCell(0, 0)
+    const picked = matchFrame(white, {
+      profile: narrowed,
+      columns: 1,
+      rows: 1,
+      matcher: 'chromatic',
+    }).getCell(0, 0)
     expect(picked.glyph).not.toBe('w')
     expect(['r', 'g', 'b']).toContain(picked.glyph)
   })

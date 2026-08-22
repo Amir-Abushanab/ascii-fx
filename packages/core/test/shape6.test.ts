@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AsciiProfile } from '@ascii-fx/core'
-import {
-  computeShape6,
-  matchFrame,
-  quantizeShape6,
-  shape6BucketCenter,
-} from '@ascii-fx/core'
+import { computeShape6, matchFrame, quantizeShape6, shape6BucketCenter } from '@ascii-fx/core'
 import { STANDARD_SIX, makeCell, makeProfile, mulberry32, randomImage } from './synthetic.js'
 
 /** Synthetic glyph vectors: identical formulas over mask bits × 255. */
@@ -16,7 +11,10 @@ const withShape6 = (base: AsciiProfile, lut = false): AsciiProfile => {
   const desc = new Int32Array(6)
   for (let g = 0; g < n; g++) {
     for (let k = 0; k < 64; k++) {
-      const bit = k < 32 ? (base.structural.masksLo[g] >>> k) & 1 : (base.structural.masksHi[g] >>> (k - 32)) & 1
+      const bit =
+        k < 32
+          ? (base.structural.masksLo[g] >>> k) & 1
+          : (base.structural.masksHi[g] >>> (k - 32)) & 1
       pl[k] = bit ? 255 : 0
     }
     computeShape6(pl, desc)
@@ -114,12 +112,23 @@ describe('shape6-v1 (ALGORITHM.md §18)', () => {
   it('LUT path stays close to brute force and is deterministic', () => {
     const withLut = withShape6(makeProfile(STANDARD_SIX), true)
     const img = randomImage(80, 48, 31)
-    const brute = matchFrame(img, { profile: profile6, columns: 10, matcher: 'shape6', color: 'full' })
+    const brute = matchFrame(img, {
+      profile: profile6,
+      columns: 10,
+      matcher: 'shape6',
+      color: 'full',
+    })
     const lut = matchFrame(img, { profile: withLut, columns: 10, matcher: 'shape6', color: 'full' })
-    const lut2 = matchFrame(img, { profile: withLut, columns: 10, matcher: 'shape6', color: 'full' })
+    const lut2 = matchFrame(img, {
+      profile: withLut,
+      columns: 10,
+      matcher: 'shape6',
+      color: 'full',
+    })
     expect(lut2.glyphIds).toEqual(lut.glyphIds)
     let agree = 0
-    for (let i = 0; i < brute.glyphIds.length; i++) if (brute.glyphIds[i] === lut.glyphIds[i]) agree++
+    for (let i = 0; i < brute.glyphIds.length; i++)
+      if (brute.glyphIds[i] === lut.glyphIds[i]) agree++
     expect(agree / brute.glyphIds.length).toBeGreaterThan(0.85)
   })
 })

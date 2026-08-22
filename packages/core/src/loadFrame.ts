@@ -11,7 +11,9 @@ export async function loadFrame(source: FrameSource, profile: AsciiProfile): Pro
   const url = typeof source === 'string' ? source : source instanceof URL ? source.href : source.url
   const res = await fetch(url)
   if (!res.ok) {
-    throw new Error(`Failed to load ASCII FX frame from ${url} (${res.status}). Is the .asciif asset deployed?`)
+    throw new Error(
+      `Failed to load ASCII FX frame from ${url} (${res.status}). Is the .asciif asset deployed?`,
+    )
   }
   return decodeFrame(new Uint8Array(await res.arrayBuffer()), profile)
 }

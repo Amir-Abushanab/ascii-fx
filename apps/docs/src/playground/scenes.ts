@@ -276,7 +276,7 @@ export const SCENES: Record<SceneKind, { label: string; create: () => Scene }> =
   dvd: { label: 'DVD bounce', create: dvd },
   plasma: { label: 'Plasma', create: plasma },
   starfield: { label: 'Starfield', create: starfield },
-  life: { label: "Game of Life", create: life },
+  life: { label: 'Game of Life', create: life },
   clock: { label: 'Clock', create: clock },
   marquee: { label: 'Marquee ♪', create: marquee },
 }

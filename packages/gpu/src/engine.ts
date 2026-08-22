@@ -137,7 +137,10 @@ export class AsciiEngine {
       size: [atlas.width, atlas.height],
       format: 'r8unorm',
       mipLevelCount: ATLAS_MIPS,
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      usage:
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.RENDER_ATTACHMENT,
     })
     device.queue.writeTexture(
       { texture: atlasTexture },
@@ -182,7 +185,10 @@ export class AsciiEngine {
       size: hasRgba ? [atlas.width, atlas.height] : [1, 1],
       format: 'rgba8unorm',
       mipLevelCount: hasRgba ? ATLAS_MIPS : 1,
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      usage:
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.RENDER_ATTACHMENT,
     })
     if (atlas.rgba) {
       device.queue.writeTexture(
@@ -227,7 +233,10 @@ export class AsciiEngine {
       const bg = device.createBindGroup({
         layout: mipgen.getBindGroupLayout(0),
         entries: [
-          { binding: 0, resource: atlasTexture.createView({ baseMipLevel: level - 1, mipLevelCount: 1 }) },
+          {
+            binding: 0,
+            resource: atlasTexture.createView({ baseMipLevel: level - 1, mipLevelCount: 1 }),
+          },
           { binding: 1, resource: sampler },
         ],
       })
@@ -253,7 +262,10 @@ export class AsciiEngine {
         const bgRgba = device.createBindGroup({
           layout: mipgenRgba.getBindGroupLayout(0),
           entries: [
-            { binding: 0, resource: atlasRgbaTexture.createView({ baseMipLevel: level - 1, mipLevelCount: 1 }) },
+            {
+              binding: 0,
+              resource: atlasRgbaTexture.createView({ baseMipLevel: level - 1, mipLevelCount: 1 }),
+            },
             { binding: 1, resource: sampler },
           ],
         })
@@ -370,9 +382,18 @@ export class AsciiStream {
     this.engine = engine
     this.pipeComposite = compositePipeline
     const d = engine.device
-    this.paramsBuf = d.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-    this.compBuf = d.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-    this.fxBuf = d.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+    this.paramsBuf = d.createBuffer({
+      size: 80,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    this.compBuf = d.createBuffer({
+      size: 96,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    this.fxBuf = d.createBuffer({
+      size: 48,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
   }
 
   grid(): { columns: number; rows: number } | null {
@@ -390,7 +411,12 @@ export class AsciiStream {
    * Bind a source texture and match options; (re)allocates grid buffers and
    * bind groups as needed. Returns whether the grid changed.
    */
-  configure(src: GPUTexture, srcW: number, srcH: number, opts: StreamMatchOptions): { gridChanged: boolean } {
+  configure(
+    src: GPUTexture,
+    srcW: number,
+    srcH: number,
+    opts: StreamMatchOptions,
+  ): { gridChanged: boolean } {
     if (opts.matcher === 'chromatic' && !this.engine.pipeChromatic) {
       throw new Error(
         `Profile ${this.engine.profile.id} carries no chromatic glyph data, so color: 'glyph' has nothing ` +
@@ -408,7 +434,8 @@ export class AsciiStream {
           `${grid.columns}×${grid.rows} cells. Increase columns/rows or pre-scale the source.`,
       )
     }
-    const gridChanged = !this.gridDims || grid.columns !== this.gridDims.columns || grid.rows !== this.gridDims.rows
+    const gridChanged =
+      !this.gridDims || grid.columns !== this.gridDims.columns || grid.rows !== this.gridDims.rows
     const srcChanged = src !== this.boundSrc
     this.boundSrc = src
     this.srcW = srcW
@@ -454,8 +481,14 @@ export class AsciiStream {
         size: n * 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
       })
-      this.cellsBuf = d.createBuffer({ size: n * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
-      this.stagingBuf = d.createBuffer({ size: n * 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST })
+      this.cellsBuf = d.createBuffer({
+        size: n * 16,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      })
+      this.stagingBuf = d.createBuffer({
+        size: n * 16,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      })
     }
     let temporalAllocated = false
     if (this.temporalActive && !this.prevReducedBuf) {
@@ -605,8 +638,19 @@ export class AsciiStream {
   }
 
   /** Encode matching for a cell sub-rect (dirty-region path, spec §22). */
-  encodeMatchRect(enc: GPUCommandEncoder, baseCol: number, baseRow: number, cols: number, rows: number): void {
-    if (baseCol !== 0 || baseRow !== 0 || cols !== this.gridDims!.columns || rows !== this.gridDims!.rows) {
+  encodeMatchRect(
+    enc: GPUCommandEncoder,
+    baseCol: number,
+    baseRow: number,
+    cols: number,
+    rows: number,
+  ): void {
+    if (
+      baseCol !== 0 ||
+      baseRow !== 0 ||
+      cols !== this.gridDims!.columns ||
+      rows !== this.gridDims!.rows
+    ) {
       this.syncMatchParams(baseCol, baseRow)
     }
     this.syncChromaticGlyphs()
@@ -666,7 +710,10 @@ export class AsciiStream {
     const originY = (ch - rows * cellScreenH) / 2
     const lod = Math.min(
       ATLAS_MIPS - 1,
-      Math.max(0, Math.log2(Math.max(atlas.cellWidth / cellScreenW, atlas.cellHeight / cellScreenH, 1))),
+      Math.max(
+        0,
+        Math.log2(Math.max(atlas.cellWidth / cellScreenW, atlas.cellHeight / cellScreenH, 1)),
+      ),
     )
     // Chromatic cells are matched against a backdrop (§C3), so they must be
     // drawn over that same backdrop or the choice is un-optimised on screen.
@@ -730,7 +777,9 @@ export class AsciiStream {
 
   encodeComposite(enc: GPUCommandEncoder, target: GPUTextureView): void {
     const pass = enc.beginRenderPass({
-      colorAttachments: [{ view: target, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }],
+      colorAttachments: [
+        { view: target, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' },
+      ],
     })
     pass.setPipeline(this.pipeComposite)
     pass.setBindGroup(0, this.bgComposite!)

@@ -50,6 +50,8 @@ export const HARNESS_PACKAGE_DISTS = ['core', 'gpu']
  * rather than checked in.
  */
 export async function buildShape6Profile() {
-  const font = new Uint8Array(await readFile(join(repoRoot, 'fixtures/fonts/GeistMono-Regular.ttf')))
+  const font = new Uint8Array(
+    await readFile(join(repoRoot, 'fixtures/fonts/GeistMono-Regular.ttf')),
+  )
   return encodeProfile(buildProfile({ font, shape6: { lut: true } }).profile)
 }

@@ -20,7 +20,9 @@ import source from '../../../benchmarks/RESULTS.md?raw'
 function section(heading: string): string {
   const body = findSection(heading)
   if (body === null) {
-    throw new Error(`RESULTS.md is missing the "${heading}" section — regenerate it with \`pnpm bench:compare\`.`)
+    throw new Error(
+      `RESULTS.md is missing the "${heading}" section — regenerate it with \`pnpm bench:compare\`.`,
+    )
   }
   return body
 }
@@ -31,7 +33,9 @@ function findSection(heading: string): string | null {
   // to itself rather than to "Cross-library render loop (emoji)". Fall back to
   // a prefix match, because some headings carry their parameters inline
   // ("## Speed (640×360 source, …)") and are referenced by their stem.
-  const m = new RegExp(`^${escaped}[ \t]*$`, 'm').exec(source) ?? new RegExp(`^${escaped}.*$`, 'm').exec(source)
+  const m =
+    new RegExp(`^${escaped}[ \t]*$`, 'm').exec(source) ??
+    new RegExp(`^${escaped}.*$`, 'm').exec(source)
   if (!m) return null
   const rest = source.slice(m.index + m[0].length)
   const end = rest.indexOf('\n## ')
@@ -86,7 +90,8 @@ export const crossLibrary: CrossLibraryRow[] = table(crossBody, CROSS_HEADING).m
 /** When the cross-library pass was measured, as an ISO string. */
 export const crossLibraryGeneratedAt: string = (() => {
   const m = crossBody.match(/Generated (\S+)/)
-  if (!m) throw new Error('RESULTS.md: no "Generated <timestamp>" line under the cross-library section.')
+  if (!m)
+    throw new Error('RESULTS.md: no "Generated <timestamp>" line under the cross-library section.')
   return m[1]
 })()
 
@@ -141,8 +146,8 @@ const SPEED_HEADING = '## Speed ('
 const speedBody = section(SPEED_HEADING)
 
 const matcherSpeed: MatcherSpeedRow[] = table(speedBody, SPEED_HEADING).map((cells) => {
-  const [matcher, ms, speedup] = cells
-  return { matcher, ms: num(ms, matcher), speedup: num(speedup, matcher) }
+  const [matcherName, ms, speedup] = cells
+  return { matcher: matcherName, ms: num(ms, matcherName), speedup: num(speedup, matcherName) }
 })
 
 const speedByName = new Map(matcherSpeed.map((r) => [r.matcher, r]))
@@ -200,12 +205,12 @@ const QUALITY_HEADING = '# Approximate matcher quality'
 const qualityBody = section(QUALITY_HEADING)
 
 const quality: QualityRow[] = table(qualityBody, QUALITY_HEADING).map((cells) => {
-  const [image, color, matcher, recall, meanErr, p95Err] = cells
-  const where = `${image}/${color}/${matcher}`
+  const [image, color, matcherName, recall, meanErr, p95Err] = cells
+  const where = `${image}/${color}/${matcherName}`
   return {
     image,
     color,
-    matcher,
+    matcher: matcherName,
     recall: num(recall, where),
     meanErr: num(meanErr, where),
     p95Err: num(p95Err, where),
@@ -215,6 +220,7 @@ const quality: QualityRow[] = table(qualityBody, QUALITY_HEADING).map((cells) =>
 /** Worst-case structural recall for a matcher across the whole corpus. */
 export function worstRecall(matcherName: string): QualityRow {
   const rows = quality.filter((r) => r.matcher === matcherName)
-  if (rows.length === 0) throw new Error(`RESULTS.md has no quality rows for matcher "${matcherName}".`)
+  if (rows.length === 0)
+    throw new Error(`RESULTS.md has no quality rows for matcher "${matcherName}".`)
   return rows.reduce((worst, r) => (r.recall < worst.recall ? r : worst))
 }

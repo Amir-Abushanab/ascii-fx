@@ -78,8 +78,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     const ctx = this.canvas.getContext('2d') as Ctx2D | null
     if (!ctx) {
       throw new Error(
-        "CPU backend could not acquire a 2d context on the target canvas. A canvas is permanently bound to its " +
-          "first context type — if this canvas previously ran the WebGPU backend, create a fresh <canvas> element " +
+        'CPU backend could not acquire a 2d context on the target canvas. A canvas is permanently bound to its ' +
+          'first context type — if this canvas previously ran the WebGPU backend, create a fresh <canvas> element ' +
           'to switch backends.',
       )
     }
@@ -180,7 +180,9 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (!(w > 0) || !(h > 0)) throw new Error('Source has zero dimensions; is it loaded yet?')
     if (!this.scratch || this.scratch.width !== w || this.scratch.height !== h) {
       this.scratch =
-        typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : document.createElement('canvas')
+        typeof OffscreenCanvas !== 'undefined'
+          ? new OffscreenCanvas(w, h)
+          : document.createElement('canvas')
       this.scratch.width = w
       this.scratch.height = h
     }
@@ -210,7 +212,9 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     // Hysteresis needs the previous frame, and only when it describes the same
     // grid and the same source — see ALGORITHM.md §C5 on discontinuities.
     const previous =
-      this.hysteresisPrimed && this.lastFrame?.colorMode === 'glyph' ? this.lastFrame.glyphIds : undefined
+      this.hysteresisPrimed && this.lastFrame?.colorMode === 'glyph'
+        ? this.lastFrame.glyphIds
+        : undefined
     return {
       ...base,
       matcher: 'chromatic' as const,
@@ -219,7 +223,10 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   private mkCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
-    const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : document.createElement('canvas')
+    const c =
+      typeof OffscreenCanvas !== 'undefined'
+        ? new OffscreenCanvas(w, h)
+        : document.createElement('canvas')
     c.width = w
     c.height = h
     return c
@@ -231,7 +238,11 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (!source) return null
     if (!isRawImage(source)) return source as CanvasImageSource
     if (this.srcFxFor !== source) {
-      if (!this.srcFxCanvas || this.srcFxCanvas.width !== source.width || this.srcFxCanvas.height !== source.height) {
+      if (
+        !this.srcFxCanvas ||
+        this.srcFxCanvas.width !== source.width ||
+        this.srcFxCanvas.height !== source.height
+      ) {
         this.srcFxCanvas = this.mkCanvas(source.width, source.height)
       }
       const c = this.srcFxCanvas.getContext('2d') as Ctx2D
@@ -239,7 +250,11 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         source.data instanceof Uint8ClampedArray
           ? source.data
           : new Uint8ClampedArray(source.data.buffer, source.data.byteOffset, source.data.length)
-      c.putImageData(new ImageData(data as Uint8ClampedArray<ArrayBuffer>, source.width, source.height), 0, 0)
+      c.putImageData(
+        new ImageData(data as Uint8ClampedArray<ArrayBuffer>, source.width, source.height),
+        0,
+        0,
+      )
       this.srcFxFor = source
     }
     return this.srcFxCanvas as CanvasImageSource
@@ -257,7 +272,11 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       this.compositeBuf,
     )
     this.compositeBuf = img
-    if (!this.compositeCanvas || this.compositeCanvas.width !== img.width || this.compositeCanvas.height !== img.height) {
+    if (
+      !this.compositeCanvas ||
+      this.compositeCanvas.width !== img.width ||
+      this.compositeCanvas.height !== img.height
+    ) {
       this.compositeCanvas = this.mkCanvas(img.width, img.height)
     }
     const cctx = this.compositeCanvas.getContext('2d') as Ctx2D
@@ -265,7 +284,11 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       img.data instanceof Uint8ClampedArray
         ? img.data
         : new Uint8ClampedArray(img.data.buffer, img.data.byteOffset, img.data.length)
-    cctx.putImageData(new ImageData(data as Uint8ClampedArray<ArrayBuffer>, img.width, img.height), 0, 0)
+    cctx.putImageData(
+      new ImageData(data as Uint8ClampedArray<ArrayBuffer>, img.width, img.height),
+      0,
+      0,
+    )
     this.lastComposited = frame
     this.pyrValid = 0
   }
@@ -317,7 +340,10 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     let dw = cw
     let dh = ch
     if (fit !== 'stretch') {
-      const s = fit === 'contain' ? Math.min(cw / base0.width, ch / base0.height) : Math.max(cw / base0.width, ch / base0.height)
+      const s =
+        fit === 'contain'
+          ? Math.min(cw / base0.width, ch / base0.height)
+          : Math.max(cw / base0.width, ch / base0.height)
       dw = base0.width * s
       dh = base0.height * s
     }
@@ -354,14 +380,25 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       for (let i = 0; i < strips; i++) {
         const yMid = dy + (i + 0.5) * cellH
         const off = Math.sin((yMid / Math.max(cellH, 1)) * 1.5 + time * 3) * intensity * cellW * 0.6
-        ctx.drawImage(base, 0, i * srcStripH, base.width, srcStripH, dx - off, dy + i * cellH, dw, cellH)
+        ctx.drawImage(
+          base,
+          0,
+          i * srcStripH,
+          base.width,
+          srcStripH,
+          dx - off,
+          dy + i * cellH,
+          dw,
+          cellH,
+        )
       }
     } else {
       ctx.drawImage(base, dx, dy, dw, dh)
     }
 
     if (kind === 'reveal' || kind === 'original-mix' || kind === 'color') {
-      if (!this.fxLayer || this.fxLayer.width !== cw || this.fxLayer.height !== ch) this.fxLayer = this.mkCanvas(cw, ch)
+      if (!this.fxLayer || this.fxLayer.width !== cw || this.fxLayer.height !== ch)
+        this.fxLayer = this.mkCanvas(cw, ch)
       const layer = this.fxLayer.getContext('2d') as Ctx2D
       layer.imageSmoothingQuality = 'high'
       layer.clearRect(0, 0, cw, ch)
@@ -380,7 +417,14 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         ctx.globalAlpha = 1
       } else {
         layer.globalCompositeOperation = 'destination-in'
-        const grad = layer.createRadialGradient(px, py, Math.max(radius - feather, 0), px, py, radius + feather)
+        const grad = layer.createRadialGradient(
+          px,
+          py,
+          Math.max(radius - feather, 0),
+          px,
+          py,
+          radius + feather,
+        )
         grad.addColorStop(0, `rgba(255,255,255,${m})`)
         grad.addColorStop(1, 'rgba(255,255,255,0)')
         layer.fillStyle = grad
@@ -463,13 +507,33 @@ export class CpuAsciiRenderer implements AsciiRenderer {
               const s = Math.max(1 - 0.75 * intensity * fall, 0.25)
               const sw = baseCellW * s
               const sh = baseCellH * s
-              ctx.drawImage(base, srcX + (baseCellW - sw) / 2, srcY + (baseCellH - sh) / 2, sw, sh, destX, destY, cellW, cellH)
+              ctx.drawImage(
+                base,
+                srcX + (baseCellW - sw) / 2,
+                srcY + (baseCellH - sh) / 2,
+                sw,
+                sh,
+                destX,
+                destY,
+                cellW,
+                cellH,
+              )
             } else {
               // GPU rotates the sampling uv by +ang → the glyph appears rotated by −ang.
               const ang = intensity * fall * Math.PI
               ctx.translate(destX + cellW / 2, destY + cellH / 2)
               ctx.rotate(-ang)
-              ctx.drawImage(base, srcX, srcY, baseCellW, baseCellH, -cellW / 2, -cellH / 2, cellW, cellH)
+              ctx.drawImage(
+                base,
+                srcX,
+                srcY,
+                baseCellW,
+                baseCellH,
+                -cellW / 2,
+                -cellH / 2,
+                cellW,
+                cellH,
+              )
             }
             ctx.restore()
             continue
@@ -482,8 +546,14 @@ export class CpuAsciiRenderer implements AsciiRenderer {
           // constant offset there produces rings of repeated cells; the
           // affine fit stretches smoothly like the shader.
           const [wx, wy] = warpAt(cxp, cyp)
-          const swC = Math.max(warpAt(cxp + cellW / 2, cyp)[0] - warpAt(cxp - cellW / 2, cyp)[0], cellW * 0.05)
-          const shC = Math.max(warpAt(cxp, cyp + cellH / 2)[1] - warpAt(cxp, cyp - cellH / 2)[1], cellH * 0.05)
+          const swC = Math.max(
+            warpAt(cxp + cellW / 2, cyp)[0] - warpAt(cxp - cellW / 2, cyp)[0],
+            cellW * 0.05,
+          )
+          const shC = Math.max(
+            warpAt(cxp, cyp + cellH / 2)[1] - warpAt(cxp, cyp - cellH / 2)[1],
+            cellH * 0.05,
+          )
           if (
             Math.abs(wx - cxp) < 0.4 &&
             Math.abs(wy - cyp) < 0.4 &&
@@ -546,7 +616,9 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       this.fxRafId = 0
     }
     const video =
-      typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement ? this.source : null
+      typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement
+        ? this.source
+        : null
     if (video && 'requestVideoFrameCallback' in video) {
       const cb = (): void => {
         if (!this.running || generation !== this.loopGeneration) return
@@ -570,7 +642,9 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.loopGeneration++
     if (this.rafId) cancelAnimationFrame(this.rafId)
     const video =
-      typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement ? this.source : null
+      typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement
+        ? this.source
+        : null
     if (this.rvfcId && video && 'cancelVideoFrameCallback' in video) {
       video.cancelVideoFrameCallback(this.rvfcId)
     }

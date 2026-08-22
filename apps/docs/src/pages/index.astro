@@ -87,7 +87,7 @@ const emojiRows = (emojiCrossLibrary ?? [])
     }
     return { ...r, ...meta }
   })
-  .sort((a, b) => a.p50 - b.p50)
+  .toSorted((a, b) => a.p50 - b.p50)
 
 const emojiMeasuredOn = emojiCrossGeneratedAt ? new Date(emojiCrossGeneratedAt).toISOString().slice(0, 10) : null
 
@@ -105,7 +105,7 @@ const rows = crossLibrary
     const [grid] = r.grid.split(' · ')
     return { ...r, ...meta, grid, overFloor: r.p50 - baseline.p50 }
   })
-  .sort((a, b) => a.p50 - b.p50)
+  .toSorted((a, b) => a.p50 - b.p50)
 
 // "over floor" is the column that carries the argument, so it gets drawn as a
 // bar as well as a number; every bar is scaled against the slowest row.
@@ -1784,6 +1784,9 @@ mono: both colors fixed by the palette</code></pre>
       </a>
     </footer>
     <script>
+      // This is the client bundle's entry point; the module wires the page up on
+      // import and exports nothing.
+      // eslint-disable-next-line import/no-unassigned-import
       import '../playground/main'
     </script>
   </body>

@@ -2,10 +2,30 @@
   "name": "@ascii-fx/gpu",
   "version": "0.1.0",
   "description": "WebGPU renderer for ASCII FX: exact structural-v1 compute matching and one-draw atlas compositing, with a CPU fallback.",
-  "license": "MIT",
-  "engines": {
-    "node": ">=22"
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "ascii-fx",
+    "canvas",
+    "compute-shader",
+    "gpgpu",
+    "renderer",
+    "webgpu"
+  ],
+  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
+  "bugs": {
+    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
   },
+  "license": "MIT",
+  "author": "Amir Abushanab (https://github.com/Amir-Abushanab)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
+    "directory": "packages/gpu"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -14,9 +34,9 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
@@ -29,13 +49,7 @@
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
-    "directory": "packages/gpu"
-  },
-  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
-  "bugs": {
-    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
+  "engines": {
+    "node": ">=22"
   }
 }

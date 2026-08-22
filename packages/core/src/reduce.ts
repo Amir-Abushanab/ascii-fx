@@ -13,7 +13,9 @@ export function reduceSource(
 ): Uint8Array {
   const { width: W, height: H, data } = source
   if (data.length < W * H * 4) {
-    throw new Error(`RawImage data is ${data.length} bytes; expected ${W * H * 4} (${W}×${H} RGBA).`)
+    throw new Error(
+      `RawImage data is ${data.length} bytes; expected ${W * H * 4} (${W}×${H} RGBA).`,
+    )
   }
   const SW = columns * 8
   const SH = rows * 8

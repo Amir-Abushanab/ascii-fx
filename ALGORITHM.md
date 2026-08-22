@@ -429,14 +429,13 @@ Runtime uses `lut3` when present, else brute-force 6D. `lut3TopK` remains reserv
 
 `matcher: 'ramp'`: every non-transparent cell uses the flat-path coverage mapping (§6) on its mean luma — no structure at all. Colors are fitted from the winning glyph's mask partition exactly as §10 (same rule as shape6). Branded as an effect, not as quality (spec §5).
 
-
 ---
 
 ## C. chromatic-v1
 
 `matcher: 'chromatic'`. A **separate algorithm**, not an approximation of structural-v1. It exists for glyph sets whose colour is part of the glyph — colour emoji — where structural-v1's central move is unavailable.
 
-structural-v1 matches a 1-bit mask and *fits* colour to it, which is exactly why its rerank is exact: with foreground and background free, the best colours for a given mask are the means of the two sample sets. A colour glyph's colour is baked, so there is nothing to fit, and the objective collapses to direct squared error against the glyph's own samples.
+structural-v1 matches a 1-bit mask and _fits_ colour to it, which is exactly why its rerank is exact: with foreground and background free, the best colours for a given mask are the means of the two sample sets. A colour glyph's colour is baked, so there is nothing to fit, and the objective collapses to direct squared error against the glyph's own samples.
 
 Requires a profile carrying `chromatic` glyph data. Emits `colorMode: 'glyph'` and **no colour planes**; the colour lives in the glyph. `color: 'glyph'` is an output mode only — passing it to any other matcher is an error.
 

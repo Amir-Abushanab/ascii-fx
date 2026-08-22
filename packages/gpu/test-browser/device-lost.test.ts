@@ -9,7 +9,9 @@ import { createAsciiRenderer } from '@ascii-fx/gpu'
 import { makeProfile, randomImage, STANDARD_SIX } from '../../core/test/synthetic.js'
 
 const gpuAvailable =
-  typeof navigator !== 'undefined' && 'gpu' in navigator ? (await navigator.gpu.requestAdapter()) !== null : false
+  typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (await navigator.gpu.requestAdapter()) !== null
+    : false
 
 /**
  * Devices are created inside the renderer, so we intercept them on the way out

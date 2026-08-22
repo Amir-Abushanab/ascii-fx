@@ -19,8 +19,12 @@ export function pointerUV(e: PointerEvent, el: HTMLElement): [u: number, v: numb
   const r = el.getBoundingClientRect()
   const cs = getComputedStyle(el)
   const scale = el.offsetWidth > 0 ? r.width / el.offsetWidth : 1
-  const w = r.width - ((parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0)) * scale
-  const h = r.height - ((parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0)) * scale
+  const w =
+    r.width -
+    ((parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0)) * scale
+  const h =
+    r.height -
+    ((parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0)) * scale
   if (!(w > 0) || !(h > 0)) return [0, 0]
   return [e.offsetX / w, e.offsetY / h]
 }

@@ -88,8 +88,30 @@ export class AsciiGlyphs {
     // @types/three cannot yet type composed TSL node graphs; the runtime API
     // is stable, so the graph is built through a single contained cast.
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    const n = { add, attribute, div, float, floor, mix, mod, mul, texture, uv, vec2 } as unknown as Record<
-      'add' | 'attribute' | 'div' | 'float' | 'floor' | 'mix' | 'mod' | 'mul' | 'texture' | 'uv' | 'vec2',
+    const n = {
+      add,
+      attribute,
+      div,
+      float,
+      floor,
+      mix,
+      mod,
+      mul,
+      texture,
+      uv,
+      vec2,
+    } as unknown as Record<
+      | 'add'
+      | 'attribute'
+      | 'div'
+      | 'float'
+      | 'floor'
+      | 'mix'
+      | 'mod'
+      | 'mul'
+      | 'texture'
+      | 'uv'
+      | 'vec2',
       (...args: any[]) => any
     >
     /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -109,7 +131,10 @@ export class AsciiGlyphs {
     const useBackground = n.attribute('aUseBackground')
     const cellColor = n.mix(n.attribute('aBg'), foreground, alpha)
     this.material.colorNode = n.mix(foreground, cellColor, useBackground)
-    this.material.opacityNode = n.mul(n.attribute('aVisible'), n.mix(alpha, n.float(1), useBackground))
+    this.material.opacityNode = n.mul(
+      n.attribute('aVisible'),
+      n.mix(alpha, n.float(1), useBackground),
+    )
     this.material.transparent = true
     this.material.depthWrite = false
 
@@ -149,7 +174,9 @@ export class AsciiGlyphs {
       const transparent = (frame.flags[i] & FLAG_TRANSPARENT) !== 0
       const glyphId = frame.glyphIds[i]
       if (glyphId >= this.glyphCount) {
-        throw new Error(`Frame cell ${i} references glyph ${glyphId}, but the profile has ${this.glyphCount} glyphs.`)
+        throw new Error(
+          `Frame cell ${i} references glyph ${glyphId}, but the profile has ${this.glyphCount} glyphs.`,
+        )
       }
       g[i] = transparent ? this.blankGlyph : glyphId
       visible[i] = transparent ? 0 : 1

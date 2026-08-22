@@ -55,15 +55,23 @@ function segmentByGlyphs(profile: AsciiProfile, text: string): string[] {
  * array to select exact strings. Duplicate glyphs are an error, and so is any
  * part of the input the profile has no glyph for.
  */
-export function subsetProfile(profile: AsciiProfile, characters: string | readonly string[]): AsciiProfile {
-  const requested = typeof characters === 'string' ? segmentByGlyphs(profile, characters) : [...characters]
+export function subsetProfile(
+  profile: AsciiProfile,
+  characters: string | readonly string[],
+): AsciiProfile {
+  const requested =
+    typeof characters === 'string' ? segmentByGlyphs(profile, characters) : [...characters]
   if (requested.length === 0) {
-    throw new Error('subsetProfile: empty character set. Pass at least one character, or use the profile as-is.')
+    throw new Error(
+      'subsetProfile: empty character set. Pass at least one character, or use the profile as-is.',
+    )
   }
   const seen = new Set<string>()
   for (const ch of requested) {
     if (seen.has(ch)) {
-      throw new Error(`subsetProfile: duplicate character ${JSON.stringify(ch)}. Each glyph may appear once.`)
+      throw new Error(
+        `subsetProfile: duplicate character ${JSON.stringify(ch)}. Each glyph may appear once.`,
+      )
     }
     seen.add(ch)
   }
@@ -92,7 +100,8 @@ export function subsetProfile(profile: AsciiProfile, characters: string | readon
     masksHi[i] = structural.masksHi[oldId]
     coverage[i] = structural.coverage[oldId]
     if (vectors6 && shape6) vectors6.set(shape6.vectors6.subarray(oldId * 6, oldId * 6 + 6), i * 6)
-    if (samples && chromatic) samples.set(chromatic.samples.subarray(oldId * 256, oldId * 256 + 256), i * 256)
+    if (samples && chromatic)
+      samples.set(chromatic.samples.subarray(oldId * 256, oldId * 256 + 256), i * 256)
   })
 
   // Repack the atlas with the compiler's layout rule (§13): columns from the

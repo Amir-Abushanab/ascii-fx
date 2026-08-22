@@ -6,7 +6,9 @@ import { performance } from 'node:perf_hooks'
 import { decodeProfile, matchFrame } from '@ascii-fx/core'
 import { markdownTable, upsertSection } from './resultsFile.mjs'
 
-const profileBytes = await readFile(new URL('../../fixtures/profiles/default.asciip', import.meta.url))
+const profileBytes = await readFile(
+  new URL('../../fixtures/profiles/default.asciip', import.meta.url),
+)
 const profile = decodeProfile(new Uint8Array(profileBytes))
 
 // Procedural 1280×720 source: gradient + rings + deterministic noise.
@@ -36,7 +38,8 @@ const src = new Uint8Array(W * H * 4)
 }
 const source = { width: W, height: H, data: src }
 
-const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))]
+const percentile = (sorted, p) =>
+  sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))]
 
 const WARMUP = 3
 const RUNS = 15
@@ -64,7 +67,9 @@ for (const columns of [80, 120, 160, 240, 320]) {
   }
 }
 
-console.log(`\nCPU structural-v1 · ${W}×${H} source · Node ${process.version} · ${profile.glyphCount} glyphs\n`)
+console.log(
+  `\nCPU structural-v1 · ${W}×${H} source · Node ${process.version} · ${profile.glyphCount} glyphs\n`,
+)
 console.log('grid       color  cells    p50 ms   p95 ms   cells/ms')
 console.log('---------  -----  -------  -------  -------  --------')
 for (const r of results) {

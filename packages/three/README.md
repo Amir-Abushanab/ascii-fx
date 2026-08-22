@@ -13,7 +13,7 @@ const pass = new AsciiPass({ profile, renderer, columns: 160, color: 'full' })
 await pass.init()
 
 function frame() {
-  pass.render(scene, camera)      // instead of renderer.render(scene, camera)
+  pass.render(scene, camera) // instead of renderer.render(scene, camera)
   requestAnimationFrame(frame)
 }
 pass.set({ columns: 180 })

@@ -65,18 +65,30 @@ function reduceTo8x8(img) {
     for (let tx = 0; tx < 8; tx++) {
       const x0 = idiv(tx * w, 8)
       const x1 = Math.max(x0 + 1, idiv((tx + 1) * w, 8))
-      let sr = 0, sg = 0, sb = 0, sa = 0, n = 0
+      let sr = 0,
+        sg = 0,
+        sb = 0,
+        sa = 0,
+        n = 0
       for (let y = y0; y < y1; y++) {
         for (let x = x0; x < x1; x++) {
           const p = (y * w + x) * 4
           const a = data[p + 3]
-          sr += data[p] * a; sg += data[p + 1] * a; sb += data[p + 2] * a; sa += a; n++
+          sr += data[p] * a
+          sg += data[p + 1] * a
+          sb += data[p + 2] * a
+          sa += a
+          n++
         }
       }
       const k = (ty * 8 + tx) * 4
-      if (sa === 0) { out[k] = out[k + 1] = out[k + 2] = out[k + 3] = 0 }
-      else {
-        out[k] = rdiv(sr, sa); out[k + 1] = rdiv(sg, sa); out[k + 2] = rdiv(sb, sa); out[k + 3] = rdiv(sa, n)
+      if (sa === 0) {
+        out[k] = out[k + 1] = out[k + 2] = out[k + 3] = 0
+      } else {
+        out[k] = rdiv(sr, sa)
+        out[k + 1] = rdiv(sg, sa)
+        out[k + 2] = rdiv(sb, sa)
+        out[k + 3] = rdiv(sa, n)
       }
     }
   }
@@ -84,7 +96,7 @@ function reduceTo8x8(img) {
 }
 
 async function mapLimit(items, limit, fn) {
-  const results = new Array(items.length)
+  const results = Array.from({ length: items.length })
   let i = 0
   await Promise.all(
     Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -124,15 +136,20 @@ const solid = kept.filter((g) => {
 
 const samples = new Uint8Array(solid.length * 256)
 solid.forEach((g, i) => samples.set(g.tile, i * 256))
-writeFileSync(join(OUT, 'noto-set.json'), JSON.stringify({
-  source: 'googlefonts/noto-emoji png/128',
-  license: 'Apache-2.0 (image assets)',
-  count: solid.length,
-  glyphs: solid.map((g) => g.char),
-}))
+writeFileSync(
+  join(OUT, 'noto-set.json'),
+  JSON.stringify({
+    source: 'googlefonts/noto-emoji png/128',
+    license: 'Apache-2.0 (image assets)',
+    count: solid.length,
+    glyphs: solid.map((g) => g.char),
+  }),
+)
 writeFileSync(join(OUT, 'noto-set.bin'), samples)
-console.log(`[emoji] ${solid.length} glyphs -> noto-set.bin (${(samples.length / 1024).toFixed(0)} KB), ` +
-  `${candidates.length - kept.length} absent from Noto, ${kept.length - solid.length} blank`)
+console.log(
+  `[emoji] ${solid.length} glyphs -> noto-set.bin (${(samples.length / 1024).toFixed(0)} KB), ` +
+    `${candidates.length - kept.length} absent from Noto, ${kept.length - solid.length} blank`,
+)
 
 // ————— compiled chromatic profile —————
 // The measurement said a usage-curated ~100 glyphs matches the full 1301-glyph
@@ -160,7 +177,9 @@ if (decodedPhotos.length > 0) {
     })
     for (const id of frame.glyphIds) counts[id]++
   }
-  const order = Array.from({ length: full.profile.glyphCount }, (_, i) => i).sort((a, b) => counts[b] - counts[a])
+  const order = Array.from({ length: full.profile.glyphCount }, (_, i) => i).toSorted(
+    (a, b) => counts[b] - counts[a],
+  )
   const used = counts.filter((c) => c > 0).length
 
   // The full set ships so the picker can offer every glyph; the curated list
@@ -193,13 +212,19 @@ console.log(`[emoji] fetching ${PHOTOS.length} Kodak images…`)
 const photos = []
 for (const id of PHOTOS) {
   const bytes = await fetchCached(`${KODAK}/${id}.png`, `${id}.png`)
-  if (!bytes) { console.warn(`[emoji] ! ${id} unavailable, skipping`); continue }
+  if (!bytes) {
+    console.warn(`[emoji] ! ${id} unavailable, skipping`)
+    continue
+  }
   writeFileSync(join(OUT, `${id}.png`), bytes)
   photos.push(id)
 }
-writeFileSync(join(OUT, 'photos.json'), JSON.stringify({
-  source: 'Kodak True Color Image Suite (r0k.us mirror)',
-  note: 'Standard colour-imaging corpus; released by Kodak for unrestricted research use.',
-  photos,
-}))
+writeFileSync(
+  join(OUT, 'photos.json'),
+  JSON.stringify({
+    source: 'Kodak True Color Image Suite (r0k.us mirror)',
+    note: 'Standard colour-imaging corpus; released by Kodak for unrestricted research use.',
+    photos,
+  }),
+)
 console.log(`[emoji] ${photos.length} photos -> public/emoji/`)

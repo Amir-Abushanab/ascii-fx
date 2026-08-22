@@ -119,7 +119,11 @@ export function maskTotals(cellW: number, cellH: number): Int32Array {
 }
 
 /** Scanline fill (non-zero winding) over subsample centers. */
-export function rasterizeGlyph(edges: readonly number[], cellW: number, cellH: number): GlyphRaster {
+export function rasterizeGlyph(
+  edges: readonly number[],
+  cellW: number,
+  cellH: number,
+): GlyphRaster {
   const S = SUPERSAMPLE
   const step = idiv(64, S) // 26.6 units between subsample centers
   const half = idiv(step, 2)

@@ -35,5 +35,9 @@ export async function upsertSection(heading, body) {
 /** Render a markdown pipe table. `align` is one entry per column. */
 export function markdownTable(headers, align, rows) {
   const sep = align.map((a) => (a === 'right' ? '---:' : a === 'center' ? ':---:' : '---'))
-  return [`| ${headers.join(' | ')} |`, `| ${sep.join(' | ')} |`, ...rows.map((r) => `| ${r.join(' | ')} |`)].join('\n')
+  return [
+    `| ${headers.join(' | ')} |`,
+    `| ${sep.join(' | ')} |`,
+    ...rows.map((r) => `| ${r.join(' | ')} |`),
+  ].join('\n')
 }

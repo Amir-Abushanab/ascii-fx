@@ -62,7 +62,10 @@ export class AsciiPass {
     this.clearColor = clearColor
     this.interaction = interaction ?? null
     const size = renderer.getDrawingBufferSize(this.drawSize)
-    this.renderTarget = new RenderTarget(width ?? Math.max(1, size.x), height ?? Math.max(1, size.y))
+    this.renderTarget = new RenderTarget(
+      width ?? Math.max(1, size.x),
+      height ?? Math.max(1, size.y),
+    )
     this.pointer = {
       set: (x: number, y: number) => {
         this.pointerX = x
@@ -102,7 +105,11 @@ export class AsciiPass {
   }
 
   /** Update matcher/composite options (spec §2: `ascii.set({...})`). */
-  set(options: Partial<StreamMatchOptions & { fit: FitMode; clearColor: readonly [number, number, number, number] }>): void {
+  set(
+    options: Partial<
+      StreamMatchOptions & { fit: FitMode; clearColor: readonly [number, number, number, number] }
+    >,
+  ): void {
     const { fit, clearColor, ...match } = options
     if (fit !== undefined) this.fit = fit
     if (clearColor !== undefined) this.clearColor = clearColor
@@ -126,7 +133,9 @@ export class AsciiPass {
     if (this.disposed) return
     const stream = this.stream
     if (!stream || !this.device) {
-      throw new Error('AsciiPass.render() called before init() — `await pass.init()` after creating the pass.')
+      throw new Error(
+        'AsciiPass.render() called before init() — `await pass.init()` after creating the pass.',
+      )
     }
     const renderer = this.rendererRef
 
@@ -167,7 +176,8 @@ export class AsciiPass {
 
   /** Explicit readback of the matched frame (spec §33). */
   async captureFrame(): Promise<AsciiFrame> {
-    if (!this.stream) throw new Error('AsciiPass.captureFrame() requires init() and at least one render().')
+    if (!this.stream)
+      throw new Error('AsciiPass.captureFrame() requires init() and at least one render().')
     return this.stream.captureFrame()
   }
 

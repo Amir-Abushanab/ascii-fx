@@ -33,7 +33,8 @@ export interface ExportState {
   interaction: Record<string, unknown> | null
 }
 
-const literal = (value: unknown): string => JSON.stringify(value)?.replaceAll('"', "'") ?? 'undefined'
+const literal = (value: unknown): string =>
+  JSON.stringify(value)?.replaceAll('"', "'") ?? 'undefined'
 
 /** Single-line `{ key: value, … }`; '{}' when empty. */
 const inlineObject = (entries: Record<string, unknown>): string => {
@@ -61,7 +62,9 @@ function profileSnippet(state: ExportState): ProfileSnippet {
     case 'geist':
       snippet = {
         imports: chars ? ['loadProfile', 'subsetProfile'] : ['loadProfile'],
-        pre: ['// compile yours: `ascii-fx profile build --font X.ttf --out default.asciip` or the @ascii-fx/vite plugin'],
+        pre: [
+          '// compile yours: `ascii-fx profile build --font X.ttf --out default.asciip` or the @ascii-fx/vite plugin',
+        ],
         expr: chars
           ? `loadProfile('/default.asciip').then((p) => subsetProfile(p, ${literal(chars)}))`
           : `loadProfile('/default.asciip')`,
@@ -70,7 +73,9 @@ function profileSnippet(state: ExportState): ProfileSnippet {
     case 'system':
       snippet = {
         imports: ['createAsciiProfile'],
-        pre: ['// runtime profile from an installed font (browser-rasterized; precompile for determinism)'],
+        pre: [
+          '// runtime profile from an installed font (browser-rasterized; precompile for determinism)',
+        ],
         expr: `createAsciiProfile(${runtimeOpts(state.font.family)})`,
       }
       break
@@ -101,7 +106,7 @@ function mountLines(state: ExportState): string[] {
     ...profile.code,
     `renderer = await createAsciiRenderer({ ${rendererOpts.join(', ')} })`,
     '',
-    "const img = new Image()",
+    'const img = new Image()',
     "img.src = '/your-image.jpg' // any image/video/canvas source works",
     'await img.decode()',
     'renderer.setSource(img)',
