@@ -17,8 +17,8 @@ on:
     # Only when something publishable changes. A docs-only / benchmark / CI push has nothing
     # to publish, so skip the workflow rather than attempt a crash-prone no-op re-publish.
     paths:
-      - "packages/**"
-      - ".changeset/**"
+      - 'packages/**'
+      - '.changeset/**'
   workflow_dispatch: {}
 
 concurrency:
@@ -50,9 +50,9 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -79,11 +79,11 @@ jobs:
           version: pnpm run version
           # Empty until the packages exist on npm (see preflight) → PR-only, no publish attempt.
           publish: ${{ needs.preflight.outputs.publish }}
-          commit: "chore: version packages"
-          title: "chore: version packages"
+          commit: 'chore: version packages'
+          title: 'chore: version packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
+          NPM_CONFIG_PROVENANCE: 'true'
           # Fallback if OIDC publishing misbehaves (pnpm's OIDC support is still maturing):
           # add a granular NPM_TOKEN secret and uncomment the next line.
           # NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
