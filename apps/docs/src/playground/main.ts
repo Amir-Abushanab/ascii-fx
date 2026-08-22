@@ -318,13 +318,19 @@ function updateStats(): void {
   const name = emojiOn()
     ? `chromatic-v1${selectionSize() === null ? ' · curated' : ''}`
     : (renderer.profile.metadata.fontFamily ?? renderer.profile.id)
-  stats.replaceChildren(
-    document.createTextNode(
-      `${renderer.backend}${backendNote ? ` (${backendNote})` : ''} · ${grid ? `${grid.columns}×${grid.rows} cells` : '—'} · `,
-    ),
+  const children: (Node | string)[] = [document.createTextNode(`${renderer.backend} `)]
+  if (backendNote) {
+    const warn = document.createElement('span')
+    warn.className = 'warn'
+    warn.textContent = `⚠ ${backendNote}`
+    children.push(warn, document.createTextNode(' '))
+  }
+  children.push(
+    document.createTextNode(`· ${grid ? `${grid.columns}×${grid.rows} cells` : '—'} · `),
     fpsSpan,
     document.createTextNode(` · ${name}${subset} · ${active?.kind ?? '—'}`),
   )
+  stats.replaceChildren(...children)
 }
 
 function renderLoopPolicy(): void {

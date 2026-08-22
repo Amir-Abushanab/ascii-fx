@@ -447,6 +447,11 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       #stats .fps-bad {
         color: #f87171;
       }
+      /* Backend-fallback notes (webgpu unavailable / gpu lost): a warning, not
+         routine telemetry, so it reads as one. */
+      #stats .warn {
+        color: #facc15;
+      }
       #explainer {
         width: min(780px, 100%);
         margin: 30px auto 24px;
@@ -1152,6 +1157,9 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       .glyph-cell.on { opacity: 1; filter: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
       .glyph-art { width: 28px; height: 28px; background-repeat: no-repeat; pointer-events: none; }
 
+      /* The export panel is two full-width rows: the four formats stretch to
+         share the first, the agent handoff fills the second. */
+      fieldset:has(> #exportComponent) > button { flex: 1; }
       /* A full-width flex row, so the handoff sits under the export formats
          rather than reading as a fifth one. */
       .agent-row {
@@ -1762,8 +1770,12 @@ mono: both colors fixed by the palette</code></pre>
       <p>
         ASCII FX matches glyphs by shape rather than brightness, exactly, on WebGPU, with a bit-identical CPU
         reference underneath.
-        Geist Mono under the SIL Open Font License. The structural approach follows the Ditherlab/chafa lineage,
-        and chafa-wasm is in the table above. The shape-vector matcher follows Alex Harri's work.
+        <a href="https://vercel.com/font" rel="noopener">Geist Mono</a> under
+        the <a href="https://openfontlicense.org" rel="noopener">SIL Open Font License</a>. The structural
+        approach follows the Ditherlab/<a href="https://hpjansson.org/chafa/" rel="noopener">chafa</a> lineage,
+        and <a href="https://github.com/hectorm/chafa-wasm" rel="noopener">chafa-wasm</a> is in the table above.
+        The shape-vector matcher follows <a href="https://alexharri.com/blog/ascii-rendering" rel="noopener"
+          >Alex Harri's work</a>.
       </p>
       <a class="ps-link" href="https://principlestash.com" rel="noopener">
         {/* The mascot stands in for the capital P, which is how Principle Stash
