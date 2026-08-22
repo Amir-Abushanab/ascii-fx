@@ -49,7 +49,7 @@ with provenance attached. If OIDC misbehaves, add an `NPM_TOKEN` secret and unco
 
 | Script               | What it does                                                                                                                                                                                              |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm check`         | The gate: format, lint, typecheck, node tests, GPU browser tests, knip, depcruise, skill validation + staleness. Also the pre-commit hook.                                                                |
+| `pnpm check`         | The gate: build, format, lint, typecheck, node tests, browser-cpu tests, knip, depcruise, skill validation + staleness. Also the pre-commit hook.                                                         |
 | `pnpm quality`       | `check` plus `pnpm audit --audit-level low`. Local only — CI audits at `high` in a job that gates nothing, because an advisory lands with no change on our side and should not red-light an unrelated PR. |
 | `pnpm version`       | `changeset version` + sync the skill version. Run by the release workflow, not by hand.                                                                                                                   |
 | `pnpm package:check` | publint + are-the-types-wrong + smoke, on every packed tarball (see below). Needs a build first.                                                                                                          |
@@ -77,6 +77,20 @@ as missing, tries to republish, and crashes on the E403 before printing the `New
 `changesets/action` needs — leaving the packages on npm but the job red with no tags or Releases.
 The script publishes only what the registry confirms is absent, and restores tags for any version
 that reached npm without one.
+
+## Before a release
+
+`pnpm test:gpu` is not in `pnpm check` and does not run in CI, because a GitHub runner
+reports a software adapter that passes every availability guard and then dies partway
+through the workload. It is the suite that proves the GPU matcher agrees with the CPU
+oracle bit-for-bit, so run it on a machine with a real adapter before cutting a release:
+
+```sh
+pnpm test:gpu
+```
+
+If you want it gating merges rather than being a manual step, point the check job at a
+self-hosted GPU runner; nothing else about the workflow has to change.
 
 ## Notes
 

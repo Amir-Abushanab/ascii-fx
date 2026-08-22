@@ -88,7 +88,9 @@ pnpm install
 pnpm build            # all packages (tsup, ESM + d.ts)
 pnpm dev              # the site at localhost:4321 — the playground, with performance and API below it
 pnpm test             # node suite: unit, golden, oracle-conformance, SSR
-pnpm test:gpu         # browser suite: CPU↔GPU bit-exact conformance (headless Chromium + WebGPU)
+pnpm test:browser     # browser suite, no GPU needed: CPU fallback, glyph renderer, React errors
+pnpm test:gpu         # browser suite, real adapter required: CPU↔GPU bit-exact conformance
+pnpm test:all         # all three projects
 pnpm docs:build       # static docs build (set DOCS_BASE=/<repo>/ for GitHub Pages)
 pnpm golden:update    # regenerate goldens after an intentional algorithm change
 ```
@@ -109,7 +111,7 @@ pnpm bench:compare    # cross-library render loop       → RESULTS.md  (headles
 pnpm bench:quality    # approximate-matcher quality     → RESULTS.md
 ```
 
-Hygiene tooling — `pnpm check` runs all of it plus the two test suites, and is also the pre-commit hook:
+Hygiene tooling — `pnpm check` builds, then runs all of it plus the node and browser-cpu suites, and is also the pre-commit hook:
 
 ```bash
 pnpm format           # oxfmt (pnpm format:check in CI)
@@ -143,3 +145,5 @@ Docs deploy: push to `main` with GitHub Pages set to "GitHub Actions" (repo Sett
 the `deploy-docs` job in `.github/workflows/ci.yml` publishes `apps/docs` to `https://<user>.github.io/<repo>/` automatically.
 
 Exactness is the contract: the GPU matcher must agree with the CPU reference bit-for-bit (glyphs, colors, flags) — enforced by the conformance suite across color modes, palettes, alpha modes, uneven reductions, temporal reuse, and dirty-region rematches.
+
+**`pnpm test:gpu` needs a real GPU and does not run in CI.** A GitHub runner reports a _software_ adapter, so every availability guard passes and the suite runs for real — then the adapter dies partway through (`Instance dropped in popErrorScope`). Bit-exactness proved against a rasterizer that falls over is not proof, so CI runs `test:browser` (no adapter needed) and the conformance suite is a local gate. Run it before cutting a release; if you want it gating merges, point the workflow at a self-hosted GPU runner.

@@ -12,7 +12,7 @@
     "bench:quality": "pnpm --filter @ascii-fx-internal/benchmarks run quality",
     "attw": "pnpm -r --filter \"./packages/*\" exec attw --pack . --profile esm-only",
     "build": "pnpm -r --filter \"./packages/*\" run build",
-    "check": "pnpm build && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:gpu && pnpm knip && pnpm depcruise && pnpm skill:validate && pnpm skill:stale",
+    "check": "pnpm build && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:browser && pnpm knip && pnpm depcruise && pnpm skill:validate && pnpm skill:stale",
     "depcruise": "depcruise \"packages/*/src/**/*.{ts,tsx}\" \"apps/docs/src/**/*.{ts,tsx}\" \"apps/benchmarks/**/*.mjs\" \"scripts/**/*.mjs\"",
     "dev": "pnpm --filter @ascii-fx-internal/docs run dev",
     "docs:build": "pnpm --filter @ascii-fx-internal/docs run build",
@@ -33,12 +33,13 @@
     "skill:validate": "pnpm --filter @ascii-fx/core skill:validate",
     "test": "vitest run --project node",
     "test:all": "vitest run",
-    "test:gpu": "vitest run --project gpu-browser",
+    "test:gpu": "vitest run --project gpu-conformance",
     "test:watch": "vitest --project node",
     "typecheck": "pnpm -r --filter \"./packages/*\" run typecheck",
     "version": "changeset version && node scripts/sync-skill-version.mjs",
     "smoke": "node scripts/smoke-packages.mjs",
-    "test:coverage": "vitest run --project node --coverage"
+    "test:coverage": "vitest run --project node --coverage",
+    "test:browser": "vitest run --project browser-cpu"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

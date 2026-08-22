@@ -37,9 +37,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The gpu-browser project drives real Chromium. Its WebGPU tests self-skip when
-      # no adapter is available, which is the normal case on a GPU-less runner — the
-      # rest of that project (canvas, CPU fallback, codecs) still runs.
+      # `pnpm check` runs the browser-cpu project, which needs Chromium but no adapter.
+      # The gpu-conformance project is deliberately NOT run here: this runner reports a
+      # software adapter, so every availability guard passes, and that adapter then dies
+      # partway through the workload. Bit-exactness proved against a rasterizer that
+      # falls over is not proof. `pnpm test:gpu` covers it on a machine with a real GPU —
+      # see RELEASING.md; point it at a self-hosted GPU runner to gate on it here.
       - run: pnpm exec playwright install --with-deps chromium
       # `check` builds first, deliberately. Cross-package imports resolve through each
       # package's `exports` to dist/*.d.ts, so on a clean checkout typecheck cannot see
