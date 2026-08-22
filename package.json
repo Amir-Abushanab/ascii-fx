@@ -12,7 +12,7 @@
     "bench:quality": "pnpm --filter @ascii-fx-internal/benchmarks run quality",
     "attw": "pnpm -r --filter \"./packages/*\" exec attw --pack . --profile esm-only",
     "build": "pnpm -r --filter \"./packages/*\" run build",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:gpu && pnpm knip && pnpm depcruise && pnpm skill:validate && pnpm skill:stale",
+    "check": "pnpm build && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:gpu && pnpm knip && pnpm depcruise && pnpm skill:validate && pnpm skill:stale",
     "depcruise": "depcruise \"packages/*/src/**/*.{ts,tsx}\" \"apps/docs/src/**/*.{ts,tsx}\" \"apps/benchmarks/**/*.mjs\" \"scripts/**/*.mjs\"",
     "dev": "pnpm --filter @ascii-fx-internal/docs run dev",
     "docs:build": "pnpm --filter @ascii-fx-internal/docs run build",

@@ -41,8 +41,11 @@ jobs:
       # no adapter is available, which is the normal case on a GPU-less runner — the
       # rest of that project (canvas, CPU fallback, codecs) still runs.
       - run: pnpm exec playwright install --with-deps chromium
+      # `check` builds first, deliberately. Cross-package imports resolve through each
+      # package's `exports` to dist/*.d.ts, so on a clean checkout typecheck cannot see
+      # @ascii-fx/core until it has been built — a failure that only ever appears on CI,
+      # never on a machine with a warm dist/.
       - run: pnpm check
-      - run: pnpm build
       # publint validates the published *manifest* (exports maps → real dist files,
       # files[] completeness); attw resolves the published *types* the way each
       # consumer's module resolution would; the smoke step installs the tarballs into a
