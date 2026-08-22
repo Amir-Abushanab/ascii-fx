@@ -65,6 +65,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Same clean-checkout problem the check job has: packages/react/test/ssr.test.tsx
+      # imports @ascii-fx/react, which the vitest alias map does not cover, so it resolves
+      # through the package's `exports` to dist/ and the file fails to load with 0 tests.
+      - run: pnpm build
       # Thresholds live in vitest.config.ts and cover the node-tested packages only;
       # the browser suite holds the GPU and React packages to account separately.
       - run: pnpm test:coverage
