@@ -1,0 +1,5 @@
+# Every path, one owner.
+#
+# GitHub applies the LAST matching pattern, not the most specific one, so any
+# narrower rule added later has to sit below this catch-all to take effect.
+* @Amir-Abushanab
