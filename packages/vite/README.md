@@ -22,10 +22,10 @@ export default defineAsciiConfig({
 ```ts
 /// <reference types="@ascii-fx/vite/client" />
 import profileRef from 'virtual:ascii-profile/default' // { url, id }
-import heroRef from 'virtual:ascii-frame/hero'         // { url, id, profile }
+import heroRef from 'virtual:ascii-frame/hero' // { url, id, profile }
 
 const profile = await loadProfile(profileRef)
-const frame = await loadFrame(heroRef, profile)        // zero matching at runtime (spec §16)
+const frame = await loadFrame(heroRef, profile) // zero matching at runtime (spec §16)
 ```
 
 Compiled assets cache in `node_modules/.ascii-fx`, content-addressed — rebuilt only when the font/image/options change. Static frames are explicit config, never AST magic (spec §16). Size reality: a 160-column full-color frame is ~22KB brotli; the ascii profile ~13KB brotli.

@@ -21,25 +21,87 @@ permissions:
 
 jobs:
   check:
-    name: Check & build
+    name: Check & build (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the floor every package declares in `engines`; without it that field is
+        # a claim nothing tests. 24 is what development actually happens on.
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version comes from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `pnpm check` runs the browser-cpu project, which needs Chromium but no adapter.
+      # The gpu-conformance project is deliberately NOT run here: this runner reports a
+      # software adapter, so every availability guard passes, and that adapter then dies
+      # partway through the workload. Bit-exactness proved against a rasterizer that
+      # falls over is not proof. `pnpm test:gpu` covers it on a machine with a real GPU —
+      # see RELEASING.md; point it at a self-hosted GPU runner to gate on it here.
+      - run: pnpm exec playwright install --with-deps chromium
+      # `check` builds first, deliberately. Cross-package imports resolve through each
+      # package's `exports` to dist/*.d.ts, so on a clean checkout typecheck cannot see
+      # @ascii-fx/core until it has been built — a failure that only ever appears on CI,
+      # never on a machine with a warm dist/.
+      - run: pnpm check
+      # publint validates the published *manifest* (exports maps → real dist files,
+      # files[] completeness); attw resolves the published *types* the way each
+      # consumer's module resolution would; the smoke step installs the tarballs into a
+      # throwaway npm project and actually imports and runs them. All three need a
+      # finished build, and only the last one would notice a package that packs
+      # perfectly and throws on import.
+      - run: pnpm package:check
+
+  coverage:
+    name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager"
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The gpu-browser project drives real Chromium. Its WebGPU tests self-skip when
-      # no adapter is available, which is the normal case on a GPU-less runner — the
-      # rest of that project (canvas, CPU fallback, codecs) still runs.
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm check
+      # Same clean-checkout problem the check job has: packages/react/test/ssr.test.tsx
+      # imports @ascii-fx/react, which the vitest alias map does not cover, so it resolves
+      # through the package's `exports` to dist/ and the file fails to load with 0 tests.
       - run: pnpm build
-      # publint validates the *published* shape (exports maps → real dist files,
-      # files[] completeness), so it must run against a finished build.
-      - run: pnpm publint
+      # Thresholds live in vitest.config.ts and cover the node-tested packages only;
+      # the browser suite holds the GPU and React packages to account separately.
+      - run: pnpm test:coverage
+      - uses: actions/upload-artifact@v7
+        # `always()` so the report still uploads when a threshold fails — lcov is written
+        # before thresholds are evaluated, which is exactly when you want to read it.
+        # Missing means vitest died before writing, so treat it as a failure rather than
+        # letting the job pass having produced nothing.
+        if: always()
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: error
+
+  # Deliberately not a `needs:` of anything. A new advisory lands without any change on
+  # our side, so gating merges or the docs deploy on it would red-light unrelated PRs;
+  # this job's job is to be visible. `high` and above only — `pnpm quality` runs the
+  # same audit at `low` locally, where a noisy transitive advisory costs nothing.
+  audit:
+    name: Audit dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level high
 
   deploy-docs:
     name: Deploy docs → GitHub Pages
@@ -59,9 +121,9 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -74,8 +136,8 @@ jobs:
           DOCS_BASE: /${{ github.event.repository.name }}/
           DOCS_SITE: https://${{ github.repository_owner }}.github.io
           PUBLIC_REPOSITORY_URL: https://github.com/${{ github.repository }}
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: apps/docs/dist
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

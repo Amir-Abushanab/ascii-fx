@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { AsciiProfile, AsciiSupport, ProfileSource } from '@ascii-fx/core'
 import { createAsciiProfile, loadProfile } from '@ascii-fx/core'
 import type {
@@ -52,17 +52,27 @@ export function useAsciiProfile(source?: ProfileSource | null): AsciiProfile | n
   return profile
 }
 
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+
+function subscribeReducedMotion(onChange: () => void): () => void {
+  if (typeof matchMedia === 'undefined') return () => {}
+  const mq = matchMedia(REDUCED_MOTION_QUERY)
+  mq.addEventListener('change', onChange)
+  return () => mq.removeEventListener('change', onChange)
+}
+
+/**
+ * The OS reduced-motion preference, read as an external store rather than
+ * state-plus-effect: the first client render already sees the real value instead of
+ * flashing `false` and re-rendering, and the server snapshot is explicitly `false`
+ * so hydration matches (spec §18).
+ */
 export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false)
-  useEffect(() => {
-    if (typeof matchMedia === 'undefined') return
-    const mq = matchMedia('(prefers-reduced-motion: reduce)')
-    setReduced(mq.matches)
-    const onChange = (): void => setReduced(mq.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  return reduced
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    () => typeof matchMedia !== 'undefined' && matchMedia(REDUCED_MOTION_QUERY).matches,
+    () => false,
+  )
 }
 
 export interface UseAsciiOptions extends AsciiRendererRuntimeOptions {
@@ -119,7 +129,9 @@ export function useAscii(
   const handleDeviceLost = useCallback((info: GPUDeviceLostInfo) => {
     remounts.current += 1
     if (remounts.current > MAX_DEVICE_LOSS_REMOUNTS) {
-      setError(new Error(`GPU device lost and could not be restored: ${info.message || info.reason}`))
+      setError(
+        new Error(`GPU device lost and could not be restored: ${info.message || info.reason}`),
+      )
       return
     }
     setLostGeneration((g) => g + 1)
@@ -143,7 +155,13 @@ export function useAscii(
     initChain.current = initChain.current.then(async () => {
       if (!live) return
       try {
-        const r = await createAsciiRenderer({ canvas, profile, backend, onDeviceLost: handleDeviceLost, ...runtimeRef.current })
+        const r = await createAsciiRenderer({
+          canvas,
+          profile,
+          backend,
+          onDeviceLost: handleDeviceLost,
+          ...runtimeRef.current,
+        })
         if (!live) {
           r.destroy()
           return
@@ -167,7 +185,8 @@ export function useAscii(
   const runtimeKey = rendererOptionsKey(runtime)
   useEffect(() => {
     renderer?.setOptions(runtimeRef.current)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `runtimeKey` is the trigger, not a value the body reads: it is what turns a new
+    // options object into one push when the options actually differ.
   }, [renderer, runtimeKey])
 
   const interactionKey = JSON.stringify(interaction ?? null)

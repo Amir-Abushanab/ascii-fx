@@ -7,7 +7,7 @@ import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three/webgpu'
 import { AsciiEffect } from '@ascii-fx/react-three'
 
-<Canvas
+;<Canvas
   gl={async (props) => {
     const renderer = new THREE.WebGPURenderer(props as never)
     await renderer.init()

@@ -2,23 +2,44 @@
   "name": "@ascii-fx/compiler",
   "version": "0.1.0",
   "description": "Build-time compiler for ASCII FX: deterministic font rasterization, glyph atlases, .asciip/.asciif generation.",
-  "license": "MIT",
-  "engines": {
-    "node": ">=22"
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "ascii-fx",
+    "build-tool",
+    "cli",
+    "font",
+    "glyph-atlas",
+    "rasterizer"
+  ],
+  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
+  "bugs": {
+    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
   },
-  "type": "module",
+  "license": "MIT",
+  "author": "Amir Abushanab (https://github.com/Amir-Abushanab)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
+    "directory": "packages/compiler"
+  },
   "bin": {
     "ascii-fx": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json && node scripts/postbuild.mjs",
     "typecheck": "tsc --noEmit"
@@ -34,13 +55,7 @@
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
-    "directory": "packages/compiler"
-  },
-  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
-  "bugs": {
-    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
+  "engines": {
+    "node": ">=22"
   }
 }

@@ -87,7 +87,10 @@ export async function activeProfile(): Promise<AsciiProfile> {
   if (selection.every((g) => inCurated.has(g))) {
     return selection.length === curated.glyphCount
       ? curated
-      : subsetProfile(curated, curated.glyphs.filter((g) => selection!.includes(g)))
+      : subsetProfile(
+          curated,
+          curated.glyphs.filter((g) => selection!.includes(g)),
+        )
   }
   const full = await loadFullPalette()
   const picked = new Set(selection)

@@ -41,4 +41,10 @@ export { PROFILE_FORMAT_VERSION, decodeProfile, encodeProfile } from './profileC
 export { loadProfile, type ProfileSource } from './loadProfile.js'
 export { createAsciiProfile, type CreateAsciiProfileOptions } from './runtimeProfile.js'
 export { loadFrame, type FrameSource } from './loadFrame.js'
-export { FRAME_FORMAT_VERSION, decodeFrame, encodeFrame, peekFrame, type FrameMeta } from './frameCodec.js'
+export {
+  FRAME_FORMAT_VERSION,
+  decodeFrame,
+  encodeFrame,
+  peekFrame,
+  type FrameMeta,
+} from './frameCodec.js'

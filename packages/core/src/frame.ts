@@ -16,6 +16,13 @@ export interface AsciiFrameInit {
 const escapeHtml = (s: string): string =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 
+const unpackRGBA = (c: number): [number, number, number, number] => [
+  unpackR(c),
+  unpackG(c),
+  unpackB(c),
+  unpackA(c),
+]
+
 export class AsciiFrame {
   readonly columns: number
   readonly rows: number
@@ -43,17 +50,11 @@ export class AsciiFrame {
     }
     const i = y * this.columns + x
     const id = this.glyphIds[i]
-    const unpack = (c: number): [number, number, number, number] => [
-      unpackR(c),
-      unpackG(c),
-      unpackB(c),
-      unpackA(c),
-    ]
     return {
       glyph: this.profile.glyphs[id],
       glyphId: id,
-      foreground: this.foreground ? unpack(this.foreground[i]) : null,
-      background: this.background ? unpack(this.background[i]) : null,
+      foreground: this.foreground ? unpackRGBA(this.foreground[i]) : null,
+      background: this.background ? unpackRGBA(this.background[i]) : null,
       flags: this.flags[i],
     }
   }

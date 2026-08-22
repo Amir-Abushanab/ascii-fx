@@ -256,11 +256,7 @@ ascii.destroy()
 ## React
 
 ```tsx
-<AsciiImage
-  src="/hero.jpg"
-  alt="Portrait"
-  profile={profile}
-/>
+<AsciiImage src="/hero.jpg" alt="Portrait" profile={profile} />
 ```
 
 Interactive:
@@ -280,10 +276,7 @@ Interactive:
 Video:
 
 ```tsx
-<AsciiVideo
-  src="/video.mp4"
-  profile={profile}
-/>
+<AsciiVideo src="/video.mp4" profile={profile} />
 ```
 
 ## Three.js
@@ -310,11 +303,7 @@ ascii.pointer.set(x, y)
 ## R3F
 
 ```tsx
-<AsciiEffect
-  profile={profile}
-  columns={180}
-  interaction="reveal"
-/>
+<AsciiEffect profile={profile} columns={180} interaction="reveal" />
 ```
 
 ## Rule
@@ -1613,7 +1602,9 @@ Also support:
 ```ts
 rows
 cellSize
-resolution: { columns, rows }
+resolution: {
+  ;(columns, rows)
+}
 ```
 
 One dimension may be `auto`, but avoid ambiguous combinations.

@@ -1,5 +1,12 @@
 import { expect, it } from 'vitest'
-import { COMPOSITE_WGSL, FEATURES_WGSL, MAX_GPU_GLYPHS, MIPGEN_WGSL, REDUCE_WGSL, matchWgsl } from '../src/shaders.js'
+import {
+  COMPOSITE_WGSL,
+  FEATURES_WGSL,
+  MAX_GPU_GLYPHS,
+  MIPGEN_WGSL,
+  REDUCE_WGSL,
+  matchWgsl,
+} from '../src/shaders.js'
 
 it('all shader modules compile cleanly', async () => {
   const adapter = await navigator.gpu.requestAdapter()
@@ -19,7 +26,6 @@ it('all shader modules compile cleanly', async () => {
     for (const m of info.messages) {
       const line = code.split('\n')[m.lineNum - 1] ?? ''
       const text = `[${name}] ${m.type} ${m.lineNum}:${m.linePos} ${m.message}\n    ${line.trim()}`
-      // eslint-disable-next-line no-console
       console.log(text)
       if (m.type === 'error') errors.push(text)
     }

@@ -10,15 +10,15 @@ description: >
   video, a terminal-style text export of an image, or how to compile a font into a glyph profile.
 metadata:
   type: core
-  library: "@ascii-fx/core"
-  library_version: "0.1.0"
+  library: '@ascii-fx/core'
+  library_version: '0.1.0'
 sources:
-  - "ascii-fx:README.md"
-  - "ascii-fx:ALGORITHM.md"
-  - "ascii-fx:CHROMATIC-FINDINGS.md"
-  - "ascii-fx:packages/core/src/types.ts"
-  - "ascii-fx:packages/gpu/src/renderer.ts"
-  - "ascii-fx:packages/react/src/components.tsx"
+  - 'ascii-fx:README.md'
+  - 'ascii-fx:ALGORITHM.md'
+  - 'ascii-fx:CHROMATIC-FINDINGS.md'
+  - 'ascii-fx:packages/core/src/types.ts'
+  - 'ascii-fx:packages/gpu/src/renderer.ts'
+  - 'ascii-fx:packages/react/src/components.tsx'
 ---
 
 # @ascii-fx — structural ASCII (and emoji) rendering for the web
@@ -31,7 +31,7 @@ underneath — same output, different speed.
 ## When to use
 
 - An ASCII-art hero, background, avatar, or live video/webcam filter.
-- ASCII that reads as *drawing* rather than a halftone dither — this is the shape-aware kind.
+- ASCII that reads as _drawing_ rather than a halftone dither — this is the shape-aware kind.
 - An **emoji mosaic** or emoji video (see "Emoji mode" — a separate matcher, not a charset swap).
 - Turning an image into text for a terminal, a `<pre>`, or a copy-paste (`toText`/`toAnsi`/`toHTML`).
 
@@ -50,15 +50,15 @@ it is the matcher and the codecs.
 
 ## Choosing an entry
 
-| Need | Use |
-| --- | --- |
+| Need                         | Use                                                                     |
+| ---------------------------- | ----------------------------------------------------------------------- |
 | React image / video / canvas | `import { AsciiImage, AsciiVideo, AsciiCanvas } from '@ascii-fx/react'` |
-| Any framework, own canvas | `import { createAsciiRenderer } from '@ascii-fx/gpu'` |
-| No DOM — match to data | `import { matchFrame } from '@ascii-fx/core'` |
-| three.js post-processing | `import { AsciiPass } from '@ascii-fx/three'` (WebGPURenderer only) |
-| React Three Fiber | `import { AsciiEffect, AsciiGlyphs } from '@ascii-fx/react-three'` |
-| Profiles at build time | `import { ascii } from '@ascii-fx/vite'` |
-| Compile a profile in Node | `import { buildProfile } from '@ascii-fx/compiler'` |
+| Any framework, own canvas    | `import { createAsciiRenderer } from '@ascii-fx/gpu'`                   |
+| No DOM — match to data       | `import { matchFrame } from '@ascii-fx/core'`                           |
+| three.js post-processing     | `import { AsciiPass } from '@ascii-fx/three'` (WebGPURenderer only)     |
+| React Three Fiber            | `import { AsciiEffect, AsciiGlyphs } from '@ascii-fx/react-three'`      |
+| Profiles at build time       | `import { ascii } from '@ascii-fx/vite'`                                |
+| Compile a profile in Node    | `import { buildProfile } from '@ascii-fx/compiler'`                     |
 
 ## Quick starts
 
@@ -67,7 +67,13 @@ it is the matcher and the codecs.
 ```tsx
 import { AsciiImage } from '@ascii-fx/react'
 
-<AsciiImage src="/portrait.jpg" alt="Portrait" profile={{ url: '/default.asciip' }} columns={160} color="full" />
+;<AsciiImage
+  src="/portrait.jpg"
+  alt="Portrait"
+  profile={{ url: '/default.asciip' }}
+  columns={160}
+  color="full"
+/>
 ```
 
 `alt` is required and the original media stays in the accessibility tree. `<AsciiVideo>` and
@@ -82,7 +88,7 @@ import { createAsciiRenderer } from '@ascii-fx/gpu'
 const profile = await loadProfile('/default.asciip')
 const ascii = await createAsciiRenderer({ canvas, profile, columns: 160, color: 'full' })
 ascii.setSource(videoOrImageOrCanvas)
-ascii.start()          // rVFC for video, rAF otherwise
+ascii.start() // rVFC for video, rAF otherwise
 // ascii.setOptions({ columns: 200 }) · ascii.setInteraction({ type: 'push' }) · ascii.destroy()
 ```
 
@@ -91,7 +97,7 @@ ascii.start()          // rVFC for video, rAF otherwise
 ```ts
 import { matchFrame } from '@ascii-fx/core'
 const frame = matchFrame(rawImage, { profile, columns: 120, color: 'mono' })
-frame.toText()   // also toAnsi() and toHTML()
+frame.toText() // also toAnsi() and toHTML()
 ```
 
 ## Profiles — the glyph set
@@ -120,16 +126,16 @@ hands the matcher 256 distinct shapes.
 
 ## Options that matter
 
-| Option | Effect |
-| --- | --- |
-| `columns` | Characters per row; rows follow from the source aspect and the cell aspect. |
-| `color` | `mono` (one ink colour) · `foreground` (fitted colour per glyph) · `full` (fitted glyph **and** background per cell — closest to the original). |
-| `alpha` | `mask` (transparent cells stay transparent) or `ignore`. |
-| `flatThreshold` | Cells with less contrast than this render as one tone instead of a shape. |
-| `backend` | `auto` (default) takes WebGPU and falls back to the exact CPU matcher. Chosen once, at construction — see the device-loss gotcha for what happens when the GPU dies later. |
-| `temporal` | Skip re-matching cells whose pixels did not change. Exact, great for video, WebGPU only. |
-| `adaptiveResolution` | Lower `columns` under frame pressure and recover. **WebGPU only** — so two backends can land on different grids. |
-| `interaction` | Pointer/time effects composited on top (`reveal`, `displace`, `wave`, `push`…). Never re-runs matching. |
+| Option               | Effect                                                                                                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `columns`            | Characters per row; rows follow from the source aspect and the cell aspect.                                                                                                |
+| `color`              | `mono` (one ink colour) · `foreground` (fitted colour per glyph) · `full` (fitted glyph **and** background per cell — closest to the original).                            |
+| `alpha`              | `mask` (transparent cells stay transparent) or `ignore`.                                                                                                                   |
+| `flatThreshold`      | Cells with less contrast than this render as one tone instead of a shape.                                                                                                  |
+| `backend`            | `auto` (default) takes WebGPU and falls back to the exact CPU matcher. Chosen once, at construction — see the device-loss gotcha for what happens when the GPU dies later. |
+| `temporal`           | Skip re-matching cells whose pixels did not change. Exact, great for video, WebGPU only.                                                                                   |
+| `adaptiveResolution` | Lower `columns` under frame pressure and recover. **WebGPU only** — so two backends can land on different grids.                                                           |
+| `interaction`        | Pointer/time effects composited on top (`reveal`, `displace`, `wave`, `push`…). Never re-runs matching.                                                                    |
 
 `matcher: 'shape6' | 'ramp'` are cheaper, visibly approximate matchers. They are explicit opt-ins,
 never automatic fallbacks — `auto` backend selection never silently degrades quality.
@@ -137,12 +143,12 @@ never automatic fallbacks — `auto` backend selection never silently degrades q
 ## Emoji mode (`chromatic-v1`)
 
 Colour emoji need a **different algorithm**, not a bigger charset. `structural-v1` matches a 1-bit
-mask and *fits* colour to it — free foreground and background are exactly what make its rerank
+mask and _fits_ colour to it — free foreground and background are exactly what make its rerank
 exact. An emoji's colour is baked, so there is nothing to fit:
 
 ```ts
-import { buildChromaticProfile } from '@ascii-fx/compiler'   // Node, from decoded PNGs
-const { binary } = buildChromaticProfile({ glyphs: [{ char: '🌊', image }, /* … */] })
+import { buildChromaticProfile } from '@ascii-fx/compiler' // Node, from decoded PNGs
+const { binary } = buildChromaticProfile({ glyphs: [{ char: '🌊', image } /* … */] })
 
 const frame = matchFrame(source, { profile, matcher: 'chromatic', background: [11, 11, 15] })
 frame.colorMode // 'glyph' — no colour planes, the colour is in the glyph
@@ -154,14 +160,14 @@ Things worth knowing, all of them measured:
 
 - **Curate the palette to ~100 glyphs.** A usage-curated 100 matches a full 1301-glyph pool to
   within 1% at a thirteenth of the per-cell cost. Curate for **usage density**, not colour coverage
-  — farthest-point/k-means selection is *worse than doing nothing* at realistic budgets.
+  — farthest-point/k-means selection is _worse than doing nothing_ at realistic budgets.
 - **Flat swatches win constantly.** A solid tile is the best possible reconstruction of a flat cell,
   and emoji sets are full of them (skin-tone modifiers render as plain squares). Dropping them
   trades reconstruction error for recognisable emoji — a deliberate choice, not a bug.
 - **No prefilter.** Over a curated palette an exhaustive search costs about what `structural-v1`'s
   shortlist-plus-rerank costs per cell, and every shortlist tested lost more quality than it saved.
 - **`hysteresis` (0–1) defaults off.** It keeps the previous glyph unless a challenger beats it by
-  that margin. Emoji actually flip *less* than ASCII unaided, so reach for ~0.1 only if a specific
+  that margin. Emoji actually flip _less_ than ASCII unaided, so reach for ~0.1 only if a specific
   source strobes. Never feed `previous` glyph ids from a different source — it is biased toward the
   incumbent and will ghost the old image in.
 - `background` is part of the objective: glyphs are matched as composited over the backdrop they
@@ -175,7 +181,7 @@ Emoji cells are **square**, unlike text cells, so the same `columns` yields more
 import { AsciiPass } from '@ascii-fx/three'
 const pass = new AsciiPass({ profile, renderer, columns: 160, color: 'full' })
 await pass.init()
-pass.render(scene, camera)   // per frame, instead of renderer.render()
+pass.render(scene, camera) // per frame, instead of renderer.render()
 ```
 
 Matching runs on three's own device, so nothing is read back. **WebGL is unsupported on purpose** —

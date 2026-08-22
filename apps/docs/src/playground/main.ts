@@ -153,12 +153,16 @@ function loadSelectedProfile(): Promise<AsciiProfile> {
   if (!pending) {
     if (value === 'geist') {
       pending = fetch(`${import.meta.env.BASE_URL}default.asciip`).then(async (res) => {
-        if (!res.ok) throw new Error('compiled profile missing — run `pnpm golden:update` at the repo root')
+        if (!res.ok)
+          throw new Error('compiled profile missing — run `pnpm golden:update` at the repo root')
         return decodeProfile(new Uint8Array(await res.arrayBuffer()))
       })
     } else if (value === 'upload') {
       if (!customFontFamily) return Promise.reject(new Error('pick a font file first'))
-      pending = createAsciiProfile({ fontFamily: customFontFamily, ...(chars ? { characters: chars } : {}) })
+      pending = createAsciiProfile({
+        fontFamily: customFontFamily,
+        ...(chars ? { characters: chars } : {}),
+      })
     } else {
       pending = createAsciiProfile({ fontFamily: value, ...(chars ? { characters: chars } : {}) })
     }
@@ -192,7 +196,10 @@ async function createSource(kind: string): Promise<ActiveSource> {
     return { kind, source: scene.canvas, tick: scene.tick, live: true }
   }
   if (kind === 'webcam') {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960 }, audio: false })
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 960 },
+      audio: false,
+    })
     const video = document.createElement('video')
     video.srcObject = stream
     video.muted = true
@@ -351,7 +358,12 @@ function renderLoopPolicy(): void {
 
 function syncMotionPolicy(): void {
   renderLoopPolicy()
-  if (active?.tick && els.animate.checked && outputVisible && document.visibilityState !== 'hidden') {
+  if (
+    active?.tick &&
+    els.animate.checked &&
+    outputVisible &&
+    document.visibilityState !== 'hidden'
+  ) {
     animationLoop()
   } else if (sceneRaf) {
     cancelAnimationFrame(sceneRaf)
@@ -581,7 +593,9 @@ async function mountGlyphPicker(): Promise<void> {
       paletteTimer = window.setTimeout(() => {
         // A selection identical to the default stays null, so the common case
         // renders straight off the curated profile with no subsetting.
-        setSelection(glyphs.length === initial.size && glyphs.every((g) => initial.has(g)) ? null : glyphs)
+        setSelection(
+          glyphs.length === initial.size && glyphs.every((g) => initial.has(g)) ? null : glyphs,
+        )
         void rebuild()
       }, 140)
     },
@@ -602,7 +616,8 @@ els.emojiMode.addEventListener('change', () => {
   els.emojiMode.disabled = true
   out.classList.add('swapping')
   heroStage.dataset.busy = '1'
-  heroBusyLabel.textContent = emojiOn() && !paletteReady() ? 'loading emoji palette…' : 'switching matcher…'
+  heroBusyLabel.textContent =
+    emojiOn() && !paletteReady() ? 'loading emoji palette…' : 'switching matcher…'
   void (async () => {
     await rebuild()
     // The full 1301-glyph sheet is 6.8 MB, so it is fetched after the first
@@ -622,14 +637,26 @@ els.emojiMode.addEventListener('change', () => {
     })
 })
 
-const optionInputs = [els.columns, els.color, els.alpha, els.flat, els.fg, els.bg, els.fit, els.temporal, els.adaptive, els.hyst]
+const optionInputs = [
+  els.columns,
+  els.color,
+  els.alpha,
+  els.flat,
+  els.fg,
+  els.bg,
+  els.fit,
+  els.temporal,
+  els.adaptive,
+  els.hyst,
+]
 for (const input of optionInputs) {
   input.addEventListener(input instanceof HTMLSelectElement ? 'change' : 'input', () => {
     els.columnsOut.value = els.columns.value
     els.flatOut.value = els.flat.value
     els.hystOut.value = Number(els.hyst.value).toFixed(2)
     renderer?.setOptions(matchOptions())
-    if (renderer && active && !(active.live && els.animate.checked && outputVisible)) renderer.render()
+    if (renderer && active && !(active.live && els.animate.checked && outputVisible))
+      renderer.render()
     syncPanel()
     updateStats()
   })
@@ -706,7 +733,9 @@ $('exportComponent').addEventListener('click', () => {
 // modal. It follows the dialog's framework pick when there is one, so the two
 // can never hand an agent different snippets.
 $('agentRow').append(
-  createAgentCopyButton(() => buildAgentBrief(exportDialog?.currentFramework() ?? 'react', getExportState())),
+  createAgentCopyButton(() =>
+    buildAgentBrief(exportDialog?.currentFramework() ?? 'react', getExportState()),
+  ),
 )
 
 /** Success/error feedback that keeps the button's icon: swap only the label + pulse. */
@@ -765,11 +794,22 @@ window.addEventListener('beforeunload', () => {
 
 // scene animation + fps meter
 function animationLoop(): void {
-  if (sceneRaf || !active?.tick || !els.animate.checked || !outputVisible || document.visibilityState === 'hidden') {
+  if (
+    sceneRaf ||
+    !active?.tick ||
+    !els.animate.checked ||
+    !outputVisible ||
+    document.visibilityState === 'hidden'
+  ) {
     return
   }
   const tick = (): void => {
-    if (!active?.tick || !els.animate.checked || !outputVisible || document.visibilityState === 'hidden') {
+    if (
+      !active?.tick ||
+      !els.animate.checked ||
+      !outputVisible ||
+      document.visibilityState === 'hidden'
+    ) {
       sceneRaf = 0
       return
     }

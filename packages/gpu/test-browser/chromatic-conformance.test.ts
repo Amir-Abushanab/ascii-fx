@@ -10,7 +10,9 @@ import { createAsciiRenderer } from '@ascii-fx/gpu'
 import { makeChromaticProfile, randomImage, solid } from '../../core/test/synthetic.js'
 
 const gpuAvailable =
-  typeof navigator !== 'undefined' && 'gpu' in navigator ? (await navigator.gpu.requestAdapter()) !== null : false
+  typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (await navigator.gpu.requestAdapter()) !== null
+    : false
 
 function expectFramesEqual(gpu: AsciiFrame, cpu: AsciiFrame, label: string): void {
   expect(gpu.columns, `${label} columns`).toBe(cpu.columns)
@@ -22,7 +24,10 @@ function expectFramesEqual(gpu: AsciiFrame, cpu: AsciiFrame, label: string): voi
   expect(gpu.background, `${label} background`).toBeUndefined()
 }
 
-const lcg = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0), seed / 4294967296)
+const lcg = (seed: number) => () => (
+  (seed = (seed * 1664525 + 1013904223) >>> 0),
+  seed / 4294967296
+)
 
 /** Random colour glyphs with real sub-cell structure and varied alpha. */
 function randomChromaticProfile(count: number, seed: number) {
@@ -58,7 +63,12 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
     ['site bg', [11, 11, 15]],
   ]
 
-  async function conform(profile: ReturnType<typeof makeChromaticProfile>, seed: number, columns: number, label: string) {
+  async function conform(
+    profile: ReturnType<typeof makeChromaticProfile>,
+    seed: number,
+    columns: number,
+    label: string,
+  ) {
     const renderer = await createAsciiRenderer({
       canvas: new OffscreenCanvas(64, 64),
       profile,
@@ -122,7 +132,12 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
       renderer.setOptions({ columns: 8, matcher: 'chromatic', alpha: 'mask' })
       renderer.setSource(image)
       const gpuFrame = await renderer.captureFrame()
-      const cpuFrame = matchFrame(image, { profile, columns: 8, matcher: 'chromatic', alpha: 'mask' })
+      const cpuFrame = matchFrame(image, {
+        profile,
+        columns: 8,
+        matcher: 'chromatic',
+        alpha: 'mask',
+      })
       expectFramesEqual(gpuFrame, cpuFrame, 'transparent')
     } finally {
       renderer.destroy()
@@ -136,6 +151,9 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
   // region, since a challenger has to be 40% better to win.
   it('does not carry the previous source across a setSource with hysteresis on', async () => {
     const profile = randomChromaticProfile(40, 3)
+    // The two sources this builds are what the case is about; at file scope the canvas
+    // size drifts away from them.
+    // eslint-disable-next-line unicorn/consistent-function-scoping
     const paint = (fn: (ctx: OffscreenCanvasRenderingContext2D) => void): OffscreenCanvas => {
       const c = new OffscreenCanvas(240, 160)
       fn(c.getContext('2d') as OffscreenCanvasRenderingContext2D)
@@ -153,10 +171,24 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
       x.fillStyle = '#e8e8c8'
       x.fillRect(120, 80, 120, 80)
     })
-    const opts = { columns: 20, matcher: 'chromatic' as const, background: [11, 11, 15] as RGB, alpha: 'ignore' as const, hysteresis: 0.4 }
+    const opts = {
+      columns: 20,
+      matcher: 'chromatic' as const,
+      background: [11, 11, 15] as RGB,
+      alpha: 'ignore' as const,
+      hysteresis: 0.4,
+    }
 
-    const switched = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, ...opts })
-    const fresh = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, ...opts })
+    const switched = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      ...opts,
+    })
+    const fresh = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      ...opts,
+    })
     try {
       switched.setSource(a)
       await switched.captureFrame()
@@ -188,8 +220,17 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
       const d = ctx.getImageData(0, 0, 64, 64)
       return { width: 64, height: 64, data: new Uint8Array(d.data.buffer.slice(0)) }
     }
-    const opts = { columns: 8, matcher: 'chromatic' as const, alpha: 'ignore' as const, hysteresis: 0.1 }
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, ...opts })
+    const opts = {
+      columns: 8,
+      matcher: 'chromatic' as const,
+      alpha: 'ignore' as const,
+      hysteresis: 0.1,
+    }
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      ...opts,
+    })
     try {
       const imgA = fill('rgb(200 200 255)') // picks the blue glyph (err 5.12M vs 9.28M)
       renderer.setSource(source)
@@ -256,8 +297,17 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
       const d = ctx.getImageData(0, 0, 64, 64)
       return { width: 64, height: 64, data: new Uint8Array(d.data.buffer.slice(0)) }
     }
-    const base = { columns: 8, matcher: 'chromatic' as const, alpha: 'ignore' as const, hysteresis: 0.1 }
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, ...base })
+    const base = {
+      columns: 8,
+      matcher: 'chromatic' as const,
+      alpha: 'ignore' as const,
+      hysteresis: 0.1,
+    }
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      ...base,
+    })
     try {
       fill('rgb(200 200 255)') // primes incumbents: blue everywhere
       renderer.setSource(source)
@@ -287,7 +337,12 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
     })
     try {
       expect(renderer.backend).toBe('cpu')
-      renderer.setOptions({ columns: 8, matcher: 'chromatic', background: [11, 11, 15], alpha: 'ignore' })
+      renderer.setOptions({
+        columns: 8,
+        matcher: 'chromatic',
+        background: [11, 11, 15],
+        alpha: 'ignore',
+      })
       renderer.setSource(image)
       const frame = await renderer.captureFrame()
       expect(frame.colorMode).toBe('glyph')

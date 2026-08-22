@@ -88,13 +88,16 @@ export function buildChromaticProfile(options: BuildChromaticOptions): BuiltChro
   const sources = options.glyphs
   const n = sources.length
   if (n === 0) throw new Error('buildChromaticProfile needs at least one glyph.')
-  if (n > 65536) throw new Error(`Chromatic profiles hold at most 65536 glyphs (got ${n}); glyph ids are u16.`)
+  if (n > 65536)
+    throw new Error(`Chromatic profiles hold at most 65536 glyphs (got ${n}); glyph ids are u16.`)
 
   const seen = new Set<string>()
   for (const g of sources) {
     if (g.char.length === 0) throw new Error('A chromatic glyph has an empty character.')
     if (seen.has(g.char)) {
-      throw new Error(`Duplicate chromatic glyph ${JSON.stringify(g.char)}. Each grapheme may appear once.`)
+      throw new Error(
+        `Duplicate chromatic glyph ${JSON.stringify(g.char)}. Each grapheme may appear once.`,
+      )
     }
     seen.add(g.char)
     if (g.image.width < 1 || g.image.height < 1) {
@@ -106,7 +109,8 @@ export function buildChromaticProfile(options: BuildChromaticOptions): BuiltChro
   }
 
   const cell = options.cellSize ?? CHROMATIC_CELL
-  if (!Number.isInteger(cell) || cell < 8) throw new Error(`cellSize must be an integer >= 8 (got ${cell}).`)
+  if (!Number.isInteger(cell) || cell < 8)
+    throw new Error(`cellSize must be an integer >= 8 (got ${cell}).`)
 
   const pitch = nextPow2(cell + 2 * ATLAS_PADDING)
   let atlasColumns = 1
@@ -166,7 +170,10 @@ export function buildChromaticProfile(options: BuildChromaticOptions): BuiltChro
   const imageBytes = new Uint8Array(total)
   let at = 0
   for (const g of sources) {
-    imageBytes.set(g.image.data instanceof Uint8Array ? g.image.data : new Uint8Array(g.image.data), at)
+    imageBytes.set(
+      g.image.data instanceof Uint8Array ? g.image.data : new Uint8Array(g.image.data),
+      at,
+    )
     at += g.image.data.length
   }
   const sourceHash = sha256(imageBytes)

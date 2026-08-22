@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest'
 import { matchFrame } from '@ascii-fx/core'
 
 const gpuAvailable =
-  typeof navigator !== 'undefined' && 'gpu' in navigator ? (await navigator.gpu.requestAdapter()) !== null : false
+  typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (await navigator.gpu.requestAdapter()) !== null
+    : false
 
 describe.runIf(gpuAvailable)('AsciiPass (three WebGPURenderer)', () => {
   it('matches the render target exactly against the CPU reference', async () => {
@@ -37,12 +39,25 @@ describe.runIf(gpuAvailable)('AsciiPass (three WebGPURenderer)', () => {
     quad(0.1, 0.6, 1.2, 0.4, 0x00ff00)
 
     const profile = makeProfile(STANDARD_SIX)
-    const pass = new AsciiPass({ profile, renderer, width: 96, height: 64, columns: 12, color: 'full' })
+    const pass = new AsciiPass({
+      profile,
+      renderer,
+      width: 96,
+      height: 64,
+      columns: 12,
+      color: 'full',
+    })
     await pass.init()
     pass.render(scene, camera)
     const gpuFrame = await pass.captureFrame()
 
-    const raw = (await renderer.readRenderTargetPixelsAsync(pass.renderTarget, 0, 0, 96, 64)) as Uint8Array
+    const raw = (await renderer.readRenderTargetPixelsAsync(
+      pass.renderTarget,
+      0,
+      0,
+      96,
+      64,
+    )) as Uint8Array
     // Some three versions return WebGPU-padded rows (bytesPerRow aligned to 256).
     const tightRow = 96 * 4
     const paddedRow = Math.ceil(tightRow / 256) * 256
@@ -59,7 +74,10 @@ describe.runIf(gpuAvailable)('AsciiPass (three WebGPURenderer)', () => {
     }
 
     const cpuOf = (data: Uint8Array): ReturnType<typeof matchFrame> =>
-      matchFrame({ width: 96, height: 64, data }, { profile, columns: 12, color: 'full', alpha: 'ignore' })
+      matchFrame(
+        { width: 96, height: 64, data },
+        { profile, columns: 12, color: 'full', alpha: 'ignore' },
+      )
 
     let cpuFrame = cpuOf(pixels)
     if (!cpuFrame.glyphIds.every((v, i) => v === gpuFrame.glyphIds[i])) {

@@ -1,11 +1,32 @@
 {
   "name": "@ascii-fx/core",
   "version": "0.1.0",
-  "description": "High-fidelity structural ASCII rendering \u2014 core types, exact CPU matcher, profile/frame codecs.",
-  "license": "MIT",
-  "engines": {
-    "node": ">=22"
+  "description": "High-fidelity structural ASCII rendering — core types, exact CPU matcher, profile/frame codecs.",
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "ascii-fx",
+    "glyph-atlas",
+    "image-to-ascii",
+    "renderer",
+    "structural-matching",
+    "tanstack-intent"
+  ],
+  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
+  "bugs": {
+    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
   },
+  "license": "MIT",
+  "author": "Amir Abushanab (https://github.com/Amir-Abushanab)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
+    "directory": "packages/core"
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -18,10 +39,9 @@
       "default": "./dist/canvas2d.js"
     }
   },
-  "files": [
-    "dist",
-    "skills"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "skill:stale": "intent stale skills",
@@ -34,16 +54,7 @@
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"
   },
-  "keywords": [
-    "tanstack-intent"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
-    "directory": "packages/core"
-  },
-  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
-  "bugs": {
-    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
+  "engines": {
+    "node": ">=22"
   }
 }

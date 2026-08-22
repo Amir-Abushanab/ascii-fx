@@ -3,7 +3,12 @@ import { useFrame, useThree } from '@react-three/fiber'
 import type { WebGPURenderer } from 'three/webgpu'
 import type { AsciiFrame, AsciiProfile, ProfileSource } from '@ascii-fx/core'
 import { loadProfile } from '@ascii-fx/core'
-import type { FitMode, InteractionOptions, InteractionType, StreamMatchOptions } from '@ascii-fx/gpu'
+import type {
+  FitMode,
+  InteractionOptions,
+  InteractionType,
+  StreamMatchOptions,
+} from '@ascii-fx/gpu'
 import { AsciiGlyphs as AsciiGlyphsImpl, AsciiPass } from '@ascii-fx/three'
 
 export interface UseAsciiEffectOptions extends StreamMatchOptions {
@@ -131,7 +136,10 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
     if (!pass) return
     const renderer = gl as unknown as WebGPURenderer
     const dpr = renderer.getPixelRatio()
-    pass.setSize(Math.max(1, Math.round(size.width * dpr)), Math.max(1, Math.round(size.height * dpr)))
+    pass.setSize(
+      Math.max(1, Math.round(size.width * dpr)),
+      Math.max(1, Math.round(size.height * dpr)),
+    )
   }, [pass, size, gl])
 
   useFrame((state) => {

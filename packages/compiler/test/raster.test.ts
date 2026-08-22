@@ -5,7 +5,13 @@ import { deriveMask, flattenCommands, maskTotals, rasterizeGlyph } from '@ascii-
 // Identity mapping: args are already 26.6 pixel-space (64 units = 1px).
 const fx = { x: (v: number) => v, y: (v: number) => v }
 
-const rect = (x0: number, y0: number, x1: number, y1: number, reverse = false): FontPathCommand[] => {
+const rect = (
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  reverse = false,
+): FontPathCommand[] => {
   const pts: Array<[number, number]> = reverse
     ? [
         [x0, y0],

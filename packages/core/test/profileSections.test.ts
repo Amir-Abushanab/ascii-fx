@@ -14,9 +14,10 @@ describe('profile section table (§14)', () => {
     const types = Array.from({ length: count }, (_, i) => view.getUint32(172 + i * 12, true))
     expect(types.length).toBeGreaterThanOrEqual(6)
     for (let i = 1; i < types.length; i++) {
-      expect(types[i], `section table ${JSON.stringify(types)} not ascending at index ${i}`).toBeGreaterThan(
-        types[i - 1],
-      )
+      expect(
+        types[i],
+        `section table ${JSON.stringify(types)} not ascending at index ${i}`,
+      ).toBeGreaterThan(types[i - 1])
     }
     const decoded = decodeProfile(bytes)
     expect(decoded.glyphs).toEqual(profile.glyphs)

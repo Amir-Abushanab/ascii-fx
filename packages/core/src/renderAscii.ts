@@ -34,7 +34,11 @@ async function normalizeSource(source: AsciiSource): Promise<RawImage> {
     )
   }
 
-  if (typeof HTMLImageElement !== 'undefined' && source instanceof HTMLImageElement && !source.complete) {
+  if (
+    typeof HTMLImageElement !== 'undefined' &&
+    source instanceof HTMLImageElement &&
+    !source.complete
+  ) {
     await source.decode()
   }
 
@@ -58,10 +62,14 @@ async function normalizeSource(source: AsciiSource): Promise<RawImage> {
   }
 
   const canvas =
-    typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(width, height) : document.createElement('canvas')
+    typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(width, height)
+      : document.createElement('canvas')
   canvas.width = width
   canvas.height = height
-  const ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | null
+  const ctx = canvas.getContext('2d', {
+    willReadFrequently: true,
+  }) as CanvasRenderingContext2D | null
   if (!ctx) throw new Error('Could not acquire a 2d context to read source pixels.')
   ctx.drawImage(source as CanvasImageSource, 0, 0, width, height)
   const img = ctx.getImageData(0, 0, width, height)

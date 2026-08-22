@@ -16,10 +16,17 @@ console.log('building shape6 profile (one-time)…')
 const shape6Bytes = await buildShape6Profile()
 const { chromium } = await import(join(root, 'node_modules/playwright/index.mjs'))
 
-const MIME = { '.js': 'text/javascript', '.html': 'text/html', '.asciip': 'application/octet-stream', '.wasm': 'application/wasm' }
+const MIME = {
+  '.js': 'text/javascript',
+  '.html': 'text/html',
+  '.asciip': 'application/octet-stream',
+  '.wasm': 'application/wasm',
+}
 // The harness fetches its assets relative to index.html, which this server
 // mounts at the root; the same files are copied under /bench/ for the docs site.
-const ROUTES = Object.fromEntries(Object.entries(HARNESS_FILES).map(([name, path]) => [`/${name}`, path]))
+const ROUTES = Object.fromEntries(
+  Object.entries(HARNESS_FILES).map(([name, path]) => [`/${name}`, path]),
+)
 ROUTES['/'] = HARNESS_FILES['index.html']
 
 const server = createServer(async (req, res) => {
@@ -59,7 +66,9 @@ const openPage = async () => {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
   page.on('pageerror', (e) => console.error('pageerror:', e.message))
   await page.goto(`http://localhost:${port}/`)
-  await page.waitForFunction(() => document.getElementById('status').textContent === 'ready', { timeout: 30000 })
+  await page.waitForFunction(() => document.getElementById('status').textContent === 'ready', {
+    timeout: 30000,
+  })
   return page
 }
 
@@ -77,7 +86,8 @@ for (let pass = 0; pass < PASSES; pass++) {
     const r = await page.evaluate((n) => window.runBench(n), name)
     await page.close()
     if (r.skipped) {
-      if (pass === 0) console.log(`pass ${pass + 1}  ${name.padEnd(32)} skipped (no compiled emoji palette)`)
+      if (pass === 0)
+        console.log(`pass ${pass + 1}  ${name.padEnd(32)} skipped (no compiled emoji palette)`)
       continue
     }
     const prev = byName.get(name)
@@ -99,7 +109,9 @@ const tableOf = (rows) =>
   [
     '| library | glyph grid | p50 ms/frame | p95 ms/frame | ~fps |',
     '| --- | --- | ---: | ---: | ---: |',
-    ...rows.map((r) => `| ${r.name} | ${r.grid} | ${fmt(r.p50)} | ${fmt(r.p95)} | ${fmt(r.fps, 0)} |`),
+    ...rows.map(
+      (r) => `| ${r.name} | ${r.grid} | ${fmt(r.p50)} | ${fmt(r.p95)} | ${fmt(r.fps, 0)} |`,
+    ),
   ].join('\n')
 const table = tableOf(asciiResults)
 

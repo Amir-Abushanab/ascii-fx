@@ -57,7 +57,8 @@ async function buildRuntimeProfile(
       // best effort; fall through to whatever the canvas resolves
     }
   }
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    ?.env
   const isDev = env?.NODE_ENV !== 'production'
   if (isDev && !warned) {
     warned = true
@@ -68,7 +69,9 @@ async function buildRuntimeProfile(
   }
 
   const measureCanvas =
-    typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(8, 8) : document.createElement('canvas')
+    typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(8, 8)
+      : document.createElement('canvas')
   const mctx = measureCanvas.getContext('2d') as CanvasRenderingContext2D
   const fontAt = (px: number): string => `${weight} ${px}px ${family}`
   mctx.font = fontAt(48)
@@ -97,7 +100,9 @@ async function buildRuntimeProfile(
   const coverage = new Uint16Array(n)
 
   const glyphCanvas =
-    typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(cellW, CELL_H) : document.createElement('canvas')
+    typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(cellW, CELL_H)
+      : document.createElement('canvas')
   glyphCanvas.width = cellW
   glyphCanvas.height = CELL_H
   const ctx = glyphCanvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D
@@ -181,6 +186,12 @@ async function buildRuntimeProfile(
       data: atlasData,
     },
     structural: { masksLo, masksHi, coverage },
-    metadata: { id: `runtime:${family}`, charset: charsetName, fontFamily: family, fontWeight: weight, compilerVersion: 'runtime' },
+    metadata: {
+      id: `runtime:${family}`,
+      charset: charsetName,
+      fontFamily: family,
+      fontWeight: weight,
+      compilerVersion: 'runtime',
+    },
   }
 }

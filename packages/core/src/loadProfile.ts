@@ -2,7 +2,13 @@ import type { AsciiProfile } from './types.js'
 import { decodeProfile } from './profileCodec.js'
 
 /** Anything that can resolve to a profile: the object itself, raw bytes, or a URL. */
-export type ProfileSource = AsciiProfile | string | URL | ArrayBuffer | Uint8Array | { url: string; id?: string }
+export type ProfileSource =
+  | AsciiProfile
+  | string
+  | URL
+  | ArrayBuffer
+  | Uint8Array
+  | { url: string; id?: string }
 
 const isProfile = (s: ProfileSource): s is AsciiProfile =>
   typeof s === 'object' && s !== null && 'glyphs' in s && 'structural' in s
@@ -22,7 +28,9 @@ export function loadProfile(source: ProfileSource): Promise<AsciiProfile> {
   if (!pending) {
     pending = fetch(url).then(async (res) => {
       if (!res.ok) {
-        throw new Error(`Failed to load ASCII FX profile from ${url} (${res.status}). Is the .asciip asset deployed?`)
+        throw new Error(
+          `Failed to load ASCII FX profile from ${url} (${res.status}). Is the .asciip asset deployed?`,
+        )
       }
       return decodeProfile(new Uint8Array(await res.arrayBuffer()))
     })

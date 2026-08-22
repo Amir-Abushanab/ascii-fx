@@ -26,7 +26,9 @@ async function probe(): Promise<AsciiSupport> {
         limitations.push('WebGPU is present but no adapter is available.')
       }
     } catch (err) {
-      limitations.push(`WebGPU device acquisition failed: ${err instanceof Error ? err.message : String(err)}`)
+      limitations.push(
+        `WebGPU device acquisition failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   } else {
     limitations.push('navigator.gpu is not available.')
@@ -46,7 +48,9 @@ async function probe(): Promise<AsciiSupport> {
   const worker = typeof Worker !== 'undefined'
   const offscreenCanvas = typeof OffscreenCanvas !== 'undefined'
   if (!webgpu) {
-    limitations.push('Worker matcher backend is not yet implemented; CPU matching runs on the main thread.')
+    limitations.push(
+      'Worker matcher backend is not yet implemented; CPU matching runs on the main thread.',
+    )
   }
 
   return {

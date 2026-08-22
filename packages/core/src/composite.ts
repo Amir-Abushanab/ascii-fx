@@ -16,7 +16,11 @@ export interface CompositeOptions {
  * RGBA pixels at native atlas cell size. Pure function — no DOM. Pass `reuse`
  * (a previous result) to avoid reallocating the pixel buffer every frame.
  */
-export function compositeFrame(frame: AsciiFrame, options: CompositeOptions = {}, reuse?: RawImage): RawImage {
+export function compositeFrame(
+  frame: AsciiFrame,
+  options: CompositeOptions = {},
+  reuse?: RawImage,
+): RawImage {
   const { atlas } = frame.profile
   const cw = atlas.cellWidth
   const ch = atlas.cellHeight

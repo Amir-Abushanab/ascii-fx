@@ -8,7 +8,9 @@ import { PNG } from 'pngjs'
 import { decodeFrame, decodeProfile } from '@ascii-fx/core'
 import { ascii } from '../src/index.js'
 
-const FONT_PATH = fileURLToPath(new URL('../../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url))
+const FONT_PATH = fileURLToPath(
+  new URL('../../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url),
+)
 
 const makePng = (): Uint8Array => {
   const png = new PNG({ width: 64, height: 32 })
@@ -98,8 +100,12 @@ describe('@ascii-fx/vite plugin', () => {
   })
 
   it('unknown names fail with the available list', async () => {
-    await expect(runHooks(plugin, 'virtual:ascii-profile/nope', [])).rejects.toThrow(/available: default/)
-    await expect(runHooks(plugin, 'virtual:ascii-frame/nope', [])).rejects.toThrow(/available: hero/)
+    await expect(runHooks(plugin, 'virtual:ascii-profile/nope', [])).rejects.toThrow(
+      /available: default/,
+    )
+    await expect(runHooks(plugin, 'virtual:ascii-frame/nope', [])).rejects.toThrow(
+      /available: hero/,
+    )
   })
 
   it('ignores unrelated ids', () => {
@@ -170,7 +176,11 @@ describe('@ascii-fx/vite plugin', () => {
 
     const rebuilt = assetPathOf(await runHooks(make(), 'virtual:ascii-frame/hero', []))
     expect(rebuilt).toBe(cachePath)
-    const profile = decodeProfile(new Uint8Array(readFileSync(assetPathOf(await runHooks(make(), 'virtual:ascii-profile/default', [])))))
+    const profile = decodeProfile(
+      new Uint8Array(
+        readFileSync(assetPathOf(await runHooks(make(), 'virtual:ascii-profile/default', []))),
+      ),
+    )
     expect(decodeFrame(new Uint8Array(readFileSync(rebuilt)), profile).columns).toBe(16)
   })
 })

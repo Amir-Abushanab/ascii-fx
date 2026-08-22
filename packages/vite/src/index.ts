@@ -80,7 +80,9 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     const file = resolve(root, typeof opt === 'string' ? opt : 'ascii-fx.config.ts')
     const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' }, file, root)
     if (!loaded) {
-      throw new Error(`[ascii-fx] Could not load config at ${file}. Create it with defineAsciiConfig({ profiles: ... }).`)
+      throw new Error(
+        `[ascii-fx] Could not load config at ${file}. Create it with defineAsciiConfig({ profiles: ... }).`,
+      )
     }
     configDeps = [normalizePath(loaded.path), ...loaded.dependencies.map((d) => abs(root, d))]
     config = loaded.config as AsciiConfig
@@ -98,7 +100,8 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
       )
     }
     const fontPath = abs(root, pc.font)
-    if (!existsSync(fontPath)) throw new Error(`[ascii-fx] Font not found for profile "${name}": ${fontPath}`)
+    if (!existsSync(fontPath))
+      throw new Error(`[ascii-fx] Font not found for profile "${name}": ${fontPath}`)
     const font = new Uint8Array(readFileSync(fontPath))
     // COMPILER_PACKAGE_VERSION salts the key because the cache dir survives installs: without
     // it, upgrading the packages would keep serving bytes built by the old compiler.
@@ -151,7 +154,8 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     const profileName = fc.profile ?? 'default'
     const { profile, fontPath } = await ensureProfile(profileName)
     const imagePath = abs(root, fc.image)
-    if (!existsSync(imagePath)) throw new Error(`[ascii-fx] Image not found for frame "${name}": ${imagePath}`)
+    if (!existsSync(imagePath))
+      throw new Error(`[ascii-fx] Image not found for frame "${name}": ${imagePath}`)
     const imageBytes = new Uint8Array(readFileSync(imagePath))
     // Salted like the profile key: matching lives in @ascii-fx/core, but the fixed release
     // group moves COMPILER_PACKAGE_VERSION whenever any of it changes.
@@ -213,7 +217,11 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
         if (entry.fontPath === id) affectedProfiles.add(name)
       }
       for (const [name, entry] of frames) {
-        if (entry.imagePath === id || entry.fontPath === id || affectedProfiles.has(entry.profileName)) {
+        if (
+          entry.imagePath === id ||
+          entry.fontPath === id ||
+          affectedProfiles.has(entry.profileName)
+        ) {
           affectedFrames.add(name)
         }
       }
@@ -230,7 +238,9 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     name: 'ascii-fx',
     configResolved(resolved) {
       root = resolved.root
-      cacheDir = options.cacheDir ? abs(root, options.cacheDir) : abs(root, 'node_modules/.ascii-fx')
+      cacheDir = options.cacheDir
+        ? abs(root, options.cacheDir)
+        : abs(root, 'node_modules/.ascii-fx')
       // Config/watch state resets per build so edits are picked up.
       config = typeof options.config === 'object' ? options.config : undefined
       configDeps = []

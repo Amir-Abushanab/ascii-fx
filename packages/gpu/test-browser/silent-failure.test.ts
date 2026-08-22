@@ -9,7 +9,9 @@ import { createAsciiRenderer } from '@ascii-fx/gpu'
 import { makeProfile, randomImage, STANDARD_SIX } from '../../core/test/synthetic.js'
 
 const gpuAvailable =
-  typeof navigator !== 'undefined' && 'gpu' in navigator ? (await navigator.gpu.requestAdapter()) !== null : false
+  typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (await navigator.gpu.requestAdapter()) !== null
+    : false
 
 /**
  * Provoke a validation error from inside the renderer's own setup, the way a
@@ -39,7 +41,11 @@ describe.skipIf(!gpuAvailable)('webgpu that accepts setup and then fails', () =>
       canvas.width = 64
       canvas.height = 64
       // No explicit backend: this is the default path the showcase uses.
-      const renderer = await createAsciiRenderer({ canvas, profile: makeProfile(STANDARD_SIX), columns: 8 })
+      const renderer = await createAsciiRenderer({
+        canvas,
+        profile: makeProfile(STANDARD_SIX),
+        columns: 8,
+      })
       expect(renderer.backend).toBe('cpu')
 
       // And it has to actually render, which is the whole point of falling back.
@@ -62,7 +68,12 @@ describe.skipIf(!gpuAvailable)('webgpu that accepts setup and then fails', () =>
       canvas.width = 64
       canvas.height = 64
       await expect(
-        createAsciiRenderer({ canvas, profile: makeProfile(STANDARD_SIX), columns: 8, backend: 'webgpu' }),
+        createAsciiRenderer({
+          canvas,
+          profile: makeProfile(STANDARD_SIX),
+          columns: 8,
+          backend: 'webgpu',
+        }),
       ).rejects.toThrow(/reported an error/)
     } finally {
       restore()

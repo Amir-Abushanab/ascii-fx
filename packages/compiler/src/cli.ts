@@ -40,7 +40,8 @@ async function main(): Promise<void> {
       id: str(args, 'id') ?? 'default',
       charset: str(args, 'charset'),
       characters,
-      shape6: args.flags.get('shape6-lut') === true ? { lut: true } : args.flags.get('shape6') === true,
+      shape6:
+        args.flags.get('shape6-lut') === true ? { lut: true } : args.flags.get('shape6') === true,
     })
     await writeFile(outPath, binary)
     console.log(
@@ -66,11 +67,14 @@ async function main(): Promise<void> {
       profile,
       columns: positiveIntFlag('columns', str(args, 'columns')),
       rows: positiveIntFlag('rows', str(args, 'rows')),
-      color: enumFlag('color', str(args, 'color'), ['mono', 'foreground', 'full'] as const) ?? 'mono',
+      color:
+        enumFlag('color', str(args, 'color'), ['mono', 'foreground', 'full'] as const) ?? 'mono',
       alpha: enumFlag('alpha', str(args, 'alpha'), ['mask', 'ignore'] as const),
     })
     await writeFile(outPath, binary)
-    console.log(`${outPath}: ${frame.columns}×${frame.rows} cells, ${frame.colorMode}, ${binary.length} bytes`)
+    console.log(
+      `${outPath}: ${frame.columns}×${frame.rows} cells, ${frame.colorMode}, ${binary.length} bytes`,
+    )
     return
   }
 

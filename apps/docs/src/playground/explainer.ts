@@ -87,7 +87,11 @@ function glyphCanvas(p: AsciiProfile, id: number, cssHeight: number): HTMLCanvas
  * square would not line up with the glyph beside it. Pass 1 for grids that are
  * abstract rather than a picture of a real cell.
  */
-function grid8Canvas(colorAt: (k: number) => string, cssHeight: number, aspect = 1): HTMLCanvasElement {
+function grid8Canvas(
+  colorAt: (k: number) => string,
+  cssHeight: number,
+  aspect = 1,
+): HTMLCanvasElement {
   const cv = document.createElement('canvas')
   cv.width = 8
   cv.height = 8
@@ -117,6 +121,14 @@ const col = (...children: (HTMLElement | string)[]): HTMLDivElement => {
   d.className = 'wcol'
   d.append(...children)
   return d
+}
+
+const btn = (text: string, fn: () => void): HTMLButtonElement => {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.textContent = text
+  b.addEventListener('click', fn)
+  return b
 }
 
 // ————— widget 1: paint a cell, watch the matcher —————
@@ -243,13 +255,6 @@ function buildCellWidget(host: HTMLElement, p: AsciiProfile): void {
   }
   const tools = document.createElement('div')
   tools.className = 'wtools'
-  const btn = (text: string, fn: () => void): HTMLButtonElement => {
-    const b = document.createElement('button')
-    b.type = 'button'
-    b.textContent = text
-    b.addEventListener('click', fn)
-    return b
-  }
   tools.append(
     btn('clear', () => {
       cell.fill(0)
@@ -310,7 +315,10 @@ function buildCellWidget(host: HTMLElement, p: AsciiProfile): void {
       const compare = document.createElement('div')
       compare.className = 'wpair'
       compare.append(
-        col(label('cell'), grid8Canvas((k) => TONE_CSS[cell[k]], 56)),
+        col(
+          label('cell'),
+          grid8Canvas((k) => TONE_CSS[cell[k]], 56),
+        ),
         col(
           label('recon'),
           grid8Canvas((k) => {
@@ -458,7 +466,15 @@ function buildAtlasWidget(host: HTMLElement, p: AsciiProfile): void {
 
   const row = document.createElement('div')
   row.className = 'wrow'
-  row.append(col(label(`every glyph the matcher knows${p.glyphCount > shown ? ` (first ${shown} of ${p.glyphCount})` : ''}`), cv), inspector)
+  row.append(
+    col(
+      label(
+        `every glyph the matcher knows${p.glyphCount > shown ? ` (first ${shown} of ${p.glyphCount})` : ''}`,
+      ),
+      cv,
+    ),
+    inspector,
+  )
   host.appendChild(row)
   inspect(Math.max(0, p.glyphs.indexOf('@')))
 }
@@ -576,15 +592,20 @@ function cellDetail(reduced: Uint8Array, columns: number, cx: number, cy: number
   const meanAlpha = Math.floor((2 * sumA + 64) / 128)
   const meanLuma = Math.floor((2 * sumL + 64) / 128)
   if (meanAlpha < 128) return { cls: 'transparent', meanAlpha, meanLuma, deltaLuma: maxL - minL }
-  if (maxL - minL < FLAT_THRESHOLD) return { cls: 'flat', meanAlpha, meanLuma, deltaLuma: maxL - minL }
+  if (maxL - minL < FLAT_THRESHOLD)
+    return { cls: 'flat', meanAlpha, meanLuma, deltaLuma: maxL - minL }
   // §7 endpoint classification + §8 polarity (foreground mode, black backdrop
   // ⇒ inkLight ⇒ invert): mask shows 1 = ink.
   const mask = new Uint8Array(64)
   for (let k = 0; k < 64; k++) {
     const dd =
-      (rgb[k * 3] - rgb[minIdx * 3]) ** 2 + (rgb[k * 3 + 1] - rgb[minIdx * 3 + 1]) ** 2 + (rgb[k * 3 + 2] - rgb[minIdx * 3 + 2]) ** 2
+      (rgb[k * 3] - rgb[minIdx * 3]) ** 2 +
+      (rgb[k * 3 + 1] - rgb[minIdx * 3 + 1]) ** 2 +
+      (rgb[k * 3 + 2] - rgb[minIdx * 3 + 2]) ** 2
     const dl =
-      (rgb[k * 3] - rgb[maxIdx * 3]) ** 2 + (rgb[k * 3 + 1] - rgb[maxIdx * 3 + 1]) ** 2 + (rgb[k * 3 + 2] - rgb[maxIdx * 3 + 2]) ** 2
+      (rgb[k * 3] - rgb[maxIdx * 3]) ** 2 +
+      (rgb[k * 3 + 1] - rgb[maxIdx * 3 + 1]) ** 2 +
+      (rgb[k * 3 + 2] - rgb[maxIdx * 3 + 2]) ** 2
     mask[k] = dd <= dl ? 0 : 1
   }
   return { cls: 'structured', meanAlpha, meanLuma, deltaLuma: maxL - minL, mask }
@@ -642,7 +663,12 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
     wrap.append(label(name), inner)
     return { name, wrap, canvas, outline }
   }
-  const stages = [mkStage('1 · source'), mkStage('2 · reduce'), mkStage('3 · classify'), mkStage('4 · match + draw')]
+  const stages = [
+    mkStage('1 · source'),
+    mkStage('2 · reduce'),
+    mkStage('3 · classify'),
+    mkStage('4 · match + draw'),
+  ]
   for (const s of stages) stagesRow.append(s.wrap)
 
   let columns = 16
@@ -654,7 +680,13 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
     const grid = deriveGrid(scene.width, scene.height, p, columns)
     rows = grid.rows
     reduced = reduceSource(scene, columns, rows, false)
-    const frame = matchFrame(scene, { profile: p, columns, rows, color: 'foreground', alpha: 'mask' })
+    const frame = matchFrame(scene, {
+      profile: p,
+      columns,
+      rows,
+      color: 'foreground',
+      alpha: 'mask',
+    })
     const SW = columns * 8
     const SH = rows * 8
 
@@ -670,7 +702,11 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
       tmp.height = scene.height
       tmp
         .getContext('2d')!
-        .putImageData(new ImageData(scene.data as Uint8ClampedArray<ArrayBuffer>, scene.width, scene.height), 0, 0)
+        .putImageData(
+          new ImageData(scene.data as Uint8ClampedArray<ArrayBuffer>, scene.width, scene.height),
+          0,
+          0,
+        )
       c.drawImage(tmp, 0, 0)
     }
     // 2 · the reduced 8C×8R samples, nearest-neighbor.
@@ -715,12 +751,22 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
       tmp.width = img.width
       tmp.height = img.height
       const data = new Uint8ClampedArray(img.data.buffer, img.data.byteOffset, img.data.length)
-      tmp.getContext('2d')!.putImageData(new ImageData(data as Uint8ClampedArray<ArrayBuffer>, img.width, img.height), 0, 0)
+      tmp
+        .getContext('2d')!
+        .putImageData(
+          new ImageData(data as Uint8ClampedArray<ArrayBuffer>, img.width, img.height),
+          0,
+          0,
+        )
       c.drawImage(tmp, 0, 0)
     }
     readout.textContent = `${columns} cols → rows = rdiv(${scene.height}·${columns}·${p.atlas.cellWidth}, ${scene.width}·${p.atlas.cellHeight}) = ${rows} · ${columns * rows} cells`
 
-    inspect(lastCell ? Math.min(lastCell[0], columns - 1) : Math.round(columns * 0.63), lastCell ? Math.min(lastCell[1], rows - 1) : Math.round(rows * 0.38), frame)
+    inspect(
+      lastCell ? Math.min(lastCell[0], columns - 1) : Math.round(columns * 0.63),
+      lastCell ? Math.min(lastCell[1], rows - 1) : Math.round(rows * 0.38),
+      frame,
+    )
   }
 
   let lastCell: [number, number] | null = null
@@ -759,7 +805,10 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
       clsNote.textContent = `Δluma ${d.deltaLuma} ≥ ${FLAT_THRESHOLD} → structured`
       parts.push(
         col(label('classify'), clsNote),
-        col(label('mask · 1 = ink'), grid8Canvas((k) => (d.mask![k] ? '#45e845' : '#14141d'), 88, cellAspect(p))),
+        col(
+          label('mask · 1 = ink'),
+          grid8Canvas((k) => (d.mask![k] ? '#45e845' : '#14141d'), 88, cellAspect(p)),
+        ),
       )
     }
     const ci = cy * columns + cx
@@ -882,14 +931,24 @@ function buildTemporalWidget(host: HTMLElement, p: AsciiProfile): void {
     }
     prevReduced = reduced
 
-    const frame = matchFrame(scene, { profile: p, columns, rows, color: 'foreground', alpha: 'ignore' })
+    const frame = matchFrame(scene, {
+      profile: p,
+      columns,
+      rows,
+      color: 'foreground',
+      alpha: 'ignore',
+    })
     composited = compositeFrame(frame, {}, composited)
     const img = composited
     view.width = img.width
     view.height = img.height
     const c = view.getContext('2d')!
     const data = new Uint8ClampedArray(img.data.buffer, img.data.byteOffset, img.data.length)
-    c.putImageData(new ImageData(data as Uint8ClampedArray<ArrayBuffer>, img.width, img.height), 0, 0)
+    c.putImageData(
+      new ImageData(data as Uint8ClampedArray<ArrayBuffer>, img.width, img.height),
+      0,
+      0,
+    )
     const cw = img.width / columns
     const ch = img.height / rows
     c.fillStyle = 'rgba(248, 113, 113, 0.28)'

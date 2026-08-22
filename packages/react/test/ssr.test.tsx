@@ -14,7 +14,9 @@ describe('React SSR', () => {
   })
 
   it('AsciiImage server-renders the accessible img fallback', () => {
-    const html = renderToString(<AsciiImage src="/hero.jpg" alt="A portrait" profile={profile} columns={120} />)
+    const html = renderToString(
+      <AsciiImage src="/hero.jpg" alt="A portrait" profile={profile} columns={120} />,
+    )
     expect(html).toContain('<img')
     expect(html).toContain('alt="A portrait"')
     expect(html).toContain('src="/hero.jpg"')
@@ -34,7 +36,9 @@ describe('React SSR', () => {
   })
 
   it('AsciiVideo server-renders the video fallback', () => {
-    const html = renderToString(<AsciiVideo src="/clip.mp4" profile={profile} poster="/poster.jpg" />)
+    const html = renderToString(
+      <AsciiVideo src="/clip.mp4" profile={profile} poster="/poster.jpg" />,
+    )
     expect(html).toContain('<video')
     expect(html).toContain('poster="/poster.jpg"')
   })

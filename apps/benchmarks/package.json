@@ -1,7 +1,7 @@
 {
   "name": "@ascii-fx-internal/benchmarks",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "bench": "node bench.mjs",
@@ -16,7 +16,7 @@
   "devDependencies": {
     "aalib.js": "^2.0.0",
     "chafa-wasm": "^0.3.3",
-    "textmode.js": "^0.17.2",
+    "textmode.js": "^0.17.1",
     "three": "0.185.1"
   }
 }

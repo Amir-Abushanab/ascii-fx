@@ -36,7 +36,7 @@ const COMPACT_IDS = ['fx-gpu', 'tm', 'three', 'aa-mono', 'chafa']
 
 const rows = ENTRIES.filter((e) => !compact || COMPACT_IDS.includes(e.id))
   .map((e) => ({ ...e, ...lib(e.results) }))
-  .sort((a, b) => b.fps - a.fps)
+  .toSorted((a, b) => b.fps - a.fps)
 const maxFps = Math.max(...rows.map((r) => r.fps))
 ---
 

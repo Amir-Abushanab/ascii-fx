@@ -1,7 +1,13 @@
 // "Export component" dialog: pick a framework, preview the generated snippet
 // with syntax highlighting (Shiki, lazily loaded with a plain-text fallback),
 // then copy or download. Native <dialog>, no modal infrastructure needed.
-import { FRAMEWORKS, generateSnippet, type ExportState, type Framework, type FrameworkId } from './exportSnippets'
+import {
+  FRAMEWORKS,
+  generateSnippet,
+  type ExportState,
+  type Framework,
+  type FrameworkId,
+} from './exportSnippets'
 
 import type { CodeToHtml } from './highlight'
 import { buildAgentBrief } from './agentBrief'
@@ -62,7 +68,8 @@ const MARKS: Record<FrameworkId, string> = {
   vue: '<path d="M1.8 3.6h4.6L12 13.2l5.6-9.6h4.6L12 21Z"/><path d="M7.9 3.6h3.0L12 5.6l1.1-2h3.0"/>',
   // One stroke: the slanted S the Svelte logo is built around.
   svelte: '<path d="M16.4 4.3 8.9 8.9a3.4 3.4 0 0 0 3.5 5.8l-.8.5a3.4 3.4 0 0 0 3.5 5.8l7.5-4.6"/>',
-  ember: '<circle cx="12" cy="12" r="9.2"/><path d="M7.6 12.6h6.1a2.5 2.5 0 1 0-4.9-.9c-.5 3 1 5 3.4 5 1.4 0 2.6-.5 3.8-1.4"/>',
+  ember:
+    '<circle cx="12" cy="12" r="9.2"/><path d="M7.6 12.6h6.1a2.5 2.5 0 1 0-4.9-.9c-.5 3 1 5 3.4 5 1.4 0 2.6-.5 3.8-1.4"/>',
   wc: '<path d="M9.4 7.4 4.6 12l4.8 4.6"/><path d="M14.6 7.4 19.4 12l-4.8 4.6"/><path d="M13.2 5.2 10.8 18.8"/>',
 }
 

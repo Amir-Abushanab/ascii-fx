@@ -1,0 +1,23 @@
+# Matches .oxfmtrc.json, for editors that format on save without the oxfmt plugin.
+# oxfmt is still the authority — `pnpm format:check` is what CI runs.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 100
+
+[*.md]
+# Two trailing spaces is a hard line break in Markdown; trimming would silently
+# reflow prose. oxfmt runs with proseWrap "preserve" for the same reason.
+trim_trailing_whitespace = false
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab

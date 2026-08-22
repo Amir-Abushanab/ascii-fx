@@ -5,11 +5,19 @@ import type { AsciiFrame, ColorMode, RGB } from '@ascii-fx/core'
 import { decodeProfile, matchFrame, subsetProfile } from '@ascii-fx/core'
 import { createAsciiRenderer } from '@ascii-fx/gpu'
 import type { AsciiRenderer } from '@ascii-fx/gpu'
-import { STANDARD_SIX, makeCell, makeProfile, randomImage, randomProfile } from '../../core/test/synthetic.js'
+import {
+  STANDARD_SIX,
+  makeCell,
+  makeProfile,
+  randomImage,
+  randomProfile,
+} from '../../core/test/synthetic.js'
 import profileUrl from '../../../fixtures/profiles/default.asciip?url'
 
 const gpuAvailable =
-  typeof navigator !== 'undefined' && 'gpu' in navigator ? (await navigator.gpu.requestAdapter()) !== null : false
+  typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (await navigator.gpu.requestAdapter()) !== null
+    : false
 
 function expectFramesEqual(gpu: AsciiFrame, cpu: AsciiFrame, label: string): void {
   expect(gpu.columns, `${label} columns`).toBe(cpu.columns)
@@ -76,7 +84,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('agrees on a 40-glyph random profile', async () => {
     const profile = randomProfile(40, 7)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       await conform(renderer, profile, randomImage(80, 48, 12), 10, 'rand40')
     } finally {
@@ -86,7 +98,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('agrees on a 300-glyph random profile', async () => {
     const profile = randomProfile(300, 21)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       await conform(renderer, profile, randomImage(96, 56, 13), 12, 'rand300')
     } finally {
@@ -96,8 +112,15 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('agrees on a subset of the real fixture profile', async () => {
     const res = await fetch(profileUrl)
-    const profile = subsetProfile(decodeProfile(new Uint8Array(await res.arrayBuffer())), ' .:-=+*#%@')
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const profile = subsetProfile(
+      decodeProfile(new Uint8Array(await res.arrayBuffer())),
+      ' .:-=+*#%@',
+    )
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       await conform(renderer, profile, randomImage(96, 56, 17), 12, 'subset10')
     } finally {
@@ -108,7 +131,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
   it('agrees on the real Geist Mono fixture profile', async () => {
     const res = await fetch(profileUrl)
     const profile = decodeProfile(new Uint8Array(await res.arrayBuffer()))
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       await conform(renderer, profile, randomImage(192, 108, 14), 24, 'geist')
     } finally {
@@ -118,7 +145,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('agrees on non-divisible source dimensions (uneven reduction rects)', async () => {
     const profile = makeProfile(STANDARD_SIX)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       await conform(renderer, profile, randomImage(97, 61, 15), 13, 'uneven')
     } finally {
@@ -128,7 +159,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('agrees on flat regions and alpha masking', async () => {
     const profile = makeProfile(STANDARD_SIX)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       // Half flat gray, half transparent, quarter structural.
       const img = randomImage(64, 64, 16, true)
@@ -159,7 +194,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('is deterministic across repeated GPU runs', async () => {
     const profile = randomProfile(40, 3)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       const img = randomImage(80, 48, 17)
       renderer.setOptions({ columns: 10, color: 'full' })
@@ -192,7 +231,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('interactions and pointer are composite-only: frame identical, no matcher dispatch', async () => {
     const profile = makeProfile(STANDARD_SIX)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       const img = randomImage(80, 48, 23)
       renderer.setOptions({ columns: 10, color: 'full' })
@@ -202,7 +245,9 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
       renderer.pointer.set(0.4, 0.6)
       renderer.render()
       const internals = renderer as unknown as { matchDirty: boolean }
-      expect(internals.matchDirty, 'pointer/interaction must not mark the matcher dirty').toBe(false)
+      expect(internals.matchDirty, 'pointer/interaction must not mark the matcher dirty').toBe(
+        false,
+      )
       renderer.setInteraction({ type: 'wave', intensity: 1 })
       renderer.render()
       expect(internals.matchDirty).toBe(false)
@@ -258,7 +303,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('invalidate(rect) rematches only the region yet lands on the exact full result', async () => {
     const profile = makeProfile(STANDARD_SIX)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       const img = randomImage(96, 56, 51)
       renderer.setOptions({ columns: 12, color: 'full' })
@@ -401,7 +450,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
     expect(profile.atlas.cellHeight).toBe(64)
     const again = await createAsciiProfile({ fontFamily: 'monospace' })
     expect(again).toBe(profile) // session cache (spec §41)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       renderer.setOptions({ columns: 12, color: 'full' })
       const img = randomImage(96, 56, 71)
@@ -449,7 +502,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
 
   it('cpu backend serves the same API for parity', async () => {
     const profile = makeProfile(STANDARD_SIX)
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(64, 64), profile, backend: 'cpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'cpu',
+    })
     try {
       expect(renderer.backend).toBe('cpu')
       const img = makeCell((_, j) => (j < 4 ? [0, 0, 0] : [255, 255, 255]))
@@ -466,7 +523,11 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
   it('informational: GPU match wall-time at 160 columns (Geist profile)', async () => {
     const res = await fetch(profileUrl)
     const profile = decodeProfile(new Uint8Array(await res.arrayBuffer()))
-    const renderer = await createAsciiRenderer({ canvas: new OffscreenCanvas(256, 144), profile, backend: 'webgpu' })
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(256, 144),
+      profile,
+      backend: 'webgpu',
+    })
     try {
       const img = randomImage(1280, 720, 19)
       renderer.setOptions({ columns: 160, color: 'full' })
@@ -480,8 +541,9 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
       }
       const ms = (performance.now() - t0) / runs
       const grid = renderer.grid()!
-      // eslint-disable-next-line no-console
-      console.log(`[gpu-bench] ${grid.columns}×${grid.rows} full re-match+readback: ${ms.toFixed(2)}ms avg`)
+      console.log(
+        `[gpu-bench] ${grid.columns}×${grid.rows} full re-match+readback: ${ms.toFixed(2)}ms avg`,
+      )
       expect(ms).toBeGreaterThan(0)
     } finally {
       renderer.destroy()

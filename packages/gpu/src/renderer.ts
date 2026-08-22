@@ -80,7 +80,15 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     const { options } = init
     this.profile = options.profile
     this.canvas = options.canvas
-    const { canvas: _c, profile: _p, backend: _b, interaction, onDeviceLost, onError, ...rest } = options
+    const {
+      canvas: _c,
+      profile: _p,
+      backend: _b,
+      interaction,
+      onDeviceLost,
+      onError,
+      ...rest
+    } = options
     this.opts = rest
     this.interaction = interaction ?? null
     this.onDeviceLost = onDeviceLost
@@ -238,7 +246,8 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       if (++this.recoverAttempts > MAX_RECOVERY_ATTEMPTS) {
         throw new Error(`device lost ${MAX_RECOVERY_ATTEMPTS} times in quick succession`)
       }
-      if (typeof navigator === 'undefined' || !navigator.gpu) throw new Error('navigator.gpu went away')
+      if (typeof navigator === 'undefined' || !navigator.gpu)
+        throw new Error('navigator.gpu went away')
       const adapter = await navigator.gpu.requestAdapter()
       if (this.destroyed) return
       if (!adapter) throw new Error('no adapter available after device loss')
@@ -278,7 +287,8 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       // never silently: a parked canvas with zero trace is undebuggable
       // (mirrors onError's console default).
       if (this.onDeviceLost) this.onDeviceLost(info)
-      else console.error('[ascii-fx] WebGPU device lost and not recovered:', info.reason, info.message)
+      else
+        console.error('[ascii-fx] WebGPU device lost and not recovered:', info.reason, info.message)
     }
   }
 
@@ -407,7 +417,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.srcTexture = this.device.createTexture({
         size: [w, h],
         format: 'rgba8unorm',
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage:
+          GPUTextureUsage.TEXTURE_BINDING |
+          GPUTextureUsage.COPY_DST |
+          GPUTextureUsage.RENDER_ATTACHMENT,
       })
       this.srcW = w
       this.srcH = h
@@ -478,7 +491,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       const grid = this.stream.grid()!
       const c0 = Math.max(0, Math.floor((rect.x * grid.columns) / this.srcW))
       const r0 = Math.max(0, Math.floor((rect.y * grid.rows) / this.srcH))
-      const c1 = Math.min(grid.columns, Math.ceil(((rect.x + rect.width) * grid.columns) / this.srcW))
+      const c1 = Math.min(
+        grid.columns,
+        Math.ceil(((rect.x + rect.width) * grid.columns) / this.srcW),
+      )
       const r1 = Math.min(grid.rows, Math.ceil(((rect.y + rect.height) * grid.rows) / this.srcH))
       if (c1 > c0 && r1 > r0) {
         const cenc = this.device.createCommandEncoder()
@@ -518,7 +534,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     this.running = true
     const generation = ++this.loopGeneration
     const video =
-      typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement ? this.source : null
+      typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement
+        ? this.source
+        : null
     if (video && 'requestVideoFrameCallback' in video) {
       const cb = (): void => {
         if (!this.running || generation !== this.loopGeneration) return
@@ -578,7 +596,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     this.lastTickAt = 0
     if (this.rafId) cancelAnimationFrame(this.rafId)
     const video =
-      typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement ? this.source : null
+      typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement
+        ? this.source
+        : null
     if (this.rvfcId && video && 'cancelVideoFrameCallback' in video) {
       video.cancelVideoFrameCallback(this.rvfcId)
     }
@@ -592,7 +612,8 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     // across that would map a buffer on the dead device and abort.
     await this.recovery
     if (!this.source) throw new Error('captureFrame() requires a source — call setSource() first.')
-    if (this.deviceLost) throw new Error('captureFrame() failed: the GPU device was lost and could not be replaced.')
+    if (this.deviceLost)
+      throw new Error('captureFrame() failed: the GPU device was lost and could not be replaced.')
     if (this.sourceDirty || this.matchDirty || this.pendingRect) this.render()
     return this.stream.captureFrame()
   }

@@ -8,9 +8,13 @@ import { buildProfile } from '@ascii-fx/compiler'
 import { GOLDEN_IMAGES } from './images.js'
 
 const UPDATE = process.env.UPDATE_GOLDEN === '1'
-const FONT_PATH = fileURLToPath(new URL('../../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url))
+const FONT_PATH = fileURLToPath(
+  new URL('../../../fixtures/fonts/GeistMono-Regular.ttf', import.meta.url),
+)
 const GOLDEN_DIR = fileURLToPath(new URL('../../../fixtures/golden/', import.meta.url))
-const PROFILE_PATH = fileURLToPath(new URL('../../../fixtures/profiles/default.asciip', import.meta.url))
+const PROFILE_PATH = fileURLToPath(
+  new URL('../../../fixtures/profiles/default.asciip', import.meta.url),
+)
 
 const built = buildProfile({ font: new Uint8Array(readFileSync(FONT_PATH)), id: 'default' })
 const { profile } = built
@@ -45,7 +49,10 @@ describe('golden corpus (structural-v1 × Geist Mono)', () => {
     for (const color of MODES) {
       it(`${name} / ${color}`, () => {
         const goldenPath = `${GOLDEN_DIR}${name}-${color}.asciif`
-        expect(existsSync(goldenPath), `missing golden ${name}-${color} — run \`pnpm golden:update\``).toBe(true)
+        expect(
+          existsSync(goldenPath),
+          `missing golden ${name}-${color} — run \`pnpm golden:update\``,
+        ).toBe(true)
         const frame = matchFrame(image, { profile, columns: COLUMNS, color })
         const bytes = encodeFrame(frame)
         expect(bytes).toEqual(new Uint8Array(readFileSync(goldenPath)))

@@ -55,7 +55,12 @@ const readStoredSections = (
     const end = offset + length
     for (const section of sections) {
       const sectionEnd = section.offset + section.data.byteLength
-      if (length > 0 && section.data.byteLength > 0 && offset < sectionEnd && end > section.offset) {
+      if (
+        length > 0 &&
+        section.data.byteLength > 0 &&
+        offset < sectionEnd &&
+        end > section.offset
+      ) {
         throw corruptFrame(`section ${type} overlaps section ${section.type}.`)
       }
     }
@@ -142,8 +147,16 @@ export interface FrameMeta {
 
 /** Read frame header/metadata without needing the profile. */
 export function peekFrame(bytes: Uint8Array): FrameMeta {
-  if (bytes.length < HEADER_FIXED || bytes[0] !== 0x41 || bytes[1] !== 0x53 || bytes[2] !== 0x43 || bytes[3] !== 0x46) {
-    throw new Error('Not an ASCII FX frame: bad magic. Expected a .asciif file built by @ascii-fx/compiler.')
+  if (
+    bytes.length < HEADER_FIXED ||
+    bytes[0] !== 0x41 ||
+    bytes[1] !== 0x53 ||
+    bytes[2] !== 0x43 ||
+    bytes[3] !== 0x46
+  ) {
+    throw new Error(
+      'Not an ASCII FX frame: bad magic. Expected a .asciif file built by @ascii-fx/compiler.',
+    )
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const formatVersion = view.getUint32(4, true)
@@ -203,9 +216,17 @@ export function decodeFrame(bytes: Uint8Array, profile: AsciiProfile): AsciiFram
   const sections = readStoredSections(bytes, view, sectionCount)
   const glyphSection = sections.find((section) => section.type === SECTION.glyphIds)
   if (!glyphSection) throw corruptFrame('glyph-id section is missing.')
-  if (glyphSection.data.byteLength !== n * 2) throw corruptFrame('glyph-id section has the wrong length.')
+  if (glyphSection.data.byteLength !== n * 2)
+    throw corruptFrame('glyph-id section has the wrong length.')
 
-  const planeTypes: number[] = [SECTION.fgR, SECTION.fgG, SECTION.fgB, SECTION.bgR, SECTION.bgG, SECTION.bgB]
+  const planeTypes: number[] = [
+    SECTION.fgR,
+    SECTION.fgG,
+    SECTION.fgB,
+    SECTION.bgR,
+    SECTION.bgG,
+    SECTION.bgB,
+  ]
   for (const section of sections) {
     if (planeTypes.includes(section.type) && section.data.byteLength !== n) {
       throw corruptFrame(`color plane ${section.type} has the wrong length.`)
@@ -271,7 +292,8 @@ export function decodeFrame(bytes: Uint8Array, profile: AsciiProfile): AsciiFram
   if (colorless && foreground) {
     throw corruptFrame(`${meta.colorMode} frames must not contain color planes.`)
   }
-  if (meta.colorMode === 'full' && !background) throw corruptFrame('full-color frames require background planes.')
+  if (meta.colorMode === 'full' && !background)
+    throw corruptFrame('full-color frames require background planes.')
   if (meta.colorMode !== 'full' && background) {
     throw corruptFrame(`${meta.colorMode} frames must not contain background color planes.`)
   }

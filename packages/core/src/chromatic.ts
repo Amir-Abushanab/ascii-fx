@@ -36,7 +36,13 @@ export function matchFrameChromatic(source: RawImage, options: MatchOptions): As
   const hysteresis = options.hysteresis ?? 0
   const previous = options.previous
 
-  const { columns, rows } = deriveGrid(source.width, source.height, profile, options.columns, options.rows)
+  const { columns, rows } = deriveGrid(
+    source.width,
+    source.height,
+    profile,
+    options.columns,
+    options.rows,
+  )
   const SW = columns * 8
   const reduced = reduceSource(source, columns, rows, alphaMode === 'ignore')
 
@@ -137,7 +143,11 @@ export function matchFrameChromatic(source: RawImage, options: MatchOptions): As
       // search above, so it is scored in full before the flip is allowed.
       if (previous !== undefined && hysteresis > 0) {
         const inc = previous[ci]
-        if (inc !== bestG && inc < G && best * 1000 >= errorOf(inc) * (1000 - Math.round(hysteresis * 1000))) {
+        if (
+          inc !== bestG &&
+          inc < G &&
+          best * 1000 >= errorOf(inc) * (1000 - Math.round(hysteresis * 1000))
+        ) {
           bestG = inc
         }
       }

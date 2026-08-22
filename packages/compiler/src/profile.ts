@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import type { AsciiProfile, Shape6GlyphData } from '@ascii-fx/core'
-import { encodeProfile, idiv, nextPow2, rdiv, resolveCharset, shape6BucketCenter } from '@ascii-fx/core'
+import {
+  encodeProfile,
+  idiv,
+  nextPow2,
+  rdiv,
+  resolveCharset,
+  shape6BucketCenter,
+} from '@ascii-fx/core'
 import { loadFont } from './font.js'
 import {
   CUBIC_SEGMENTS,
@@ -50,7 +57,8 @@ export interface BuiltProfile {
   binary: Uint8Array
 }
 
-export const sha256 = (data: Uint8Array | string): string => createHash('sha256').update(data).digest('hex')
+export const sha256 = (data: Uint8Array | string): string =>
+  createHash('sha256').update(data).digest('hex')
 
 /** Glyph-side shape6 vector (ALGORITHM.md §18): float64 means over mask-cell lumas. */
 function glyphShape6(lumas: Float64Array, out: Float32Array, at: number): void {
@@ -96,7 +104,10 @@ export function buildProfile(options: BuildProfileOptions): BuiltProfile {
   if (missing.length > 0) {
     throw new Error(
       `Font "${lf.familyName ?? 'unknown'}" has no glyph for: ${missing
-        .map((c) => `${JSON.stringify(c)} (U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')})`)
+        .map(
+          (c) =>
+            `${JSON.stringify(c)} (U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')})`,
+        )
         .join(', ')}. Remove them from the charset or pick a font that covers them.`,
     )
   }
@@ -114,7 +125,8 @@ export function buildProfile(options: BuildProfileOptions): BuiltProfile {
   }
 
   const unitsCell = lf.ascent - lf.descent
-  if (!(unitsCell > 0)) throw new Error('Font reports non-positive ascent−descent; cannot derive a cell box.')
+  if (!(unitsCell > 0))
+    throw new Error('Font reports non-positive ascent−descent; cannot derive a cell box.')
   const cellH = REF_GLYPH_HEIGHT
   const cellW = Math.max(1, rdiv(advance * REF_GLYPH_HEIGHT, unitsCell))
   const baseline = rdiv(lf.ascent * REF_GLYPH_HEIGHT, unitsCell)
@@ -167,7 +179,8 @@ export function buildProfile(options: BuildProfileOptions): BuiltProfile {
   let shape6: Shape6GlyphData | undefined
   if (cellLumas) {
     const vectors6 = new Float32Array(n * 6)
-    for (let i = 0; i < n; i++) glyphShape6(cellLumas.subarray(i * 64, i * 64 + 64), vectors6, i * 6)
+    for (let i = 0; i < n; i++)
+      glyphShape6(cellLumas.subarray(i * 64, i * 64 + 64), vectors6, i * 6)
     let lut3: Uint16Array | undefined
     if (typeof options.shape6 === 'object' && options.shape6.lut) {
       lut3 = new Uint16Array(8 ** 6)

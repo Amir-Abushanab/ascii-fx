@@ -9,8 +9,14 @@ export interface SynthGlyph {
 
 export const G_SPACE: SynthGlyph = { char: ' ', rows: Array(8).fill('00000000') }
 export const G_FULL: SynthGlyph = { char: '█', rows: Array(8).fill('11111111') }
-export const G_TOP: SynthGlyph = { char: '▀', rows: [...Array(4).fill('11111111'), ...Array(4).fill('00000000')] }
-export const G_BOTTOM: SynthGlyph = { char: '▄', rows: [...Array(4).fill('00000000'), ...Array(4).fill('11111111')] }
+export const G_TOP: SynthGlyph = {
+  char: '▀',
+  rows: [...Array(4).fill('11111111'), ...Array(4).fill('00000000')],
+}
+export const G_BOTTOM: SynthGlyph = {
+  char: '▄',
+  rows: [...Array(4).fill('00000000'), ...Array(4).fill('11111111')],
+}
 export const G_LEFT: SynthGlyph = { char: '▌', rows: Array(8).fill('11110000') }
 export const G_RIGHT: SynthGlyph = { char: '▐', rows: Array(8).fill('00001111') }
 
@@ -99,7 +105,9 @@ export function makeProfile(glyphs: SynthGlyph[]): AsciiProfile {
 export const STANDARD_SIX = [G_SPACE, G_FULL, G_TOP, G_BOTTOM, G_LEFT, G_RIGHT]
 
 /** 8×8 single-cell image from a per-sample color function. */
-export function makeCell(fn: (i: number, j: number) => [number, number, number, number?]): RawImage {
+export function makeCell(
+  fn: (i: number, j: number) => [number, number, number, number?],
+): RawImage {
   const data = new Uint8Array(8 * 8 * 4)
   for (let j = 0; j < 8; j++) {
     for (let i = 0; i < 8; i++) {
@@ -141,7 +149,12 @@ export function randomProfile(glyphCount: number, seed: number): AsciiProfile {
   return makeProfile(glyphs)
 }
 
-export function randomImage(width: number, height: number, seed: number, withAlpha = false): RawImage {
+export function randomImage(
+  width: number,
+  height: number,
+  seed: number,
+  withAlpha = false,
+): RawImage {
   const rnd = mulberry32(seed)
   const data = new Uint8Array(width * height * 4)
   for (let i = 0; i < width * height; i++) {

@@ -24,32 +24,32 @@
  *
  * Run via `pnpm release`, which builds the packages first. Pass `--dry-run` to preview.
  */
-import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { execFileSync } from 'node:child_process'
+import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
-const dryRun = process.argv.includes("--dry-run");
-const packagesDir = new URL("../packages/", import.meta.url);
+const dryRun = process.argv.includes('--dry-run')
+const packagesDir = new URL('../packages/', import.meta.url)
 
 /** Every non-private package under packages/, with its directory. */
 function publishablePackages() {
-  const out = [];
+  const out = []
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    let pkg;
+    if (!entry.isDirectory()) continue
+    let pkg
     try {
-      pkg = JSON.parse(readFileSync(new URL(`${entry.name}/package.json`, packagesDir), "utf8"));
+      pkg = JSON.parse(readFileSync(new URL(`${entry.name}/package.json`, packagesDir), 'utf8'))
     } catch {
-      continue; // no readable package.json in this directory
+      continue // no readable package.json in this directory
     }
-    if (pkg.private || !pkg.name || !pkg.version) continue;
+    if (pkg.private || !pkg.name || !pkg.version) continue
     out.push({
       name: pkg.name,
       version: pkg.version,
       dir: fileURLToPath(new URL(`${entry.name}/`, packagesDir)),
-    });
+    })
   }
-  return out;
+  return out
 }
 
 /** Is this exact name@version already on the npm registry? */
@@ -57,28 +57,28 @@ function isPublished(name, version) {
   try {
     // --prefer-online revalidates npm's HTTP cache instead of trusting a possibly-stale local
     // packument, so a version published moments ago is still seen.
-    const raw = execFileSync("npm", ["view", name, "versions", "--json", "--prefer-online"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let versions = JSON.parse(raw);
-    if (!Array.isArray(versions)) versions = [versions]; // single-version packages come back as a bare string
-    return versions.includes(version);
+    const raw = execFileSync('npm', ['view', name, 'versions', '--json', '--prefer-online'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let versions = JSON.parse(raw)
+    if (!Array.isArray(versions)) versions = [versions] // single-version packages come back as a bare string
+    return versions.includes(version)
   } catch (err) {
-    const stderr = String(err?.stderr ?? "");
-    if (stderr.includes("E404") || stderr.includes("404")) return false; // genuinely not on npm
+    const stderr = String(err?.stderr ?? '')
+    if (stderr.includes('E404') || stderr.includes('404')) return false // genuinely not on npm
     // Network / registry / auth hiccup is not evidence the version is unpublished — fail loudly
     // rather than trigger a bogus publish.
-    throw err;
+    throw err
   }
 }
 
 /** Annotated tag at HEAD, like `changeset publish` makes; a pre-existing tag only warns. */
 function ensureLocalTag(tag) {
   try {
-    execFileSync("git", ["tag", tag, "-m", tag], { stdio: ["ignore", "ignore", "pipe"] });
+    execFileSync('git', ['tag', tag, '-m', tag], { stdio: ['ignore', 'ignore', 'pipe'] })
   } catch (err) {
-    console.error(`warning: could not create git tag ${tag}: ${String(err?.stderr ?? err)}`);
+    console.error(`warning: could not create git tag ${tag}: ${String(err?.stderr ?? err)}`)
   }
 }
 
@@ -91,86 +91,86 @@ function ensureLocalTag(tag) {
  * re-print `New tag:` so changesets/action pushes it and cuts the Release. Never fails the run.
  */
 function restoreMissingTags(onNpm) {
-  if (onNpm.length === 0) return;
-  let remote;
+  if (onNpm.length === 0) return
+  let remote
   try {
-    const raw = execFileSync("git", ["ls-remote", "--tags", "origin"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const raw = execFileSync('git', ['ls-remote', '--tags', 'origin'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
     remote = new Set(
       raw
-        .split("\n")
-        .map((line) => line.split("\t")[1])
+        .split('\n')
+        .map((line) => line.split('\t')[1])
         .filter(Boolean)
-        .map((ref) => ref.replace("refs/tags/", "").replace(/\^\{\}$/, "")),
-    );
+        .map((ref) => ref.replace('refs/tags/', '').replace(/\^\{\}$/, '')),
+    )
   } catch (err) {
     console.error(
       `warning: could not list origin tags, skipping tag restore: ${String(err?.stderr ?? err)}`,
-    );
-    return;
+    )
+    return
   }
   for (const p of onNpm) {
-    const tag = `${p.name}@${p.version}`;
-    if (remote.has(tag)) continue;
+    const tag = `${p.name}@${p.version}`
+    if (remote.has(tag)) continue
     if (dryRun) {
-      console.log(`(dry run) would restore missing tag ${tag}`);
-      continue;
+      console.log(`(dry run) would restore missing tag ${tag}`)
+      continue
     }
-    console.log(`Restoring missing tag for already-published ${tag}`);
-    ensureLocalTag(tag);
-    console.log(`New tag: ${tag}`);
+    console.log(`Restoring missing tag for already-published ${tag}`)
+    ensureLocalTag(tag)
+    console.log(`New tag: ${tag}`)
   }
 }
 
-const pkgs = publishablePackages();
-const label = (list) => list.map((p) => `${p.name}@${p.version}`).join(", ");
-const pending = pkgs.filter((p) => !isPublished(p.name, p.version));
+const pkgs = publishablePackages()
+const label = (list) => list.map((p) => `${p.name}@${p.version}`).join(', ')
+const pending = pkgs.filter((p) => !isPublished(p.name, p.version))
 
-restoreMissingTags(pkgs.filter((p) => !pending.includes(p)));
+restoreMissingTags(pkgs.filter((p) => !pending.includes(p)))
 
 if (pending.length === 0) {
-  console.log(`Nothing to publish. Already on npm: ${label(pkgs)}`);
-  process.exit(0);
+  console.log(`Nothing to publish. Already on npm: ${label(pkgs)}`)
+  process.exit(0)
 }
 
-console.log(`Publishing: ${label(pending)}`);
+console.log(`Publishing: ${label(pending)}`)
 if (dryRun) {
-  console.log("(dry run) skipping publish");
-  process.exit(0);
+  console.log('(dry run) skipping publish')
+  process.exit(0)
 }
 
-const published = [];
-const failed = [];
+const published = []
+const failed = []
 for (const p of pending) {
   try {
     // The same call `changeset publish` makes for a pnpm workspace: from the package dir (so
     // workspace: deps get rewritten), --access public per .changeset/config.json, and
     // --no-git-checks so pnpm doesn't balk at CI's git state. Provenance + npm OIDC trusted
     // publishing come from the workflow env (NPM_CONFIG_PROVENANCE, id-token).
-    execFileSync("pnpm", ["publish", "--access", "public", "--no-git-checks"], {
+    execFileSync('pnpm', ['publish', '--access', 'public', '--no-git-checks'], {
       cwd: p.dir,
-      stdio: "inherit",
-    });
+      stdio: 'inherit',
+    })
     // changesets/action will `git push origin <tag>`, so the tag must exist locally.
-    const tag = `${p.name}@${p.version}`;
-    ensureLocalTag(tag);
-    console.log(`New tag: ${tag}`);
-    published.push(p);
+    const tag = `${p.name}@${p.version}`
+    ensureLocalTag(tag)
+    console.log(`New tag: ${tag}`)
+    published.push(p)
   } catch {
     // A non-zero exit is benign only if the version is already on npm (our pre-check raced a
     // concurrent publish, or misfired); anything else is a real publish failure.
     if (isPublished(p.name, p.version)) {
-      console.error(`${p.name}@${p.version} is already on npm — skipping.`);
+      console.error(`${p.name}@${p.version} is already on npm — skipping.`)
     } else {
-      failed.push(p);
+      failed.push(p)
     }
   }
 }
 
 if (failed.length > 0) {
-  console.error(`Failed to publish: ${label(failed)}`);
-  process.exit(1);
+  console.error(`Failed to publish: ${label(failed)}`)
+  process.exit(1)
 }
-console.log(`Published: ${label(published)}`);
+console.log(`Published: ${label(published)}`)

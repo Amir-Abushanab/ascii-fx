@@ -1,4 +1,4 @@
-import type { AsciiProfile, MatchOptions, RawImage } from './types.js'
+import type { MatchOptions, RawImage } from './types.js'
 import { FLAG_FLAT, FLAG_TRANSPARENT } from './types.js'
 import { popcount32, rdiv } from './util.js'
 import { luma8, packRGBA } from './color.js'
@@ -19,7 +19,8 @@ export { blankGlyphId }
  */
 export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame {
   const profile = options.profile
-  if (!profile) throw new Error('matchFrame requires options.profile (build one with @ascii-fx/compiler).')
+  if (!profile)
+    throw new Error('matchFrame requires options.profile (build one with @ascii-fx/compiler).')
   const matcher = options.matcher ?? 'structural'
   if (options.color === 'glyph' && matcher !== 'chromatic') {
     throw new Error(
@@ -42,7 +43,13 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
       ? luma8(fgOpt[0], fgOpt[1], fgOpt[2]) >= luma8(bgOpt[0], bgOpt[1], bgOpt[2])
       : luma8(bgOpt[0], bgOpt[1], bgOpt[2]) < 128
 
-  const { columns, rows } = deriveGrid(source.width, source.height, profile, options.columns, options.rows)
+  const { columns, rows } = deriveGrid(
+    source.width,
+    source.height,
+    profile,
+    options.columns,
+    options.rows,
+  )
   const SW = columns * 8
   const reduced = reduceSource(source, columns, rows, alphaMode === 'ignore')
 

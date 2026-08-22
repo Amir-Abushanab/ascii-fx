@@ -4,9 +4,8 @@ const ASCII = (() => {
   return s
 })()
 
-const BLOCKS =
-  '▀▄█▌▐░▒▓' +
-  '▖▗▘▙▚▛▜▝▞▟'
+// Halves, full and shades first, then the ten quadrant blocks.
+const BLOCKS = '▀▄█▌▐░▒▓▖▗▘▙▚▛▜▝▞▟'
 
 export const BUILTIN_CHARSETS: Readonly<Record<string, string>> = {
   ascii: ASCII,
@@ -28,7 +27,9 @@ export function resolveCharset(
 ): ResolvedCharset {
   if (characters !== undefined) {
     const glyphs =
-      typeof characters === 'string' ? Array.from(characters) : characters.flatMap((c) => Array.from(c))
+      typeof characters === 'string'
+        ? Array.from(characters)
+        : characters.flatMap((c) => Array.from(c))
     if (glyphs.length === 0) throw new Error('Custom character set is empty.')
     const seen = new Set<string>()
     const dupes = new Set<string>()

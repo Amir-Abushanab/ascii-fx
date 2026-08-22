@@ -57,7 +57,12 @@ const readStoredSections = (
     const end = offset + length
     for (const section of sections) {
       const sectionEnd = section.offset + section.data.byteLength
-      if (length > 0 && section.data.byteLength > 0 && offset < sectionEnd && end > section.offset) {
+      if (
+        length > 0 &&
+        section.data.byteLength > 0 &&
+        offset < sectionEnd &&
+        end > section.offset
+      ) {
         throw corruptProfile(`section ${type} overlaps section ${section.type}.`)
       }
     }
@@ -114,7 +119,8 @@ export function encodeProfile(profile: AsciiProfile): Uint8Array {
   sections.push({ type: SECTION.atlas, bytes: profile.atlas.data })
 
   if (profile.atlas.rgba) sections.push({ type: SECTION.atlasRgba, bytes: profile.atlas.rgba })
-  if (profile.chromatic) sections.push({ type: SECTION.chromaticSamples, bytes: profile.chromatic.samples })
+  if (profile.chromatic)
+    sections.push({ type: SECTION.chromaticSamples, bytes: profile.chromatic.samples })
 
   if (profile.shape6) {
     const v = profile.shape6.vectors6
@@ -191,8 +197,16 @@ export function encodeProfile(profile: AsciiProfile): Uint8Array {
 
 /** Decode asciip/1 bytes. Unknown section types are skipped (forward compatibility). */
 export function decodeProfile(bytes: Uint8Array): AsciiProfile {
-  if (bytes.length < HEADER_FIXED || bytes[0] !== 0x41 || bytes[1] !== 0x53 || bytes[2] !== 0x43 || bytes[3] !== 0x49) {
-    throw new Error('Not an ASCII FX profile: bad magic. Expected a .asciip file built by @ascii-fx/compiler.')
+  if (
+    bytes.length < HEADER_FIXED ||
+    bytes[0] !== 0x41 ||
+    bytes[1] !== 0x53 ||
+    bytes[2] !== 0x43 ||
+    bytes[3] !== 0x49
+  ) {
+    throw new Error(
+      'Not an ASCII FX profile: bad magic. Expected a .asciip file built by @ascii-fx/compiler.',
+    )
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const formatVersion = view.getUint32(4, true)
@@ -228,9 +242,11 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
     columns: atlas.columns,
   }
   for (const [name, value] of Object.entries(positiveAtlasValues)) {
-    if (!Number.isInteger(value) || value <= 0) throw corruptProfile(`atlas ${name} must be a positive integer.`)
+    if (!Number.isInteger(value) || value <= 0)
+      throw corruptProfile(`atlas ${name} must be a positive integer.`)
   }
-  if (!Number.isInteger(atlas.padding) || atlas.padding < 0) throw corruptProfile('atlas padding must be non-negative.')
+  if (!Number.isInteger(atlas.padding) || atlas.padding < 0)
+    throw corruptProfile('atlas padding must be non-negative.')
   const minimumPitchWidth = atlas.cellWidth + atlas.padding * 2
   const minimumPitchHeight = atlas.cellHeight + atlas.padding * 2
   if (atlas.pitchWidth < minimumPitchWidth || atlas.pitchHeight < minimumPitchHeight) {
@@ -239,7 +255,10 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
   if (exactProduct('atlas row width', atlas.columns, atlas.pitchWidth) > atlas.width) {
     throw corruptProfile('atlas columns do not fit within its width.')
   }
-  if (exactProduct('atlas rows', Math.ceil(glyphCount / atlas.columns), atlas.pitchHeight) > atlas.height) {
+  if (
+    exactProduct('atlas rows', Math.ceil(glyphCount / atlas.columns), atlas.pitchHeight) >
+    atlas.height
+  ) {
     throw corruptProfile('atlas does not have enough rows for every glyph.')
   }
   const expectedAtlasBytes = exactProduct('atlas byte length', atlas.width, atlas.height)
@@ -253,7 +272,11 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
     cellWidth: atlas.cellWidth,
     cellHeight: atlas.cellHeight,
   }
-  if (metrics.baseline > metrics.cellHeight || metrics.unitsPerEm <= 0 || metrics.advanceUnits <= 0) {
+  if (
+    metrics.baseline > metrics.cellHeight ||
+    metrics.unitsPerEm <= 0 ||
+    metrics.advanceUnits <= 0
+  ) {
     throw corruptProfile('font metrics are invalid.')
   }
   const charsetHash = bytesToHex(bytes.subarray(76, 108))
@@ -279,7 +302,9 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
         const sv = new DataView(data.buffer, data.byteOffset, data.byteLength)
         const count = sv.getUint32(0, true)
         if (count !== glyphCount) {
-          throw corruptProfile(`glyph table contains ${count} entries; header declares ${glyphCount}.`)
+          throw corruptProfile(
+            `glyph table contains ${count} entries; header declares ${glyphCount}.`,
+          )
         }
         const blobStart = 4 + 4 * (count + 1)
         if (blobStart > data.byteLength) throw corruptProfile('glyph offset table is truncated.')
@@ -297,11 +322,13 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
           glyphs.push(glyph)
           previous = b
         }
-        if (previous !== blobLength) throw corruptProfile('glyph table has unreferenced trailing bytes.')
+        if (previous !== blobLength)
+          throw corruptProfile('glyph table has unreferenced trailing bytes.')
         break
       }
       case SECTION.masks: {
-        if (data.byteLength !== glyphCount * 8) throw corruptProfile('mask section has the wrong length.')
+        if (data.byteLength !== glyphCount * 8)
+          throw corruptProfile('mask section has the wrong length.')
         const sv = new DataView(data.buffer, data.byteOffset, data.byteLength)
         masksLo = new Uint32Array(glyphCount)
         masksHi = new Uint32Array(glyphCount)
@@ -312,14 +339,16 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
         break
       }
       case SECTION.coverage: {
-        if (data.byteLength !== glyphCount * 2) throw corruptProfile('coverage section has the wrong length.')
+        if (data.byteLength !== glyphCount * 2)
+          throw corruptProfile('coverage section has the wrong length.')
         const sv = new DataView(data.buffer, data.byteOffset, data.byteLength)
         coverage = new Uint16Array(glyphCount)
         for (let g = 0; g < glyphCount; g++) coverage[g] = sv.getUint16(g * 2, true)
         break
       }
       case SECTION.atlas:
-        if (data.byteLength !== expectedAtlasBytes) throw corruptProfile('atlas section has the wrong length.')
+        if (data.byteLength !== expectedAtlasBytes)
+          throw corruptProfile('atlas section has the wrong length.')
         atlas.data = new Uint8Array(data)
         break
       case SECTION.atlasRgba:
@@ -344,12 +373,14 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
         break
       }
       case SECTION.shape6Lut: {
-        if (data.byteLength !== 8 ** 6 * 2) throw corruptProfile('shape6 LUT section has the wrong length.')
+        if (data.byteLength !== 8 ** 6 * 2)
+          throw corruptProfile('shape6 LUT section has the wrong length.')
         const sv = new DataView(data.buffer, data.byteOffset, data.byteLength)
         lut3 = new Uint16Array(data.byteLength / 2)
         for (let i = 0; i < lut3.length; i++) {
           const glyphId = sv.getUint16(i * 2, true)
-          if (glyphId >= glyphCount) throw corruptProfile(`shape6 LUT references missing glyph ${glyphId}.`)
+          if (glyphId >= glyphCount)
+            throw corruptProfile(`shape6 LUT references missing glyph ${glyphId}.`)
           lut3[i] = glyphId
         }
         break
@@ -376,17 +407,23 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
   }
 
   if (!glyphs || !masksLo || !masksHi || !coverage || atlas.data.length === 0 || !metadata) {
-    throw new Error('Profile is missing required sections; the .asciip file is corrupt or truncated.')
+    throw new Error(
+      'Profile is missing required sections; the .asciip file is corrupt or truncated.',
+    )
   }
   if (lut3 && !vectors6) throw corruptProfile('shape6 LUT is present without shape6 vectors.')
   // The two halves of a chromatic profile are useless apart: samples drive the
   // match, the RGBA atlas draws the result. A profile carrying one without the
   // other would match correctly and then render as blank tiles.
   if (chromaticSamples && !atlasRgba) {
-    throw corruptProfile('chromatic samples are present without the RGBA atlas needed to draw them.')
+    throw corruptProfile(
+      'chromatic samples are present without the RGBA atlas needed to draw them.',
+    )
   }
   if (atlasRgba && !chromaticSamples) {
-    throw corruptProfile('an RGBA atlas is present without the chromatic samples needed to match it.')
+    throw corruptProfile(
+      'an RGBA atlas is present without the chromatic samples needed to match it.',
+    )
   }
   if (atlasRgba) atlas.rgba = atlasRgba
   return {

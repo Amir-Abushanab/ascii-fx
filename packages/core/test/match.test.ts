@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AsciiProfile, ColorMode, RGB, RawImage } from '@ascii-fx/core'
+import type { AsciiProfile, ColorMode, RGB } from '@ascii-fx/core'
 import { FLAG_FLAT, FLAG_TRANSPARENT, luma8, matchFrame, rdiv, reduceSource } from '@ascii-fx/core'
 import { STANDARD_SIX, makeCell, makeProfile, randomImage, randomProfile } from './synthetic.js'
 
@@ -10,7 +10,12 @@ const topDarkBottomLight = makeCell((_, j) => (j < 4 ? [10, 10, 10] : [240, 240,
 
 describe('structural-v1 matcher', () => {
   it('full mode reconstructs a half-split cell exactly', () => {
-    const frame = matchFrame(topDarkBottomLight, { profile: profile6, columns: 1, rows: 1, color: 'full' })
+    const frame = matchFrame(topDarkBottomLight, {
+      profile: profile6,
+      columns: 1,
+      rows: 1,
+      color: 'full',
+    })
     const cell = frame.getCell(0, 0)
     expect(cell.glyphId).toBe(2) // '▀' wins its tie with '▄' by candidate order
     expect(cell.foreground).toEqual([10, 10, 10, 255]) // ink side = top
@@ -18,7 +23,12 @@ describe('structural-v1 matcher', () => {
   })
 
   it('mono default polarity puts ink on the light side', () => {
-    const frame = matchFrame(topDarkBottomLight, { profile: profile6, columns: 1, rows: 1, color: 'mono' })
+    const frame = matchFrame(topDarkBottomLight, {
+      profile: profile6,
+      columns: 1,
+      rows: 1,
+      color: 'mono',
+    })
     expect(frame.getCell(0, 0).glyphId).toBe(3) // '▄'
   })
 
@@ -99,7 +109,13 @@ describe('structural-v1 matcher', () => {
     const masked = matchFrame(clear, { profile: profile6, columns: 1, rows: 1, color: 'full' })
     expect(masked.getCell(0, 0).flags & FLAG_TRANSPARENT).toBe(FLAG_TRANSPARENT)
     expect(masked.getCell(0, 0).glyphId).toBe(0)
-    const ignored = matchFrame(clear, { profile: profile6, columns: 1, rows: 1, color: 'full', alpha: 'ignore' })
+    const ignored = matchFrame(clear, {
+      profile: profile6,
+      columns: 1,
+      rows: 1,
+      color: 'full',
+      alpha: 'ignore',
+    })
     expect(ignored.getCell(0, 0).flags & FLAG_TRANSPARENT).toBe(0)
   })
 
@@ -143,11 +159,17 @@ function naiveCell(
     if (lum[k] < lum[minI]) minI = k
     if (lum[k] > lum[maxI]) maxI = k
   }
+  // The naive reference reads as one block; hoisting its two arithmetic shorthands
+  // would split the thing under test.
+  // eslint-disable-next-line unicorn/consistent-function-scoping
   const sum = (arr: Uint8Array): number => arr.reduce((a, v) => a + v, 0)
   const meanR = rdiv(sum(r), 64)
   const meanG = rdiv(sum(g), 64)
   const meanB = rdiv(sum(b), 64)
-  const meanL = rdiv(lum.reduce((a, v) => a + v, 0), 64)
+  const meanL = rdiv(
+    lum.reduce((a, v) => a + v, 0),
+    64,
+  )
 
   if (lum[maxI] - lum[minI] < 15) {
     if (color === 'full') {
@@ -165,10 +187,18 @@ function naiveCell(
     const target = inkLight ? meanL * 257 : (255 - meanL) * 257
     let best = 0
     for (let gi = 1; gi < profile.glyphCount; gi++) {
-      if (Math.abs(profile.structural.coverage[gi] - target) < Math.abs(profile.structural.coverage[best] - target))
+      if (
+        Math.abs(profile.structural.coverage[gi] - target) <
+        Math.abs(profile.structural.coverage[best] - target)
+      )
         best = gi
     }
-    return { id: best, fg: color === 'foreground' ? [meanR, meanG, meanB] : [...fgOpt] as [number, number, number], bg: [...bgOpt] as [number, number, number], flat: true }
+    return {
+      id: best,
+      fg: color === 'foreground' ? [meanR, meanG, meanB] : ([...fgOpt] as [number, number, number]),
+      bg: [...bgOpt] as [number, number, number],
+      flat: true,
+    }
   }
 
   const bits: number[] = []
@@ -180,7 +210,9 @@ function naiveCell(
   const matchBits = color === 'full' ? bits : inkLight ? bits.map((v) => 1 - v) : bits
 
   const glyphBit = (gi: number, k: number): number =>
-    k < 32 ? (profile.structural.masksLo[gi] >>> k) & 1 : (profile.structural.masksHi[gi] >>> (k - 32)) & 1
+    k < 32
+      ? (profile.structural.masksLo[gi] >>> k) & 1
+      : (profile.structural.masksHi[gi] >>> (k - 32)) & 1
 
   const scored = Array.from({ length: profile.glyphCount }, (_, gi) => {
     let d = 0
@@ -203,14 +235,24 @@ function naiveCell(
       const ink: number[] = []
       const off: number[] = []
       for (let k = 0; k < 64; k++) (glyphBit(gi, k) ? ink : off).push(k)
-      const mean = (ks: number[], arr: Uint8Array): number => rdiv(ks.reduce((a, k) => a + arr[k], 0), ks.length)
+      // See `sum` above: the partition means belong next to the ink/off split they
+      // average over.
+      // eslint-disable-next-line unicorn/consistent-function-scoping
+      const mean = (ks: number[], arr: Uint8Array): number =>
+        rdiv(
+          ks.reduce((a, k) => a + arr[k], 0),
+          ks.length,
+        )
       if (color === 'full') {
         const inkKs = ink.length > 0 ? ink : off
         const offKs = off.length > 0 ? off : ink
         fg = [mean(inkKs, r), mean(inkKs, g), mean(inkKs, b)]
         bg = [mean(offKs, r), mean(offKs, g), mean(offKs, b)]
       } else {
-        fg = ink.length > 0 ? [mean(ink, r), mean(ink, g), mean(ink, b)] : ([...bgOpt] as [number, number, number])
+        fg =
+          ink.length > 0
+            ? [mean(ink, r), mean(ink, g), mean(ink, b)]
+            : ([...bgOpt] as [number, number, number])
         bg = [...bgOpt] as [number, number, number]
       }
     }
@@ -272,11 +314,17 @@ describe('oracle conformance: matchFrame ≡ naive sort-based implementation', (
             expect(frame.glyphIds[ci], `glyph at (${cx},${cy})`).toBe(naive.id)
             if (color !== 'mono') {
               const fg = frame.foreground![ci]
-              expect([fg & 0xff, (fg >>> 8) & 0xff, (fg >>> 16) & 0xff], `fg at (${cx},${cy})`).toEqual(naive.fg)
+              expect(
+                [fg & 0xff, (fg >>> 8) & 0xff, (fg >>> 16) & 0xff],
+                `fg at (${cx},${cy})`,
+              ).toEqual(naive.fg)
             }
             if (color === 'full') {
               const bg = frame.background![ci]
-              expect([bg & 0xff, (bg >>> 8) & 0xff, (bg >>> 16) & 0xff], `bg at (${cx},${cy})`).toEqual(naive.bg)
+              expect(
+                [bg & 0xff, (bg >>> 8) & 0xff, (bg >>> 16) & 0xff],
+                `bg at (${cx},${cy})`,
+              ).toEqual(naive.bg)
             }
           }
         }

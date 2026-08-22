@@ -10,9 +10,7 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": [
-    "@ascii-fx-internal/*"
-  ],
+  "ignore": ["@ascii-fx-internal/*"],
   "fixed": [
     [
       "@ascii-fx/core",

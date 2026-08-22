@@ -41,10 +41,16 @@ export const str = (args: Args, key: string): string | undefined => {
 }
 
 /** An enum-valued flag: anything outside `allowed` is an error, never a guess. */
-export function enumFlag<T extends string>(key: string, value: string | undefined, allowed: readonly T[]): T | undefined {
+export function enumFlag<T extends string>(
+  key: string,
+  value: string | undefined,
+  allowed: readonly T[],
+): T | undefined {
   if (value === undefined) return undefined
   if ((allowed as readonly string[]).includes(value)) return value as T
-  throw new Error(`Invalid --${key} ${JSON.stringify(value)}: expected one of ${allowed.join(' | ')}.`)
+  throw new Error(
+    `Invalid --${key} ${JSON.stringify(value)}: expected one of ${allowed.join(' | ')}.`,
+  )
 }
 
 /** A grid-dimension flag: positive integers only — NaN and fractions reach typed-array sizes otherwise. */

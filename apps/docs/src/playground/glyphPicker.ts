@@ -14,7 +14,6 @@
 import type { AsciiProfile } from '@ascii-fx/core'
 import { idiv } from '@ascii-fx/core'
 
-
 export interface PickerHandles {
   /** Currently selected graphemes, in profile order. */
   selection: () => string[]
@@ -80,7 +79,11 @@ function atlasSpriteUrl(profile: AsciiProfile): string | null {
   canvas.width = atlas.width
   canvas.height = atlas.height
   const ctx = canvas.getContext('2d')!
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(atlas.rgba), atlas.width, atlas.height), 0, 0)
+  ctx.putImageData(
+    new ImageData(new Uint8ClampedArray(atlas.rgba), atlas.width, atlas.height),
+    0,
+    0,
+  )
   return canvas.toDataURL()
 }
 
@@ -88,7 +91,8 @@ export function mountPicker(host: HTMLElement, options: PickerOptions): PickerHa
   const { profile } = options
   const n = profile.glyphCount
   const selected = new Uint8Array(n)
-  for (let i = 0; i < n; i++) selected[i] = options.initial ? (options.initial(profile.glyphs[i], i) ? 1 : 0) : 1
+  for (let i = 0; i < n; i++)
+    selected[i] = options.initial ? (options.initial(profile.glyphs[i], i) ? 1 : 0) : 1
   const flat = Array.from({ length: n }, (_, i) => flatness(profile, i))
 
   const grid = document.createElement('div')
@@ -184,7 +188,9 @@ export function mountPicker(host: HTMLElement, options: PickerOptions): PickerHa
   }
   if (options.defaultSelection) {
     const def = options.defaultSelection
-    action('Default', `Restore the ${def.size} glyphs selected on load`, (i) => def.has(profile.glyphs[i]))
+    action('Default', `Restore the ${def.size} glyphs selected on load`, (i) =>
+      def.has(profile.glyphs[i]),
+    )
   }
   action('All', 'Select every glyph', () => true)
   action('None', 'Deselect everything — the live view needs at least one', () => false)

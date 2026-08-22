@@ -2,11 +2,31 @@
   "name": "@ascii-fx/vite",
   "version": "0.1.0",
   "description": "Vite integration for ASCII FX: build-time profile compilation and static frame generation as virtual modules.",
-  "license": "MIT",
-  "engines": {
-    "node": ">=22"
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "ascii-fx",
+    "build-tool",
+    "vite",
+    "vite-plugin"
+  ],
+  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
+  "bugs": {
+    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
   },
+  "license": "MIT",
+  "author": "Amir Abushanab (https://github.com/Amir-Abushanab)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
+    "directory": "packages/vite"
+  },
+  "files": [
+    "dist",
+    "client.d.ts"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -16,16 +36,12 @@
       "types": "./client.d.ts"
     }
   },
-  "files": [
-    "dist",
-    "client.d.ts"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
-  },
-  "peerDependencies": {
-    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0"
   },
   "dependencies": {
     "@ascii-fx/compiler": "workspace:*",
@@ -33,19 +49,16 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/pngjs": "^6.0.5",
+    "pngjs": "^7.0.0",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2",
-    "vite": "^8.2.1",
-    "pngjs": "^7.0.0",
-    "@types/pngjs": "^6.0.5"
+    "vite": "^8.2.1"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Amir-Abushanab/ascii-fx.git",
-    "directory": "packages/vite"
+  "peerDependencies": {
+    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0"
   },
-  "homepage": "https://github.com/Amir-Abushanab/ascii-fx#readme",
-  "bugs": {
-    "url": "https://github.com/Amir-Abushanab/ascii-fx/issues"
+  "engines": {
+    "node": ">=22"
   }
 }

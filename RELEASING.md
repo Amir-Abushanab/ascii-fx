@@ -29,7 +29,7 @@ entirely via its `paths` filter.
 **GitHub Pages.** Repo Settings → Pages → Source: **GitHub Actions**. The docs deploy is a job in
 `ci.yml`, gated on `check`, so a red suite cannot ship the showcase.
 
-**npm, first publish.** npm cannot do a package's *first* publish over OIDC, so 0.1.0 has to go up
+**npm, first publish.** npm cannot do a package's _first_ publish over OIDC, so 0.1.0 has to go up
 from a laptop:
 
 ```sh
@@ -47,13 +47,29 @@ with provenance attached. If OIDC misbehaves, add an `NPM_TOKEN` secret and unco
 
 ## Scripts
 
-| Script | What it does |
-| --- | --- |
-| `pnpm check` | The gate: typecheck, node tests, GPU browser tests, knip, depcruise, skill validation. Also the pre-commit hook. |
-| `pnpm quality` | `check` plus `pnpm audit`. Local only — an advisory in a transitive dep should not block a PR. |
-| `pnpm version` | `changeset version` + sync the skill version. Run by the release workflow, not by hand. |
-| `pnpm publint` | [publint](https://publint.dev) every publishable package against its packed tarball. Needs a build first; CI runs it after `pnpm build`, and `pnpm release` runs it before publishing. |
-| `pnpm release` | Build, publint, then publish only the versions npm is missing. |
+| Script               | What it does                                                                                                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm check`         | The gate: build, format, lint, typecheck, node tests, browser-cpu tests, knip, depcruise, skill validation + staleness. Also the pre-commit hook.                                                         |
+| `pnpm quality`       | `check` plus `pnpm audit --audit-level low`. Local only — CI audits at `high` in a job that gates nothing, because an advisory lands with no change on our side and should not red-light an unrelated PR. |
+| `pnpm version`       | `changeset version` + sync the skill version. Run by the release workflow, not by hand.                                                                                                                   |
+| `pnpm package:check` | publint + are-the-types-wrong + smoke, on every packed tarball (see below). Needs a build first.                                                                                                          |
+| `pnpm release`       | Build, `package:check`, then publish only the versions npm is missing.                                                                                                                                    |
+
+`pnpm package:check` is the published-shape gate, and it is three tools because they check different
+things. [publint](https://publint.dev) reads the **manifest**: that every `exports` path lands on a
+file the tarball actually contains, that `files[]` is not missing something, that the `type` and the
+extensions agree. [are-the-types-wrong](https://arethetypeswrong.github.io) resolves the **types**
+the way each consumer's TypeScript would, which is the failure publint cannot see — a `.d.ts` that
+exists but does not describe the JS beside it, or an entry point reachable in one module mode and
+not another. It runs with `--profile esm-only`: these packages are ESM-only on purpose, so the
+node10 and require-from-CJS failures are expected and ignored, while a real types regression in the
+modes that matter still fails the run. Neither one executes a line, though, so `scripts/smoke-packages.mjs`
+runs last: it packs every package, installs the tarballs into a throwaway **npm** project — no
+workspace links, no access to our store, resolving exactly as a stranger's install would — and then
+imports each entry point in bare Node and puts the Node-capable ones through real work. Nothing else
+in the repo imports `dist/` at all, so this is the only step that would notice a package that packs
+perfectly and throws on import. CI runs all three after `pnpm build`; `pnpm release` runs them
+before publishing.
 
 `scripts/publish-if-needed.mjs` drives `pnpm publish` per package rather than `changeset publish`,
 which cannot be trusted against npm 11: its pre-publish check misreads an already-published package
@@ -61,6 +77,20 @@ as missing, tries to republish, and crashes on the E403 before printing the `New
 `changesets/action` needs — leaving the packages on npm but the job red with no tags or Releases.
 The script publishes only what the registry confirms is absent, and restores tags for any version
 that reached npm without one.
+
+## Before a release
+
+`pnpm test:gpu` is not in `pnpm check` and does not run in CI, because a GitHub runner
+reports a software adapter that passes every availability guard and then dies partway
+through the workload. It is the suite that proves the GPU matcher agrees with the CPU
+oracle bit-for-bit, so run it on a machine with a real adapter before cutting a release:
+
+```sh
+pnpm test:gpu
+```
+
+If you want it gating merges rather than being a manual step, point the check job at a
+self-hosted GPU runner; nothing else about the workflow has to change.
 
 ## Notes
 

@@ -11,7 +11,9 @@ describe('React hook dependency keys', () => {
 
   it('tracks temporal and adaptive-resolution option changes', () => {
     expect(rendererOptionsKey({ temporal: false })).not.toBe(rendererOptionsKey({ temporal: true }))
-    expect(rendererOptionsKey({ matcher: 'structural' })).not.toBe(rendererOptionsKey({ matcher: 'chromatic' }))
+    expect(rendererOptionsKey({ matcher: 'structural' })).not.toBe(
+      rendererOptionsKey({ matcher: 'chromatic' }),
+    )
     expect(rendererOptionsKey({ hysteresis: 0 })).not.toBe(rendererOptionsKey({ hysteresis: 0.1 }))
     expect(rendererOptionsKey({ adaptiveResolution: false })).not.toBe(
       rendererOptionsKey({ adaptiveResolution: true }),

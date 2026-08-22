@@ -1,0 +1,54 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "react", "import"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "env": {
+    "browser": true,
+    "es2022": true
+  },
+  "rules": {
+    // Off because the rule is categorically wrong here, not because of exceptions:
+    // every package compiles with the automatic JSX runtime (`"jsx": "react-jsx"`),
+    // so `React` is never needed in scope and every JSX tag would report.
+    // Everything else stays on and its exceptions carry a per-site comment.
+    "react/react-in-jsx-scope": "off",
+    // Hook dependency arrays are a real bug class in a library other people mount into
+    // their trees, so these stay on and the deliberate exceptions keep their
+    // `eslint-disable-next-line` comment — which `reportUnusedDisableDirectives` below
+    // then holds to account.
+    "react-hooks/exhaustive-deps": "error",
+    "react-hooks/rules-of-hooks": "error",
+    // `any` is allowed only where a comment says why (three.js internals, WebGPU shims).
+    "typescript/no-explicit-any": "error",
+    // Nothing the browser packages ship may print unless it is a deliberate
+    // warn/error/info. Relaxed below for CLIs, scripts, benchmarks and tests.
+    "no-console": ["error", { "allow": ["warn", "error", "info"] }]
+  },
+  "overrides": [
+    {
+      // Node entry points, build scripts, benchmarks and tests print for a living, and
+      // reach into untyped third-party internals. Whole categories of file, not a
+      // handful of sites — the only exemptions broad enough to belong in config.
+      "files": [
+        "packages/compiler/src/cli.ts",
+        "packages/*/test/**",
+        "packages/*/test-browser/**",
+        "apps/**",
+        "scripts/**",
+        "*.config.ts",
+        "*.cjs"
+      ],
+      "rules": {
+        "no-console": "off",
+        "typescript/no-explicit-any": "off"
+      }
+    }
+  ],
+  "options": {
+    "denyWarnings": true,
+    "reportUnusedDisableDirectives": "error"
+  }
+}
