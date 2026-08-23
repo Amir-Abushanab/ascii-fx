@@ -103,6 +103,7 @@ const els = {
   fxFeatherOut: $<HTMLOutputElement>('fxFeatherOut'),
   fxIntensity: $<HTMLInputElement>('fxIntensity'),
   fxIntensityOut: $<HTMLOutputElement>('fxIntensityOut'),
+  fxNote: $<HTMLParagraphElement>('fxNote'),
 }
 
 const reducedMotionQuery = matchMedia('(prefers-reduced-motion: reduce)')
@@ -262,6 +263,34 @@ function matchOptions(): AsciiRendererRuntimeOptions {
   }
 }
 
+/**
+ * Effects with no falloff term: they apply uniformly to the whole frame, so
+ * radius and feather reach the shader and change nothing. Named here once
+ * because three places need to agree — the panel greys those two dials, the
+ * note says why, and the exported snippet leaves them out.
+ */
+const POINTERLESS_FX = new Set<string>(['wave', 'original-mix'])
+
+/** One line per effect: what it does, and which dials it reads. */
+const FX_NOTES: Record<string, string> = {
+  none: 'Nothing composited on top — the glyph field as the matcher emitted it.',
+  reveal:
+    'Fades the original source back in under the pointer. Reads radius, feather and intensity.',
+  displace: 'Wobbles the sampling position near the pointer. Reads radius, feather and intensity.',
+  wave: 'Shears every row sideways on a travelling sine — no pointer, so only intensity applies.',
+  push: 'Shoves the glyph field away from the pointer. Reads radius, feather and intensity.',
+  color: 'Rotates hue near the pointer. Reads radius, feather and intensity.',
+  'glyph-scale':
+    'Shrinks each glyph inside its own cell near the pointer. Reads radius, feather and intensity.',
+  'glyph-rotate':
+    'Spins each glyph inside its own cell near the pointer. Reads radius, feather and intensity.',
+  // The one effect whose max is "no ASCII at all", which reads as a broken
+  // canvas rather than as the far end of a crossfade unless it says so.
+  'original-mix':
+    'Crossfades the whole frame back to the source — no pointer, only intensity: 0 is all glyphs, 1 is the bare source with none.',
+  resolution: 'Magnifies the glyph field under the pointer. Reads radius, feather and intensity.',
+}
+
 function applyInteraction(): void {
   const value = els.interaction.value
   renderer?.setInteraction(
@@ -274,6 +303,16 @@ function applyInteraction(): void {
           intensity: Number(els.fxIntensity.value),
         },
   )
+}
+
+/** Grey the dials the selected effect ignores, and say what it does. */
+function syncFxPanel(): void {
+  const value = els.interaction.value
+  const off = value === 'none' || POINTERLESS_FX.has(value)
+  els.fxRadius.disabled = off
+  els.fxFeather.disabled = off
+  els.fxIntensity.disabled = value === 'none'
+  els.fxNote.textContent = FX_NOTES[value] ?? ''
 }
 
 /** Every interaction runs on both backends; temporal/adaptive are WebGPU features. */
@@ -489,6 +528,7 @@ async function rebuild(): Promise<void> {
   }
   syncCanvasSize()
   if (active) renderer.setSource(active.source)
+  syncFxPanel()
   applyInteraction()
   syncInteractionAvailability()
   syncMotionPolicy()
@@ -665,9 +705,21 @@ for (const input of optionInputs) {
 const fxInputs = [els.interaction, els.fxRadius, els.fxFeather, els.fxIntensity]
 for (const input of fxInputs) {
   input.addEventListener(input instanceof HTMLSelectElement ? 'change' : 'input', () => {
+    // Arriving at original-mix with intensity parked at the top hands you a
+    // canvas with zero glyphs on it, which looks like a failed render rather
+    // than the far end of a crossfade. Land mid-fade instead — but only from
+    // the default, so a deliberate setting is never overwritten.
+    if (
+      input === els.interaction &&
+      els.interaction.value === 'original-mix' &&
+      Number(els.fxIntensity.value) === 1
+    ) {
+      els.fxIntensity.value = '0.5'
+    }
     els.fxRadiusOut.value = Number(els.fxRadius.value).toFixed(2)
     els.fxFeatherOut.value = Number(els.fxFeather.value).toFixed(2)
     els.fxIntensityOut.value = Number(els.fxIntensity.value).toFixed(2)
+    syncFxPanel()
     applyInteraction()
   })
 }
@@ -700,8 +752,12 @@ function getExportState(): ExportState {
     const radius = Number(els.fxRadius.value)
     const feather = Number(els.fxFeather.value)
     const intensity = Number(els.fxIntensity.value)
-    if (radius !== 0.15) interaction.radius = radius
-    if (feather !== 0.06) interaction.feather = feather
+    // A snippet carrying radius/feather for an effect that has no falloff
+    // reads as though they tune it; they do not.
+    if (!POINTERLESS_FX.has(els.interaction.value)) {
+      if (radius !== 0.15) interaction.radius = radius
+      if (feather !== 0.06) interaction.feather = feather
+    }
     if (intensity !== 1) interaction.intensity = intensity
   }
 
