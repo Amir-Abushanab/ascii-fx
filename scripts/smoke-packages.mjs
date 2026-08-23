@@ -31,12 +31,22 @@ const PEERS = {
   vite: '^8.2.1',
 }
 
+// pnpm exports its own settings to child processes as npm_config_* environment
+// variables, and npm warns about every one it does not recognise ("Unknown env config
+// manage-package-manager-versions"). Stripping them silences that, and is what this
+// script wants anyway: the throwaway install is meant to resolve the way a stranger's
+// would, not to inherit whatever pnpm config happens to be in scope.
+const cleanEnv = () =>
+  Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.toLowerCase().startsWith('npm_config_')),
+  )
+
 const run = (cmd, args, cwd, env) =>
   execFileSync(cmd, args, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, ...env },
+    env: { ...cleanEnv(), ...env },
   })
 
 // The body that runs inside the throwaway project. Kept as a string so the file it
