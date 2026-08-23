@@ -16,6 +16,12 @@ importers:
       '@arethetypeswrong/cli':
         specifier: ^0.18.5
         version: 0.18.5
+      '@ascii-fx/compiler':
+        specifier: workspace:*
+        version: link:packages/compiler
+      '@ascii-fx/core':
+        specifier: workspace:*
+        version: link:packages/core
       '@changesets/changelog-github':
         specifier: ^0.5.1
         version: 0.5.2
@@ -49,6 +55,9 @@ importers:
       playwright:
         specifier: ^1.62.1
         version: 1.62.1
+      pngjs:
+        specifier: ^7.0.0
+        version: 7.0.0
       publint:
         specifier: ^0.3.23
         version: 0.3.23

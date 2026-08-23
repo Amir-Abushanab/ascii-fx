@@ -1,24 +1,39 @@
 # @ascii-fx/react-three
 
-React Three Fiber bindings (kept separate from `@ascii-fx/react` so plain React apps never pull Three). Requires an R3F v9 `<Canvas>` running `THREE.WebGPURenderer`.
+[`@ascii-fx/three`](../three) as React Three Fiber components.
+
+```sh
+pnpm add @ascii-fx/react-three three @react-three/fiber
+```
 
 ```tsx
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three/webgpu'
 import { AsciiEffect } from '@ascii-fx/react-three'
 
-;<Canvas
-  gl={async (props) => {
-    const renderer = new THREE.WebGPURenderer(props as never)
-    await renderer.init()
-    return renderer
-  }}
->
-  <mesh>{/* your scene */}</mesh>
-  <AsciiEffect profile={profileRef} columns={180} interaction="reveal" />
+;<Canvas gl={(canvas) => new THREE.WebGPURenderer({ canvas })}>
+  <mesh>
+    <torusKnotGeometry />
+    <meshNormalMaterial />
+  </mesh>
+  <AsciiEffect profile={profile} columns={160} />
 </Canvas>
 ```
 
-`<AsciiEffect>` takes over the render loop while mounted (AsciiPass under the hood), auto-wires the R3F pointer, and resizes with the canvas. `useAsciiEffect(options)` returns the pass for imperative control (`captureFrame`, `set`).
+Drop `<AsciiEffect>` inside a `<Canvas>` and everything rendered before it comes out as ASCII.
 
-`<AsciiGlyphs profile={profile} columns={80} rows={45} frame={frame} />` renders the instanced 3D glyph field from a matched frame.
+## Why it's a separate package
+
+This is the only entry point in the project that pulls in `three` _and_ `@react-three/fiber`. Folding it into [`@ascii-fx/react`](../react) would put both in the dependency graph of every plain React app that just wanted `<AsciiImage>` — so it lives here, and you install it only if you're already in R3F.
+
+## Components
+
+- **`<AsciiEffect>`** — post-processes the scene through the exact matcher on the renderer's own device, no readback.
+- **`<AsciiGlyphs>`** — an instanced glyph mesh you can place, light, and move within the scene.
+- **`useAsciiEffect`** — the hook underneath, when you want the pass without the component.
+
+Requires an R3F v9 `<Canvas>` running `THREE.WebGPURenderer`; see [`@ascii-fx/three`](../three) for why WebGL isn't supported.
+
+## License
+
+[MIT](../../LICENSE)

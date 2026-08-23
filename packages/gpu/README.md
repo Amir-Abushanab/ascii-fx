@@ -1,6 +1,10 @@
 # @ascii-fx/gpu
 
-The realtime renderer: exact `structural-v1` matching as WebGPU compute (bit-for-bit agreement with the CPU reference, enforced by a browser conformance suite), a one-draw fullscreen atlas compositor, composite-stage interactions, and an exact CPU fallback behind the same API. `auto` never downgrades to an approximate matcher (spec §11).
+The realtime renderer: the exact structural matcher running as **WebGPU compute**, and an exact CPU implementation behind the identical API for everywhere else.
+
+```sh
+pnpm add @ascii-fx/gpu
+```
 
 ```ts
 import { createAsciiRenderer } from '@ascii-fx/gpu'
@@ -8,41 +12,48 @@ import { loadProfile } from '@ascii-fx/core'
 
 const ascii = await createAsciiRenderer({
   canvas,
-  profile: await loadProfile('/default.asciip'),
-  backend: 'auto', // webgpu → exact cpu fallback
+  profile: await loadProfile('/fonts/default.asciip'),
   columns: 160,
   color: 'full',
 })
 
 ascii.setSource(video)
-ascii.start() // requestVideoFrameCallback for videos, rAF otherwise
-
-ascii.setInteraction({ type: 'reveal', radius: 0.18, feather: 0.08 })
-canvas.addEventListener('pointermove', (e) => ascii.pointer.set(x01, y01))
-
-const frame = await ascii.captureFrame() // the only GPU→CPU readback path
-ascii.destroy()
+ascii.start()
 ```
 
-## Guarantees (warm render loop)
+~2.8 ms/frame on an M3 Pro at 160×42 — about 0.2 ms of that on the main thread, because matching and compositing overlap on the GPU.
 
-- zero GPU→CPU readback; zero per-cell JS allocations; buffers/textures reused, reallocated only when the grid changes
-- pointer/interaction/time updates are composite-only — the matcher never re-dispatches (verified by tests)
-- matching and presentation submit separately, so presentation failures can't drop match work
+## The fallback is not a downgrade
 
-## Beyond the basics
+`backend: 'auto'` picks WebGPU when there's an adapter and the CPU matcher when there isn't, and **both produce identical output** — same glyph ids, same colours, same flags, enforced by a browser conformance suite across colour modes, palettes, alpha modes, uneven reductions, temporal reuse, and dirty-region rematches.
 
-- `interaction` types: `reveal · displace · wave · push · color · glyph-scale · glyph-rotate · original-mix · resolution` — all of them on both backends. The CPU backend runs the shader's own formulas at the composite stage: masked layers (reveal/color/original-mix), row strips (wave), and a cell-granular warp engine for the rest — each affected cell is redrawn from its warped source position (or with its glyph-local scale/rotation), so the geometry matches WebGPU up to cell quantization. Time-based effects self-drive a composite-only loop on static sources; the matcher never re-runs for any of it.
-- `temporal: true` — exact per-cell reuse for video (spec §21): unchanged cells skip matching via byte-identical sample comparison; costs one buffer copy + the previous-frame buffer
-- `ascii.invalidate({ x, y, width, height })` — dirty-region rematch (spec §22): full source re-upload, sub-rect dispatch
-- `adaptiveResolution: true` — steps columns down under sustained frame pressure with hysteresis; explicit resolution stays the upper bound; `grid()` reports the actual grid (spec §46)
-- `AsciiEngine` / `AsciiStream` — the device-agnostic core used by `@ascii-fx/three` to run matching on Three's own `GPUDevice`
+What it will never do is quietly swap in a cheaper, worse matcher to hold a frame rate. Approximate matchers exist in `@ascii-fx/core`, and you get one only by naming it. A slow frame is a slow frame; it isn't silently a different picture.
 
-## Limits
+## Device loss
 
-- ≤ 2048 glyphs on the GPU path (workgroup memory); larger charsets use the CPU backend
-- per-sample reduction blocks are bounded to keep u32 accumulation exact — pre-scale gigantic sources or raise columns (clear error otherwise)
+A GPU device can vanish — driver reset, tab backgrounded too long, laptop switching GPUs. The renderer rebuilds on a fresh device by itself. For the case it can't recover from, `onDeviceLost` fires and you remount the canvas: a canvas is bound to its first context type for good, so one that has held a `'webgpu'` context can never be given a 2D one, and starting over needs a _new element_. `@ascii-fx/react` does this for you via `canvasKey`.
 
-## Deliberately deferred (benchmark-gated, spec §38–39)
+## Interactions
 
-Workgroup-shape tuning, subgroup ops, and fused-pass variants need profiling across real device classes; large-glyph clustering needs >2048-glyph use cases. The conformance suite is in place to keep any of them exact when they land.
+Pointer-driven effects run in the composite stage, after matching, so they cost nothing extra per glyph:
+
+```ts
+ascii.setInteraction({ type: 'reveal', radius: 0.2, feather: 0.08, intensity: 1 })
+ascii.pointer.set(0.5, 0.5)
+```
+
+`reveal`, `displace`, `wave`, `push`, `color`, `glyph-scale`, `glyph-rotate`, `original-mix`, and `resolution`.
+
+## Capability probe
+
+```ts
+import { getAsciiSupport } from '@ascii-fx/gpu'
+
+const { webgpu, recommendedBackend, limitations } = await getAsciiSupport()
+```
+
+Safe to call anywhere, including Node during SSR — it reports rather than throws.
+
+## License
+
+[MIT](../../LICENSE)

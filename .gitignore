@@ -9,3 +9,4 @@ apps/benchmarks/results/
 apps/docs/public/bench/
 apps/docs/public/emoji/
 coverage/
+.assets-frames/
