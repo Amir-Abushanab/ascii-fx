@@ -27,5 +27,6 @@
       "entry": ["src/pages/**/*.astro", "src/playground/main.ts", "ascii-fx.config.ts"],
       "project": "src/**/*.{ts,astro}"
     }
-  }
+  },
+  "ignoreBinaries": ["ffmpeg"]
 }

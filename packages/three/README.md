@@ -1,26 +1,45 @@
 # @ascii-fx/three
 
-Three.js adapter. `AsciiPass` post-processes a scene through the exact matcher **on Three's own GPUDevice** — zero readback — and composites straight to the canvas. Requires `THREE.WebGPURenderer` (r170–r185 verified): exactly matching a WebGL renderer would need per-frame GPU→CPU readback, so it is not supported (spec §30).
+Render a Three.js scene as ASCII, without ever leaving the GPU.
+
+```sh
+pnpm add @ascii-fx/three three
+```
 
 ```ts
 import * as THREE from 'three/webgpu'
 import { AsciiPass } from '@ascii-fx/three'
 
-const renderer = new THREE.WebGPURenderer({ canvas })
-await renderer.init()
+const renderer = new THREE.WebGPURenderer()
+const pass = new AsciiPass({ renderer, profile, columns: 160 })
 
-const pass = new AsciiPass({ profile, renderer, columns: 160, color: 'full' })
-await pass.init()
-
-function frame() {
-  pass.render(scene, camera) // instead of renderer.render(scene, camera)
-  requestAnimationFrame(frame)
-}
-pass.set({ columns: 180 })
-pass.pointer.set(x01, y01)
-pass.setInteraction({ type: 'wave' })
+renderer.setAnimationLoop(() => pass.render(scene, camera))
 ```
 
-Color handling (spec §28): render targets hold linear-light values, so the pass sRGB-encodes before quantization. With pure 0/1 scene colors this is exact (the conformance test uses that); midtones can differ ±1 byte across GPUs in the encode — a source-side conversion, not matcher variance. Tone mapping is not applied to render targets; treat the RT as the match source.
+## Why WebGPURenderer only
 
-`AsciiGlyphs` (experimental): instanced plane-per-cell renderer with a TSL node material sampling the profile atlas — glyph ids/colors as instanced attributes via `updateFromFrame(frame)` (CPU hop in v1; a zero-readback bridge from the GPU cell buffer is planned), transforms in the standard `instanceMatrix` for effects.
+The pass runs the matcher **on Three's own `GPUDevice`** — the scene's render target is matched and composited in place, with no readback. That's what keeps it cheap enough to run every frame.
+
+A WebGL renderer can't do that. Matching a WebGL-rendered scene exactly would mean pulling every frame back to the CPU, matching there, and pushing the result up again — a GPU→CPU→GPU round trip per frame, which is slow enough to defeat the point. Rather than ship a "supported" path that's quietly 20× slower, this package requires `THREE.WebGPURenderer` (r170–r185 verified) and says so.
+
+If you're on WebGL and want ASCII, render your scene to a canvas and feed that canvas to [`@ascii-fx/gpu`](../gpu) as a source — you'll pay the readback, but explicitly.
+
+## Glyphs as geometry
+
+`AsciiGlyphs` is the other direction: an instanced mesh of glyph quads you can place in the scene, light, and move with the camera, rather than a full-frame post effect.
+
+```ts
+import { AsciiGlyphs } from '@ascii-fx/three'
+
+const glyphs = new AsciiGlyphs({ profile, columns: 120, rows: 40 })
+scene.add(glyphs)
+glyphs.setSource(video)
+```
+
+One draw call for the whole grid.
+
+`three` is a peer dependency (`>=0.170.0`); add `@types/three` for TypeScript. For React Three Fiber, use [`@ascii-fx/react-three`](../react-three).
+
+## License
+
+[MIT](../../LICENSE)
