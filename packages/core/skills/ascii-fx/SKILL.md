@@ -11,7 +11,7 @@ description: >
 metadata:
   type: core
   library: '@ascii-fx/core'
-  library_version: '0.1.0'
+  library_version: '0.2.0'
 sources:
   - 'ascii-fx:README.md'
   - 'ascii-fx:ALGORITHM.md'
