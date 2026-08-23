@@ -187,12 +187,35 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     return this.stream.grid()
   }
 
-  private configureContext(): void {
+  /**
+   * Whether the frame this configuration produces can contain transparency at all.
+   *
+   * This used to be `color === 'foreground'`, which made two documented options contradict
+   * each other: `alpha: 'mask'` flags transparent cells in every colour mode and the
+   * compositor honours them, but an opaque canvas cannot present them — so `alpha: 'mask'`
+   * with `color: 'full'` produced cells that were transparent everywhere except on screen.
+   * A `clearColor` with alpha < 1 was ignored the same way.
+   *
+   * Keyed on the output rather than the colour mode, the rule is one line: the canvas is
+   * transparent when the frame is. Opaque stays the default for the common case, where it
+   * lets the compositor skip blending the canvas against the page.
+   */
+  private canBeTransparent(): boolean {
     const color = this.opts.color ?? 'mono'
+    if (color === 'foreground') return true
+    // Deliberately *not* `alpha === 'mask'`: that is the default, so keying on it would
+    // make every canvas premultiplied and give up the opaque fast path for the common
+    // case. A source with no transparent pixels needs no blending. What matters is that
+    // the caller asked for a see-through ground, which is what clearColor's alpha says.
+    const clear = this.opts.clearColor
+    return clear !== undefined && clear[3] < 1
+  }
+
+  private configureContext(): void {
     this.context.configure({
       device: this.device,
       format: this.format,
-      alphaMode: color === 'foreground' ? 'premultiplied' : 'opaque',
+      alphaMode: this.canBeTransparent() ? 'premultiplied' : 'opaque',
     })
   }
 
@@ -312,9 +335,8 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       )
     }
     const previous = this.opts
-    const prevColor = previous.color ?? 'mono'
+    const transparentBefore = this.canBeTransparent()
     this.opts = { ...previous, ...options }
-    const color = this.opts.color ?? 'mono'
     const matchChanged =
       previous.columns !== this.opts.columns ||
       previous.rows !== this.opts.rows ||
@@ -338,7 +360,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.matchDirty = true
       if (this.srcTexture) this.reconfigureStream()
     }
-    if ((color === 'foreground') !== (prevColor === 'foreground')) {
+    // Reconfigure whenever the transparency of the output changes, not just on the
+    // foreground boundary — `alpha` and `clearColor` move it too.
+    if (transparentBefore !== this.canBeTransparent()) {
       this.configureContext()
     }
     this.compositeDirty = true

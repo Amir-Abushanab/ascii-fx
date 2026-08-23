@@ -62,6 +62,13 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
   const flags = new Uint16Array(N)
 
   const { masksLo, masksHi, coverage } = profile.structural
+  // The flat ramp (§6) maps mean luma onto glyph ink coverage, so its ceiling has to be
+  // the densest glyph this profile actually has — not the 65535 a full block would score.
+  // The default ascii charset tops out at '@' (16906/65535), so a fixed 65535 ceiling made
+  // every cell above ~26% luma target a coverage no glyph could reach and clamp to '@'.
+  let covMax = 0
+  for (let g = 0; g < profile.glyphCount; g++) if (coverage[g] > covMax) covMax = coverage[g]
+  if (covMax === 0) covMax = 1 // a profile of blanks: avoid a zero-width ramp
   const G = profile.glyphCount
   const blank = blankGlyphId(profile)
   const full = color === 'full'
@@ -134,7 +141,7 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
           fgArr![ci] = c
           bgArr![ci] = c
         } else {
-          const target = inkLight ? meanL * 257 : (255 - meanL) * 257
+          const target = rdiv((inkLight ? meanL : 255 - meanL) * covMax, 255)
           let bestId = 0
           let bestD = 0x7fffffff
           for (let g = 0; g < G; g++) {

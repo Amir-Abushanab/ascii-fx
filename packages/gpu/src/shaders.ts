@@ -24,6 +24,7 @@ struct Params {
   baseRow: u32,
   temporal: u32,       // 1 = prevReduced holds last frame's samples; identical cells skip (spec §21, exact)
   hysteresisMilli: u32, // chromatic-v1 §C5, in thousandths; 0 = off
+  covMax: u32,         // densest glyph's coverage (§6); the flat ramp's ceiling
 }
 
 fn luma8(r: u32, g: u32, b: u32) -> u32 {
@@ -288,10 +289,11 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k
     }
     workgroupBarrier();
     let meanL = mean >> 24u;
-    var covTarget = meanL * 257u;
+    var lumaIn = meanL;
     if (P.inkLight == 0u) {
-      covTarget = (255u - meanL) * 257u;
+      lumaIn = 255u - meanL;
     }
+    let covTarget = rdivU(lumaIn * P.covMax, 255u);
     for (var g = k; g < P.glyphCount; g += 64u) {
       let cov = coverage[g];
       let diff = max(cov, covTarget) - min(cov, covTarget);

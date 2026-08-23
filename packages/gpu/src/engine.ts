@@ -336,6 +336,9 @@ export class AsciiStream {
   private readonly compBuf: GPUBuffer
   private readonly fxBuf: GPUBuffer
   private readonly paramsScratch = new Uint32Array(20)
+  /** Densest glyph coverage, per profile — the §6 flat ramp's ceiling. Cached by
+   * fingerprint so a profile swap recomputes rather than carrying the old ceiling. */
+  private covMaxFor = { fingerprint: '', value: 1 }
   private readonly compScratch = new ArrayBuffer(96)
   private readonly fxScratch = new ArrayBuffer(48)
 
@@ -602,6 +605,16 @@ export class AsciiStream {
       color === 'glyph' && this.hysteresisPrimed
         ? Math.round(Math.min(0.999, Math.max(0, opts.hysteresis ?? 0)) * 1000)
         : 0
+    // §6: the flat ramp's ceiling is the densest glyph this profile has, not 65535.
+    // Must match the CPU matcher exactly or the conformance suite fails on flat cells.
+    if (this.covMaxFor.fingerprint !== profile.fingerprint) {
+      let m = 0
+      for (let g = 0; g < profile.glyphCount; g++) {
+        if (profile.structural.coverage[g] > m) m = profile.structural.coverage[g]
+      }
+      this.covMaxFor = { fingerprint: profile.fingerprint, value: m === 0 ? 1 : m }
+    }
+    p[17] = this.covMaxFor.value
     this.engine.device.queue.writeBuffer(this.paramsBuf, 0, p)
   }
 
