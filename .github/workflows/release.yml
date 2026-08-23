@@ -107,6 +107,14 @@ jobs:
           # `rev-list origin/main..origin/$branch` can miss the merge base and lie.
           ahead=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$branch" --jq '.ahead_by' 2>/dev/null || echo "")
 
+          # When the branch does not exist, `gh` prints the 404 body to stdout and still
+          # exits 0, so `ahead` comes back as JSON rather than a count — non-empty and not
+          # "0", which sailed straight past the guard below and tried to open a PR for a
+          # branch that was not there. Anything non-numeric means no branch.
+          case "$ahead" in
+            '' | *[!0-9]*) ahead="" ;;
+          esac
+
           # No version branch, or nothing on it: there was no PR to open, so the action's
           # outcome is the whole story — a failure was in the publish path and must stay red.
           if [ -z "$ahead" ] || [ "$ahead" = "0" ]; then
