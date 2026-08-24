@@ -25,12 +25,15 @@ if (!md.startsWith('---\n') || end === -1) {
   throw new Error(`${SKILL}: no YAML frontmatter block`)
 }
 const head = md.slice(0, end)
-const field = /^(\s*library_version:\s*)"?[^"\n]*"?$/m
+const field = /^(\s*library_version:\s*)['"]?[^'"\n]*['"]?$/m
 if (!field.test(head)) {
   throw new Error(`${SKILL}: no metadata.library_version field in the frontmatter`)
 }
 
-const next = head.replace(field, `$1"${version}"`) + md.slice(end)
+// Single quotes, not double: oxfmt normalises YAML scalars to single-quoted, and the
+// `version` script's commit goes through a formatting gate. Writing `"0.3.0"` here left
+// the release job rewriting the file into a state its own `format:check` rejected.
+const next = head.replace(field, `$1'${version}'`) + md.slice(end)
 if (next === md) {
   console.log(`skill version already ${version}`)
 } else {
