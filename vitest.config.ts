@@ -2,11 +2,17 @@ import { fileURLToPath } from 'node:url'
 import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
 
+// Every workspace package a test imports by name needs an entry here. Without one
+// the specifier resolves through that package's `exports` to dist/, which exists on
+// a machine with a warm build and not on a clean checkout — so the suite passes
+// locally and dies in CI with "Failed to resolve entry for package". Miss an entry
+// and the test file fails to load entirely, reported as a suite of 0 tests.
 const alias = {
   '@ascii-fx/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
   '@ascii-fx/compiler': fileURLToPath(new URL('./packages/compiler/src/index.ts', import.meta.url)),
   '@ascii-fx/gpu': fileURLToPath(new URL('./packages/gpu/src/index.ts', import.meta.url)),
   '@ascii-fx/three': fileURLToPath(new URL('./packages/three/src/index.ts', import.meta.url)),
+  '@ascii-fx/react': fileURLToPath(new URL('./packages/react/src/index.ts', import.meta.url)),
 }
 
 // The browser suite is split in two because a GitHub runner cannot honestly run all of
