@@ -8,7 +8,7 @@ import type {
   InteractionOptions,
   RenderSource,
 } from './types.js'
-import { isLiveSource, isRawImage, sourceDims } from './types.js'
+import { isLiveSource, isRawImage, outputCanBeTransparent, sourceDims } from './types.js'
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
@@ -263,12 +263,16 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   /** Render the frame into the native-cell-size composite canvas (cached per frame). */
   private ensureBase(frame: AsciiFrame): void {
     if (frame === this.lastComposited && this.compositeCanvas) return
-    const color = frame.colorMode
+    // Same predicate the WebGPU renderer keys its alphaMode on: when the caller asked for
+    // a see-through ground, the frame must not bake an opaque background plane, or the
+    // grid presents as a slab while the letterbox lets the page through. `full` keeps its
+    // per-cell sampled background either way — that plane is content, not a backdrop.
     const img = compositeFrame(
       frame,
-      color === 'foreground'
-        ? { background: null }
-        : { foreground: this.opts.foreground, background: this.opts.background },
+      {
+        foreground: this.opts.foreground,
+        background: outputCanBeTransparent(this.opts) ? null : this.opts.background,
+      },
       this.compositeBuf,
     )
     this.compositeBuf = img

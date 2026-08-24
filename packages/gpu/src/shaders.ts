@@ -480,7 +480,7 @@ struct CompParams {
   cellW: u32,
   cellH: u32,
   colorMode: u32,      // 0 mono, 1 foreground, 2 full
-  useBackdrop: u32,    // foreground/glyph modes: 1 = blend onto backdrop, 0 = premultiplied alpha out
+  useBackdrop: u32,    // 1 = paint the ground plane (mono bg, glyph backdrop), 0 = premultiplied alpha out
   backdrop: u32,       // packed rgb
   _pad0: u32,
   atlasW: f32,
@@ -624,7 +624,11 @@ fn fs(in: VSOut) -> @location(0) vec4<f32> {
   } else {
     let a = textureSampleLevel(atlas, samp, uv, C.lod).r;
     let fg = unpack3(cell.y);
-    if (C.colorMode == 1u && C.useBackdrop == 0u) {
+    // mono joins foreground here when the ground is dropped (transparent clearColor):
+    // its fg is uniform, so glyph coverage becomes the only alpha, same as the CPU
+    // compositeFrame with background: null. full never does — its background plane is
+    // per-cell sampled content, not a backdrop.
+    if ((C.colorMode == 0u || C.colorMode == 1u) && C.useBackdrop == 0u) {
       outColor = vec4<f32>(fg * a, a); // premultiplied
     } else {
       var bg = unpack3(cell.z);

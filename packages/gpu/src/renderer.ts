@@ -9,7 +9,7 @@ import type {
   InteractionOptions,
   RenderSource,
 } from './types.js'
-import { isLiveSource, isRawImage, sourceDims } from './types.js'
+import { isLiveSource, isRawImage, outputCanBeTransparent, sourceDims } from './types.js'
 
 /** Recovery cascade bound: consecutive attempts allowed inside one incident window. */
 const MAX_RECOVERY_ATTEMPTS = 3
@@ -188,27 +188,13 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   }
 
   /**
-   * Whether the frame this configuration produces can contain transparency at all.
-   *
-   * This used to be `color === 'foreground'`, which made two documented options contradict
-   * each other: `alpha: 'mask'` flags transparent cells in every colour mode and the
-   * compositor honours them, but an opaque canvas cannot present them — so `alpha: 'mask'`
-   * with `color: 'full'` produced cells that were transparent everywhere except on screen.
-   * A `clearColor` with alpha < 1 was ignored the same way.
-   *
-   * Keyed on the output rather than the colour mode, the rule is one line: the canvas is
-   * transparent when the frame is. Opaque stays the default for the common case, where it
-   * lets the compositor skip blending the canvas against the page.
+   * The rule is one line: the canvas is transparent when the frame is. Opaque stays the
+   * default for the common case, where it lets the compositor skip blending the canvas
+   * against the page. The predicate is shared with the compositors so the alphaMode and
+   * the frame's ground can never disagree — see `outputCanBeTransparent`.
    */
   private canBeTransparent(): boolean {
-    const color = this.opts.color ?? 'mono'
-    if (color === 'foreground') return true
-    // Deliberately *not* `alpha === 'mask'`: that is the default, so keying on it would
-    // make every canvas premultiplied and give up the opaque fast path for the common
-    // case. A source with no transparent pixels needs no blending. What matters is that
-    // the caller asked for a see-through ground, which is what clearColor's alpha says.
-    const clear = this.opts.clearColor
-    return clear !== undefined && clear[3] < 1
+    return outputCanBeTransparent(this.opts)
   }
 
   private configureContext(): void {

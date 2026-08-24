@@ -10,6 +10,7 @@ import {
   matchWgsl,
 } from './shaders.js'
 import type { FitMode, InteractionOptions, InteractionType } from './types.js'
+import { outputCanBeTransparent } from './types.js'
 
 const ATLAS_MIPS = 4
 /** Reduction block bound keeping u32 accumulators exact (ALGORITHM.md §0). */
@@ -730,9 +731,15 @@ export class AsciiStream {
     )
     // Chromatic cells are matched against a backdrop (§C3), so they must be
     // drawn over that same backdrop or the choice is un-optimised on screen.
-    // color: 'foreground' keeps its transparent-canvas meaning here too,
-    // mirroring the CPU backend's compositeFrame with background: null.
-    const glyphTransparent = color === 'glyph' && (this.opts.color ?? 'mono') === 'foreground'
+    // A see-through ground overrides that trade — color: 'foreground' or a
+    // transparent clearColor (outputCanBeTransparent, the predicate alphaMode
+    // keys on) drops the ground plane in mono and glyph modes, mirroring the
+    // CPU backend's compositeFrame with background: null.
+    const transparent = outputCanBeTransparent({
+      color: this.opts.color,
+      clearColor: view.clearColor,
+    })
+    const glyphTransparent = color === 'glyph' && transparent
     const bd = this.opts.background ?? [0, 0, 0]
     const clear =
       view.clearColor ??
@@ -754,7 +761,7 @@ export class AsciiStream {
     u(6, atlas.cellWidth)
     u(7, atlas.cellHeight)
     u(8, COLOR_MODE_CODE[color])
-    u(9, color === 'glyph' && !glyphTransparent ? 1 : 0)
+    u(9, (color === 'glyph' || color === 'mono') && !transparent ? 1 : 0)
     u(10, bd[0] | (bd[1] << 8) | (bd[2] << 16))
     u(11, 0)
     f(12, atlas.width)
