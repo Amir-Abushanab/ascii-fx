@@ -55,7 +55,8 @@ export interface AsciiRendererOptions {
    * plane selection and `foreground` are ignored — except that
    * `color: 'foreground'` keeps its transparent-canvas meaning: glyphs are
    * emitted with their own alpha for the page to composite, instead of being
-   * drawn over `background`. The approximate CPU matchers are not offered here.
+   * drawn over `background`. A `clearColor` with alpha < 1 asks for the same.
+   * The approximate CPU matchers are not offered here.
    */
   matcher?: 'structural' | 'chromatic'
   alpha?: AlphaMode
@@ -66,7 +67,15 @@ export interface AsciiRendererOptions {
   hysteresis?: number
   /** How the ASCII grid maps onto the canvas. Default 'contain'. */
   fit?: FitMode
-  /** Letterbox/clear color (rgba 0..1). Default: transparent for 'foreground', the backdrop for chromatic, opaque black otherwise. */
+  /**
+   * Letterbox/clear color (rgba 0..1). Default: transparent for 'foreground', the
+   * backdrop for chromatic, opaque black otherwise. Alpha < 1 asks for a see-through
+   * ground: it configures the canvas for transparency and drops the background plane
+   * baked into the grid for mono and chromatic frames, so the page shows through glyph
+   * gaps and blank cells — mono stays a fixed foreground over that ground. 'full' keeps
+   * its per-cell sampled background either way (that plane is content, not a backdrop);
+   * there, transparency comes from `alpha: 'mask'` cells and the letterbox alone.
+   */
   clearColor?: readonly [number, number, number, number]
   interaction?: InteractionOptions | null
   /** Exact temporal reuse for video/live sources (spec §21). WebGPU backend only. */
@@ -103,6 +112,32 @@ export interface AsciiRendererOptions {
 export type AsciiRendererRuntimeOptions = Partial<
   Omit<AsciiRendererOptions, 'canvas' | 'profile' | 'backend' | 'onDeviceLost' | 'onError'>
 >
+
+/**
+ * Whether the frame this configuration produces can contain transparency at all.
+ *
+ * `color: 'foreground'` has always meant glyphs over a see-through ground, and a
+ * `clearColor` with alpha < 1 is the caller asking for one in any colour mode. This used
+ * to be `color === 'foreground'` alone, which made two documented options contradict each
+ * other: `alpha: 'mask'` flags transparent cells in every colour mode and the compositor
+ * honours them, but an opaque canvas cannot present them — so `alpha: 'mask'` with
+ * `color: 'full'` produced cells that were transparent everywhere except on screen.
+ * Deliberately *not* `alpha === 'mask'` either: that is the default, so keying on it would
+ * make every WebGPU canvas premultiplied and give up the opaque fast path for the common
+ * case — a source with no transparent pixels needs no blending against the page.
+ *
+ * Two decisions key on this predicate and must agree: the WebGPU canvas's alphaMode, and
+ * whether the base composite bakes an opaque background plane into the frame (mono's
+ * `background`, chromatic's backdrop). 0.3.0 split them — the canvas was declared
+ * transparent while every in-grid cell stayed opaque, so a mono overlay still presented
+ * as a slab and only the letterbox let the page through.
+ */
+export const outputCanBeTransparent = (
+  opts: Pick<AsciiRendererOptions, 'color' | 'clearColor'>,
+): boolean => {
+  if ((opts.color ?? 'mono') === 'foreground') return true
+  return opts.clearColor !== undefined && opts.clearColor[3] < 1
+}
 
 export interface AsciiRenderer {
   readonly backend: 'webgpu' | 'cpu'

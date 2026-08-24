@@ -131,6 +131,7 @@ hands the matcher 256 distinct shapes.
 | `columns`            | Characters per row; rows follow from the source aspect and the cell aspect.                                                                                                |
 | `color`              | `mono` (one ink colour) · `foreground` (fitted colour per glyph) · `full` (fitted glyph **and** background per cell — closest to the original).                            |
 | `alpha`              | `mask` (transparent cells stay transparent) or `ignore`.                                                                                                                   |
+| `clearColor`         | Letterbox/ground colour (rgba 0..1). Alpha < 1 turns the render into an overlay: the page shows through the letterbox and — in `mono` and chromatic — through glyph gaps.  |
 | `flatThreshold`      | Cells with less contrast than this render as one tone instead of a shape.                                                                                                  |
 | `backend`            | `auto` (default) takes WebGPU and falls back to the exact CPU matcher. Chosen once, at construction — see the device-loss gotcha for what happens when the GPU dies later. |
 | `temporal`           | Skip re-matching cells whose pixels did not change. Exact, great for video, WebGPU only.                                                                                   |
