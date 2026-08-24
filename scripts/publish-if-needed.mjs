@@ -20,7 +20,8 @@
  *
  * Also self-heals: an already-on-npm version whose git tag never made it to origin (a past run
  * that published, then died before tags were pushed) gets its tag and `New tag:` line restored,
- * so no release stays permanently tagless. See restoreMissingTags.
+ * so no release stays tagless by accident. Versions listed in NEVER_RESTORE are exempt — see
+ * restoreMissingTags.
  *
  * Run via `pnpm release`, which builds the packages first. Pass `--dry-run` to preview.
  */
@@ -83,6 +84,16 @@ function ensureLocalTag(tag) {
 }
 
 /**
+ * Versions deliberately left untagged. 0.2.0 was published from a laptop before this pipeline
+ * worked; the commit it was cut from is not recoverable from a CI checkout, so restoring it would
+ * pin seven tags and seven GitHub Releases to whatever commit the run happens to check out. An
+ * inaccurate tag is worse than no tag, so it stays absent by choice rather than by accident.
+ * Every package shares one version (the `fixed` group in .changeset/config.json), so one entry
+ * covers all seven.
+ */
+const NEVER_RESTORE = new Set(['0.2.0'])
+
+/**
  * A version can be live on npm yet have no git tag or GitHub Release: a previous run published,
  * then died before changesets/action pushed the tags (0.3.0 lost its tags to the changesets↔npm 11
  * crash, 0.4.1 to this script not creating them), or the first publish ran from a laptop. Such a
@@ -113,7 +124,7 @@ function restoreMissingTags(onNpm) {
   }
   for (const p of onNpm) {
     const tag = `${p.name}@${p.version}`
-    if (remote.has(tag)) continue
+    if (remote.has(tag) || NEVER_RESTORE.has(p.version)) continue
     if (dryRun) {
       console.log(`(dry run) would restore missing tag ${tag}`)
       continue
