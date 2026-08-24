@@ -1,6 +1,6 @@
 {
   "name": "@ascii-fx/core",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "High-fidelity structural ASCII rendering — core types, exact CPU matcher, profile/frame codecs.",
   "keywords": [
     "ascii",

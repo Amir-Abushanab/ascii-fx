@@ -1,5 +1,14 @@
 # @ascii-fx/react-three
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [[`9299da6`](https://github.com/Amir-Abushanab/ascii-fx/commit/9299da6259d8f0b20ad56360212aba4cd05b7722)]:
+  - @ascii-fx/gpu@0.3.1
+  - @ascii-fx/three@0.3.1
+  - @ascii-fx/core@0.3.1
+
 ## 0.3.0
 
 ### Patch Changes
