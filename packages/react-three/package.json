@@ -1,6 +1,6 @@
 {
   "name": "@ascii-fx/react-three",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "React Three Fiber bindings for ASCII FX: <AsciiEffect>, <AsciiGlyphs>, useAsciiEffect (WebGPURenderer only).",
   "keywords": [
     "ascii",
