@@ -1,6 +1,6 @@
 {
   "name": "@ascii-fx/gpu",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "WebGPU renderer for ASCII FX: exact structural-v1 compute matching and one-draw atlas compositing, with a CPU fallback.",
   "keywords": [
     "ascii",
