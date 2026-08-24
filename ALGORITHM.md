@@ -117,7 +117,8 @@ Per color mode:
 full:        glyph = blank glyph; fg = bg = (meanR, meanG, meanB); flag FLAT
              (with both colors free every glyph reconstructs identically — pin the stable choice)
 
-mono:        target = inkLight ? meanLuma · 257 : (255 − meanLuma) · 257      (inkLight per §8)
+mono:        target = rdiv((inkLight ? meanLuma : 255 − meanLuma) · covMax, 255)  (inkLight per §8)
+             covMax = max coverage16 over the profile's glyphs (0 ⇒ 1)
              glyph = argmin |coverage16(g) − target|, ties → lowest id; flag FLAT
 
 foreground:  glyph as mono; fg = (meanR, meanG, meanB); flag FLAT
@@ -125,9 +126,28 @@ foreground:  glyph as mono; fg = (meanR, meanG, meanB); flag FLAT
               which would degenerate to the max-coverage glyph in flat regions)
 ```
 
-(`x · 257` maps 0..255 onto 0..65535 exactly.)
+(`covMax` is the densest glyph the profile actually has, so the ramp spans the range the charset can express.)
 
-The target is deliberately **not** normalized into the charset's coverage range: the structural rerank saturates at the densest glyph for bright cells in exactly the same way, so an unnormalized flat target keeps flat and structural neighbors consistent. Perceived tonal range in mono is bounded by the charset's maximum coverage (~18% for ASCII text glyphs) — use `ascii-blocks` or `full` color for wide-range sources.
+The target is normalized into the charset's own coverage range. It previously was not — it
+mapped luma onto the full 0..65535 as `luma · 257` — on the rationale that the structural
+rerank saturates at the densest glyph for bright cells in the same way, so leaving the flat
+target unnormalized kept flat and structural neighbors consistent.
+
+That rationale does not survive measurement. Structural cells do **not** saturate at the
+densest glyph: their rerank minimizes reconstruction error against fixed colors, so a
+half-bright cell lands on a half-inked glyph. Measured on Geist Mono / `ascii`, a
+high-contrast cell plateaus at `w` (coverage 11656) while the old flat target reached `@`
+(16906) for every cell above ~26% luma. The two paths were never consistent; the
+unnormalized target simply sat _above_ the structural plateau instead of below it.
+
+What it cost was the whole upper range: with `@` at 16906/65535, a fixed 65535 ceiling put
+every flat cell brighter than ~26% luma past what any glyph could reach, collapsing roughly
+two thirds of the luma range onto one glyph. A linear gradient rendered as six glyphs of
+ramp followed by eighteen cells of solid `@`.
+
+Normalizing makes flat regions span the range the charset can express. It does not make
+flat and structural agree — nothing can, since the structural plateau depends on the cell's
+shape and not only on its mean — but it makes each correct on its own terms.
 
 ## 7. Binary source mask
 
