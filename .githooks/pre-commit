@@ -1,3 +1,10 @@
 #!/bin/sh
 
+# Local commits only. `pnpm install` runs `prepare`, which points git at this
+# directory on CI too — so the changesets action's version commit was firing the
+# whole suite inside the release job and failing it on unrelated grounds. CI
+# already runs `pnpm check` as its own job, and release.yml gates on `pnpm test`
+# before it ever commits.
+[ -n "$CI" ] && exit 0
+
 exec pnpm check
