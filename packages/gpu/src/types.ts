@@ -78,6 +78,33 @@ export interface AsciiRendererOptions {
    */
   clearColor?: readonly [number, number, number, number]
   interaction?: InteractionOptions | null
+  /**
+   * Matcher workers for the CPU backend (spec §11 tier 2). Default: one per
+   * core, less one for the main thread's extract and composite, capped at 8.
+   * `false` keeps matching on the main thread; a number pins the pool size.
+   *
+   * Workers change *when* a live source's cells arrive, never what they are:
+   * bands are matched by the same `matchBand` the main thread runs and the
+   * assembled result is byte-identical. The cost is one frame of latency on
+   * live sources, since a frame is presented while the next one matches. The
+   * first frame, static sources, and `captureFrame()` are matched inline and
+   * carry no latency at all.
+   */
+  workers?: number | false
+
+  /**
+   * How the CPU backend paints (spec §12; internal, and offered only as an
+   * escape hatch). Default 'auto': a WebGL2 fullscreen composite where WebGL2
+   * exists, Canvas2D otherwise. 'canvas2d' forces the Canvas2D path.
+   *
+   * These are not pixel-identical. The Canvas2D path builds the grid at native
+   * atlas cell size and scales it down; the WebGL2 one samples a mipped atlas,
+   * which is what the WebGPU backend does — so 'auto' is also the closer match
+   * to the GPU output, and it runs the interactions as the real shader rather
+   * than the Canvas2D approximation of them at cell granularity.
+   */
+  compositor?: 'auto' | 'canvas2d'
+
   /** Exact temporal reuse for video/live sources (spec §21). WebGPU backend only. */
   temporal?: boolean
   /**
@@ -110,7 +137,10 @@ export interface AsciiRendererOptions {
 }
 
 export type AsciiRendererRuntimeOptions = Partial<
-  Omit<AsciiRendererOptions, 'canvas' | 'profile' | 'backend' | 'onDeviceLost' | 'onError'>
+  Omit<
+    AsciiRendererOptions,
+    'canvas' | 'profile' | 'backend' | 'workers' | 'compositor' | 'onDeviceLost' | 'onError'
+  >
 >
 
 /**
@@ -139,8 +169,21 @@ export const outputCanBeTransparent = (
   return opts.clearColor !== undefined && opts.clearColor[3] < 1
 }
 
+/**
+ * What the CPU backend actually resolved to. `backend` alone says 'cpu' for
+ * three quite different pipelines, and which one you got depends on runtime
+ * capability rather than on anything the caller asked for — so it has to be
+ * readable, or a machine silently on the slow path looks like a fast one.
+ */
+export interface AsciiPipeline {
+  matcher: 'workers' | 'main-thread'
+  compositor: 'webgl2' | 'canvas2d'
+}
+
 export interface AsciiRenderer {
   readonly backend: 'webgpu' | 'cpu'
+  /** CPU backend only; absent on WebGPU, where the whole pipeline is the GPU. */
+  readonly pipeline?: AsciiPipeline
   readonly profile: AsciiProfile
   /** Composite-stage pointer (spec §9). Never reruns matching. */
   readonly pointer: AsciiPointer

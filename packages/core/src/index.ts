@@ -18,7 +18,8 @@ export type {
 export { FLAG_FLAT, FLAG_TRANSPARENT } from './types.js'
 
 export { AsciiFrame, type AsciiFrameInit } from './frame.js'
-export { ALGORITHM_VERSION, blankGlyphId, matchFrame } from './match.js'
+export { ALGORITHM_VERSION, blankGlyphId, matchBand, matchFrame } from './match.js'
+export type { StructuralCells } from './match.js'
 export { CHROMATIC_VERSION, matchFrameChromatic } from './chromatic.js'
 export { deriveGrid, type Grid } from './grid.js'
 export {
@@ -29,7 +30,8 @@ export {
   shape6BucketCenter,
 } from './shape6.js'
 export { renderAscii, type AsciiSource } from './renderAscii.js'
-export { reduceSource } from './reduce.js'
+export { bandSourceRows, reduceBand, reduceSource } from './reduce.js'
+export type { SourceStrip } from './reduce.js'
 export { subsetProfile } from './subsetProfile.js'
 export { compositeFrame, type CompositeOptions } from './composite.js'
 

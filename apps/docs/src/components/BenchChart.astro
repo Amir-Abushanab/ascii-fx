@@ -28,14 +28,20 @@ const ENTRIES: Entry[] = [
   { id: 'three', results: 'three.js AsciiEffect', logo: 'three', name: 'three.js AsciiEffect', detail: 'brightness · DOM', shape: false, color: '#049ef4' },
   { id: 'aa-mono', results: 'aalib.js mono', logo: 'aa', name: 'aalib.js 2.0 · mono', detail: 'brightness · canvas', shape: false, color: '#8a8a99' },
   { id: 'aa-color', results: 'aalib.js colored', logo: 'aa', name: 'aalib.js 2.0 · colored', detail: 'brightness + color · canvas', shape: false, color: '#8a8a99' },
-  { id: 'fx-cpu', results: 'ascii-fx cpu', logo: 'fx', name: 'ascii-fx · CPU fallback', detail: 'same exact output, no GPU needed', shape: true, color: '#4d7d59', us: true },
+  { id: 'fx-cpu', results: 'ascii-fx cpu (workers+webgl)', logo: 'fx', name: 'ascii-fx · no WebGPU', detail: 'exact structural · workers + WebGL2', shape: true, color: '#4d7d59', us: true },
   { id: 'chafa', results: 'chafa-wasm', logo: 'ch', name: 'chafa-wasm 0.3', detail: 'shape-aware blocks · wasm', shape: true, color: '#654ff0' },
 ]
 
 const COMPACT_IDS = ['fx-gpu', 'tm', 'three', 'aa-mono', 'chafa']
 
+// Take only the numbers off the measured row: it also carries a `name` (the
+// harness's row key), and spreading the whole thing silently replaced every
+// label here with that key.
 const rows = ENTRIES.filter((e) => !compact || COMPACT_IDS.includes(e.id))
-  .map((e) => ({ ...e, ...lib(e.results) }))
+  .map((e) => {
+    const { fps, p50 } = lib(e.results)
+    return { ...e, fps, p50 }
+  })
   .toSorted((a, b) => b.fps - a.fps)
 const maxFps = Math.max(...rows.map((r) => r.fps))
 ---
@@ -75,7 +81,7 @@ const maxFps = Math.max(...rows.map((r) => r.fps))
   }
   .bench-row {
     display: grid;
-    grid-template-columns: 34px minmax(160px, 220px) 1fr 116px;
+    grid-template-columns: 34px minmax(160px, 300px) 1fr 116px;
     gap: 1.1rem;
     align-items: center;
     background: var(--panel);
@@ -110,13 +116,15 @@ const maxFps = Math.max(...rows.map((r) => r.fps))
   .bench-name b {
     display: block;
     font-size: 0.9rem;
-    white-space: nowrap;
+    /* Wrap rather than nowrap: this column is capped, and a label that cannot
+       wrap overflows it and paints across the bar in the next column. */
     margin-bottom: 0.15rem;
   }
   .bench-name span {
     color: var(--muted);
     font-size: 0.74rem;
-    white-space: nowrap;
+    /* Wraps rather than nowrap, for the same reason as the label above: this
+       column is capped, and text that cannot wrap runs into the bar instead. */
   }
   .bench-name .chip {
     display: inline-block;

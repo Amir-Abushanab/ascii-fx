@@ -333,7 +333,10 @@ function syncPanel(): void {
   const mode = els.color.value
   els.fgLab.hidden = mode !== 'mono'
   els.bgLab.hidden = mode === 'full'
-  els.colWarn.hidden = !(renderer?.backend === 'cpu' && Number(els.columns.value) > 120)
+  // The matcher is the ceiling here, not the paint, so the threshold follows
+  // the matcher: a worker pool sustains far more columns than one thread.
+  const ceiling = renderer?.pipeline?.matcher === 'workers' ? 220 : 120
+  els.colWarn.hidden = !(renderer?.backend === 'cpu' && Number(els.columns.value) > ceiling)
 }
 
 function syncCanvasSize(): void {
@@ -364,7 +367,13 @@ function updateStats(): void {
   const name = emojiOn()
     ? `chromatic-v1${selectionSize() === null ? ' · curated' : ''}`
     : (renderer.profile.metadata.fontFamily ?? renderer.profile.id)
-  const children: (Node | string)[] = [document.createTextNode(`${renderer.backend} `)]
+  // `backend` says 'cpu' for three different pipelines; the renderer reports
+  // which one it actually landed on, so show that rather than imply one.
+  const pipeline = renderer.pipeline
+  const running = pipeline
+    ? `cpu · ${pipeline.matcher === 'workers' ? 'workers' : '1 thread'} + ${pipeline.compositor}`
+    : renderer.backend
+  const children: (Node | string)[] = [document.createTextNode(`${running} `)]
   if (backendNote) {
     const warn = document.createElement('span')
     warn.className = 'warn'
@@ -440,6 +449,17 @@ let lastDeviceLossAt = 0
  * 'auto' would keep choosing WebGPU forever; this pins the rebuild to CPU.
  */
 let forcedBackend: BackendChoice | null = null
+/**
+ * The dropdown names a pipeline, not just a backend: without WebGPU the work
+ * splits into a matcher and a compositor that degrade independently, and 'cpu'
+ * alone no longer says which of those you got.
+ */
+function selectedBackend(): { backend: BackendChoice; compositor: 'auto' | 'canvas2d' } {
+  const value = els.backend.value
+  if (value === 'cpu-canvas2d') return { backend: 'cpu', compositor: 'canvas2d' }
+  return { backend: value as BackendChoice, compositor: 'auto' }
+}
+
 /** Why the running backend differs from the dropdown (webgpu picked, unavailable); shown in the status line. */
 let backendNote: string | null = null
 function handleGpuError(error: GPUError): void {
@@ -490,7 +510,8 @@ async function rebuild(): Promise<void> {
     stats.textContent = `font failed: ${err instanceof Error ? err.message : String(err)}`
     return
   }
-  const backend = forcedBackend ?? (els.backend.value as BackendChoice)
+  const choice = selectedBackend()
+  const backend = forcedBackend ?? choice.backend
   // A forced rebuild carries its note (why we are on CPU); a user-initiated
   // one starts clean.
   if (!forcedBackend) backendNote = null
@@ -499,6 +520,7 @@ async function rebuild(): Promise<void> {
       canvas: out,
       profile,
       backend,
+      compositor: choice.compositor,
       onDeviceLost: handleDeviceLost,
       onError: handleGpuError,
       ...matchOptions(),
@@ -515,6 +537,7 @@ async function rebuild(): Promise<void> {
           canvas: out,
           profile,
           backend: 'cpu',
+          compositor: choice.compositor,
           ...matchOptions(),
         })
       } catch (cpuErr) {
@@ -772,7 +795,11 @@ function getExportState(): ExportState {
   return {
     font,
     characters: charSubset() ?? undefined,
-    backend: els.backend.value === 'auto' ? undefined : (els.backend.value as 'webgpu' | 'cpu'),
+    backend: (() => {
+      const { backend } = selectedBackend()
+      return backend === 'auto' ? undefined : backend
+    })(),
+    compositor: selectedBackend().compositor === 'canvas2d' ? 'canvas2d' : undefined,
     options,
     interaction,
   }

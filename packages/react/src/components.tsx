@@ -23,6 +23,16 @@ export interface AsciiCommonProps {
   /** Omit for a runtime 'monospace' profile — precompiled profiles render faster and deterministically. */
   profile?: ProfileSource
   backend?: BackendChoice
+  /**
+   * CPU-backend matcher workers. Default: one per core less one, capped at 8;
+   * `false` matches on the main thread. Set at creation, like `backend`.
+   */
+  workers?: number | false
+  /**
+   * How the CPU backend paints: 'auto' (WebGL2 where available) or 'canvas2d'.
+   * Set at creation, like `backend`.
+   */
+  compositor?: 'auto' | 'canvas2d'
   columns?: number
   rows?: number
   color?: ColorMode

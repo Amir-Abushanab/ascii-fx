@@ -2,7 +2,7 @@
 name: ascii-fx
 description: >
   Render images, video, canvases or a three.js scene as ASCII art — or as colour emoji — in the
-  browser, with WebGPU compute matching and a bit-identical CPU fallback. Load this when a user
+  browser, with WebGPU compute matching and a bit-identical worker + WebGL2 fallback. Load this when a user
   wants an @ascii-fx package — @ascii-fx/react (<AsciiImage> <AsciiVideo> <AsciiCanvas>),
   @ascii-fx/gpu (createAsciiRenderer), @ascii-fx/core (matchFrame), @ascii-fx/three (AsciiPass),
   @ascii-fx/react-three (<AsciiEffect>) or @ascii-fx/vite (build-time profiles) — or asks for an
@@ -25,8 +25,9 @@ sources:
 
 Reconstructs an image out of glyphs by **shape**, not brightness. Each cell's 8×8 sample block is
 matched against every glyph's real rasterised mask, then reranked on exact reconstruction error with
-fitted colours. The whole pipeline runs as WebGPU compute with a bit-identical CPU reference
-underneath — same output, different speed.
+fitted colours. The whole pipeline runs as WebGPU compute, and without a GPU it runs as a
+bit-identical CPU matcher on worker threads painted by a WebGL2 fullscreen draw — same output, and
+on a 2023 laptop the same frame time.
 
 ## When to use
 
@@ -134,6 +135,8 @@ hands the matcher 256 distinct shapes.
 | `clearColor`         | Letterbox/ground colour (rgba 0..1). Alpha < 1 turns the render into an overlay: the page shows through the letterbox and — in `mono` and chromatic — through glyph gaps.  |
 | `flatThreshold`      | Cells with less contrast than this render as one tone instead of a shape.                                                                                                  |
 | `backend`            | `auto` (default) takes WebGPU and falls back to the exact CPU matcher. Chosen once, at construction — see the device-loss gotcha for what happens when the GPU dies later. |
+| `workers`            | CPU-backend matcher threads; default one per core less one, `false` pins it to the main thread. Costs one frame of latency on live sources, never a different cell.        |
+| `compositor`         | How the CPU backend paints: `auto` (WebGL2 where available) or `canvas2d`. Escape hatch only.                                                                              |
 | `temporal`           | Skip re-matching cells whose pixels did not change. Exact, great for video, WebGPU only.                                                                                   |
 | `adaptiveResolution` | Lower `columns` under frame pressure and recover. **WebGPU only** — so two backends can land on different grids.                                                           |
 | `interaction`        | Pointer/time effects composited on top (`reveal`, `displace`, `wave`, `push`…). Never re-runs matching.                                                                    |
@@ -192,7 +195,13 @@ as scene geometry instead of as a post-pass.
 ## Gotchas
 
 - **A canvas is bound to its first context type.** Switching backend needs a fresh `<canvas>`
-  element, not just a new renderer.
+  element, not just a new renderer. Note the CPU backend takes a **`webgl2`** context by default, so
+  `getContext('2d')` on its canvas returns null — read it back with `drawImage` onto your own 2D
+  canvas, or pass `compositor: 'canvas2d'`.
+- **`backend` says `cpu` for several different pipelines.** The matcher (workers vs main thread) and
+  the compositor (WebGL2 vs Canvas2D) degrade independently, and a machine on the slow path looks
+  like a fast one. `renderer.pipeline` reports which it actually landed on; `getAsciiSupport()`
+  reports what the machine can do before you build one.
 - **WebGPU fails silently.** Buffers, textures, bind groups and dispatches validate without throwing,
   so a browser with different limits can accept setup and render nothing. `auto` detects this at
   construction and falls back to the CPU matcher; `onError` reports what went wrong later.

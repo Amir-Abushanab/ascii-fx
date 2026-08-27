@@ -9,9 +9,14 @@ import { STANDARD_SIX, makeProfile, randomImage } from '../../core/test/syntheti
 const frame2 = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
 
+/** Works whichever context the renderer took: 2d, or webgl2 via the compositor. */
 const pixels = (canvas: HTMLCanvasElement): Uint8ClampedArray => {
-  const ctx = canvas.getContext('2d')!
-  return ctx.getImageData(0, 0, canvas.width, canvas.height).data
+  const out = document.createElement('canvas')
+  out.width = canvas.width
+  out.height = canvas.height
+  const ctx = out.getContext('2d')!
+  ctx.drawImage(canvas, 0, 0)
+  return ctx.getImageData(0, 0, out.width, out.height).data
 }
 
 const diffCount = (a: Uint8ClampedArray, b: Uint8ClampedArray): number => {

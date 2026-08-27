@@ -12,6 +12,14 @@ import { matchFrameChromatic } from './chromatic.js'
 export const ALGORITHM_VERSION = 'structural-v1'
 export { blankGlyphId }
 
+/** The per-cell outputs of a structural match, without the profile a frame carries. */
+export interface StructuralCells {
+  glyphIds: Uint16Array
+  foreground?: Uint32Array
+  background?: Uint32Array
+  flags: Uint16Array
+}
+
 /**
  * structural-v1 reference matcher (ALGORITHM.md §§3–11). Deterministic and
  * all-integer; this implementation defines correctness for every backend.
@@ -30,6 +38,45 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
   if (matcher === 'shape6') return matchFrameShape6(source, options)
   if (matcher === 'ramp') return matchFrameRamp(source, options)
   if (matcher === 'chromatic') return matchFrameChromatic(source, options)
+
+  const { columns, rows } = deriveGrid(
+    source.width,
+    source.height,
+    profile,
+    options.columns,
+    options.rows,
+  )
+  const reduced = reduceSource(source, columns, rows, (options.alpha ?? 'mask') === 'ignore')
+  const cells = matchBand(reduced, columns, rows, options)
+
+  return new AsciiFrame({
+    columns,
+    rows,
+    colorMode: options.color ?? 'mono',
+    glyphIds: cells.glyphIds,
+    foreground: cells.foreground,
+    background: cells.background,
+    flags: cells.flags,
+    profile,
+  })
+}
+
+/**
+ * structural-v1 over a band of `bandRows` cell rows, given that band's reduced
+ * samples. Both the input and the outputs are band-local, and no step reads
+ * outside the band — every cell in ALGORITHM.md §§5–10 is independent — so
+ * concatenating bands reproduces `matchFrame` byte for byte. This is the one
+ * implementation of the exact matcher; `matchFrame` is a whole-frame band.
+ */
+export function matchBand(
+  reduced: Uint8Array,
+  columns: number,
+  bandRows: number,
+  options: MatchOptions,
+): StructuralCells {
+  const profile = options.profile
+  if (!profile)
+    throw new Error('matchBand requires options.profile (build one with @ascii-fx/compiler).')
   const color = options.color ?? 'mono'
   const alphaMode = options.alpha ?? 'mask'
   const flatT = options.flatThreshold ?? 15
@@ -43,17 +90,9 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
       ? luma8(fgOpt[0], fgOpt[1], fgOpt[2]) >= luma8(bgOpt[0], bgOpt[1], bgOpt[2])
       : luma8(bgOpt[0], bgOpt[1], bgOpt[2]) < 128
 
-  const { columns, rows } = deriveGrid(
-    source.width,
-    source.height,
-    profile,
-    options.columns,
-    options.rows,
-  )
   const SW = columns * 8
-  const reduced = reduceSource(source, columns, rows, alphaMode === 'ignore')
 
-  const N = columns * rows
+  const N = columns * bandRows
   const glyphIds = new Uint16Array(N)
   const needFg = color !== 'mono'
   const needBg = color === 'full'
@@ -80,7 +119,7 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
   const candId = new Int32Array(8)
   const candScore = new Int32Array(8)
 
-  for (let cy = 0; cy < rows; cy++) {
+  for (let cy = 0; cy < bandRows; cy++) {
     for (let cx = 0; cx < columns; cx++) {
       const ci = cy * columns + cx
 
@@ -309,14 +348,5 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
     }
   }
 
-  return new AsciiFrame({
-    columns,
-    rows,
-    colorMode: color,
-    glyphIds,
-    foreground: fgArr,
-    background: bgArr,
-    flags,
-    profile,
-  })
+  return { glyphIds, foreground: fgArr, background: bgArr, flags }
 }

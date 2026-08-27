@@ -1,6 +1,11 @@
-import type { AsciiFrame, AsciiProfile, MatchOptions, RawImage } from '@ascii-fx/core'
-import { compositeFrame, deriveGrid, matchFrame } from '@ascii-fx/core'
+import type { AsciiProfile, ColorMode, MatchOptions, RawImage } from '@ascii-fx/core'
+import { AsciiFrame, compositeFrame, deriveGrid, matchFrame } from '@ascii-fx/core'
+import type { BandOptions } from './matchProtocol.js'
+import { MatchPool } from './matchPool.js'
+import type { GlFxParams, GlViewParams } from './glCompositor.js'
+import { GL_ATLAS_MIPS, GL_FX_KIND, GlCompositor } from './glCompositor.js'
 import type {
+  AsciiPipeline,
   AsciiPointer,
   AsciiRenderer,
   AsciiRendererOptions,
@@ -35,7 +40,14 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   readonly pointer: AsciiPointer
 
   private readonly canvas: HTMLCanvasElement | OffscreenCanvas
-  private readonly ctx: Ctx2D
+  /** Absent when the WebGL2 compositor took the canvas instead. */
+  private readonly ctx?: Ctx2D
+  /**
+   * Spec §12's preferred fallback: the glyph field goes to a fullscreen WebGL2
+   * draw rather than a full-resolution RGBA buffer built on the CPU. Absent
+   * where WebGL2 is unavailable or the caller asked for Canvas2D.
+   */
+  private readonly glc?: GlCompositor
   private opts: AsciiRendererRuntimeOptions
   private source?: RenderSource
   private sourceLive = false
@@ -68,6 +80,19 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private readonly t0 = performance.now()
   private pyr: Array<HTMLCanvasElement | OffscreenCanvas> = []
   private pyrValid = 0
+  /**
+   * Matcher workers (spec §11 tier 2). Absent where Worker is, and dropped on
+   * the first failure — matching then runs on the main thread, slower and
+   * never different.
+   */
+  private pool?: MatchPool
+  /** Requested pool size; `false` pins matching to the main thread. */
+  private readonly workersOption: number | false | undefined
+  /** Set once a pool has been attempted, so a failed one is not respawned every frame. */
+  private poolTried = false
+  /** The grid and colour mode the in-flight band job was submitted with. */
+  private pending?: { columns: number; rows: number; colorMode: ColorMode }
+  private adoptScheduled = false
 
   constructor(options: AsciiRendererOptions) {
     this.canvas = options.canvas
@@ -75,16 +100,21 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     const { canvas: _c, profile: _p, backend: _b, interaction, ...rest } = options
     this.opts = rest
     this.interaction = interaction ?? null
-    const ctx = this.canvas.getContext('2d') as Ctx2D | null
-    if (!ctx) {
-      throw new Error(
-        'CPU backend could not acquire a 2d context on the target canvas. A canvas is permanently bound to its ' +
-          'first context type — if this canvas previously ran the WebGPU backend, create a fresh <canvas> element ' +
-          'to switch backends.',
-      )
+    if (options.compositor !== 'canvas2d') {
+      this.glc = GlCompositor.tryCreate(this.canvas, this.profile)
     }
-    this.ctx = ctx
-    ctx.imageSmoothingQuality = 'high'
+    if (!this.glc) {
+      const ctx = this.canvas.getContext('2d') as Ctx2D | null
+      if (!ctx) {
+        throw new Error(
+          'CPU backend could not acquire a 2d context on the target canvas. A canvas is permanently bound to its ' +
+            'first context type — if this canvas previously ran the WebGPU backend, create a fresh <canvas> element ' +
+            'to switch backends.',
+        )
+      }
+      this.ctx = ctx
+      ctx.imageSmoothingQuality = 'high'
+    }
     this.pointer = {
       set: (x: number, y: number) => {
         this.pointerX = x
@@ -92,6 +122,45 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         this.scheduleFxPresent()
       },
       setVelocity: () => {},
+    }
+    this.workersOption = options.workers
+  }
+
+  /**
+   * Spawn the pool on first structural use rather than at construction: a
+   * chromatic-only renderer never matches on workers, and a profile clone per
+   * worker is not free.
+   */
+  private ensurePool(): MatchPool | undefined {
+    if (this.poolTried) return this.pool
+    this.poolTried = true
+    if (this.workersOption === false) return undefined
+    this.pool = MatchPool.create(
+      this.profile,
+      typeof this.workersOption === 'number' ? this.workersOption : undefined,
+      (err) => {
+        this.pool = undefined
+        this.pending = undefined
+        // Matching is still exact on the main thread, but it is now the main
+        // thread's ~25 ms/frame. Say so rather than let the page just be slow.
+        console.error(
+          '[ascii-fx] matcher workers unavailable, matching on the main thread:',
+          err.message,
+        )
+      },
+    )
+    return this.pool
+  }
+
+  /**
+   * Read rather than stored: the pool is spun up on first structural use and
+   * dropped if it fails, so this is a live answer, not what was intended at
+   * construction.
+   */
+  get pipeline(): AsciiPipeline {
+    return {
+      matcher: this.pool?.ready ? 'workers' : 'main-thread',
+      compositor: this.glc && !this.glc.unavailable ? 'webgl2' : 'canvas2d',
     }
   }
 
@@ -109,6 +178,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.matchDirty = true
     this.hysteresisPrimed = false
     this.srcFxFor = undefined
+    this.pool?.abandon()
+    this.pending = undefined
     if (restart) this.start()
   }
 
@@ -130,7 +201,13 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       previous.background !== this.opts.background ||
       previous.flatThreshold !== this.opts.flatThreshold ||
       previous.temporal !== this.opts.temporal
-    if (changed) this.hysteresisPrimed = false
+    if (changed) {
+      this.hysteresisPrimed = false
+      // The in-flight band job was submitted against the old options; adopting
+      // it would present one frame matched to something the caller has changed.
+      this.pool?.abandon()
+      this.pending = undefined
+    }
     this.matchDirty = true
   }
 
@@ -261,6 +338,85 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   /** Render the frame into the native-cell-size composite canvas (cached per frame). */
+  /**
+   * One fullscreen draw. The view maths below is engine.ts's `syncView`, not a
+   * second derivation of it — this compositor is the WebGPU one, so its grid
+   * placement and atlas LOD have to land on the same numbers.
+   */
+  private presentGl(frame: AsciiFrame): void {
+    const { atlas } = this.profile
+    const cw = this.canvas.width
+    const ch = this.canvas.height
+    const color = this.opts.color ?? 'mono'
+    const gridW = frame.columns * atlas.cellWidth
+    const gridH = frame.rows * atlas.cellHeight
+    const fit = this.opts.fit ?? 'contain'
+    let sx = cw / gridW
+    let sy = ch / gridH
+    if (fit === 'contain') sx = sy = Math.min(sx, sy)
+    else if (fit === 'cover') sx = sy = Math.max(sx, sy)
+    const cellScreenW = atlas.cellWidth * sx
+    const cellScreenH = atlas.cellHeight * sy
+    const transparent = outputCanBeTransparent(this.opts)
+    const bd = this.opts.background ?? [0, 0, 0]
+    const view: GlViewParams = {
+      canvasWidth: cw,
+      canvasHeight: ch,
+      colorMode: color,
+      originX: (cw - frame.columns * cellScreenW) / 2,
+      originY: (ch - frame.rows * cellScreenH) / 2,
+      cellScreenW,
+      cellScreenH,
+      lod: Math.min(
+        GL_ATLAS_MIPS - 1,
+        Math.max(
+          0,
+          Math.log2(Math.max(atlas.cellWidth / cellScreenW, atlas.cellHeight / cellScreenH, 1)),
+        ),
+      ),
+      useBackdrop: (color === 'glyph' || color === 'mono') && !transparent,
+      backdrop: bd,
+      clearColor:
+        this.opts.clearColor ??
+        (color === 'foreground' || (color === 'glyph' && transparent)
+          ? [0, 0, 0, 0]
+          : color === 'glyph'
+            ? [bd[0] / 255, bd[1] / 255, bd[2] / 255, 1]
+            : [0, 0, 0, 1]),
+      foreground: this.opts.foreground ?? [255, 255, 255],
+      background: bd,
+    }
+
+    const interaction = this.interaction
+    const minDim = Math.min(cw, ch)
+    const kind = interaction ? (GL_FX_KIND[interaction.type] ?? 0) : 0
+    const fx: GlFxParams = {
+      kind,
+      pointerX: this.pointerX * cw,
+      pointerY: this.pointerY * ch,
+      radiusPx: (interaction?.radius ?? 0.15) * minDim,
+      featherPx: (interaction?.feather ?? 0.06) * minDim,
+      intensity: interaction?.intensity ?? 1,
+      time: (performance.now() - this.t0) / 1000,
+      source: kind === 1 || kind === 8 ? this.sourceTexture() : undefined,
+    }
+    this.glc!.present(frame, view, fx)
+  }
+
+  /**
+   * The source as something WebGL can upload. CanvasImageSource also admits
+   * SVGImageElement, which texImage2D does not take; the effects that sample
+   * the source degrade to not sampling it rather than throwing.
+   */
+  private sourceTexture(): TexImageSource | undefined {
+    const drawable = this.sourceDrawable()
+    if (!drawable) return undefined
+    if (typeof SVGImageElement !== 'undefined' && drawable instanceof SVGImageElement) {
+      return undefined
+    }
+    return drawable as TexImageSource
+  }
+
   private ensureBase(frame: AsciiFrame): void {
     if (frame === this.lastComposited && this.compositeCanvas) return
     // Same predicate the WebGPU renderer keys its alphaMode on: when the caller asked for
@@ -328,9 +484,13 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   /** Draw the composited frame to the target with fit + interaction effects. */
   private present(frame: AsciiFrame): void {
+    if (this.glc && !this.glc.unavailable) {
+      this.presentGl(frame)
+      return
+    }
     this.ensureBase(frame)
     const base0 = this.compositeCanvas!
-    const ctx = this.ctx
+    const ctx = this.ctx!
     const cw = this.canvas.width
     const ch = this.canvas.height
     const color = this.opts.color ?? 'mono'
@@ -604,11 +764,89 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   render(): void {
     if (this.destroyed || !this.source) return
     if (this.matchDirty || this.sourceLive || !this.lastFrame) {
-      this.lastFrame = matchFrame(this.extract(), this.matchOptions())
+      if (!this.matchOnWorkers()) {
+        this.lastFrame = matchFrame(this.extract(), this.matchOptions())
+        this.hysteresisPrimed = true
+        this.matchDirty = false
+      }
+    }
+    if (this.lastFrame) this.present(this.lastFrame)
+  }
+
+  /**
+   * Pipelined matching on the worker pool: adopt whatever finished since the
+   * last frame, then dispatch this one. Costs one frame of latency on live
+   * sources and gives the main thread back the ~25 ms/frame the cell loop
+   * takes at 160×42 — the cells themselves are the same bytes either way
+   * (@ascii-fx/core's band tests). Returns false when the caller has to match
+   * on the main thread instead.
+   */
+  private matchOnWorkers(): boolean {
+    // chromatic-v1 carries frame-to-frame hysteresis and is not banded.
+    if (this.opts.matcher === 'chromatic') return false
+    const pool = this.ensurePool()
+    if (!pool || !pool.ready || pool.failed) return false
+    // Nothing on screen yet: match now rather than show a frame of nothing.
+    if (!this.lastFrame) return false
+
+    const done = pool.take()
+    if (done && this.pending) {
+      this.lastFrame = new AsciiFrame({
+        columns: this.pending.columns,
+        rows: this.pending.rows,
+        colorMode: this.pending.colorMode,
+        glyphIds: done.glyphIds,
+        foreground: done.foreground,
+        background: done.background,
+        flags: done.flags,
+        profile: this.profile,
+      })
       this.hysteresisPrimed = true
+      this.pending = undefined
       this.matchDirty = false
     }
-    this.present(this.lastFrame)
+
+    if (!pool.busy) {
+      const source = this.extract()
+      const { columns, rows } = deriveGrid(
+        source.width,
+        source.height,
+        this.profile,
+        this.opts.columns,
+        this.opts.rows,
+      )
+      const colorMode = this.opts.color ?? 'mono'
+      const options: BandOptions = {
+        color: colorMode,
+        alpha: this.opts.alpha ?? 'mask',
+        flatThreshold: this.opts.flatThreshold,
+        foreground: this.opts.foreground,
+        background: this.opts.background,
+      }
+      if (pool.submit(source, columns, rows, options)) {
+        this.pending = { columns, rows, colorMode }
+        this.matchDirty = false
+        this.scheduleAdopt()
+      }
+    }
+    return true
+  }
+
+  /**
+   * Drive adoption when nothing else will. A running loop re-enters render()
+   * on its own, but a caller who renders by hand — a still image, a manual
+   * loop — would otherwise submit a band job whose result nobody ever picks
+   * up, leaving the last frame on the canvas for good.
+   */
+  private scheduleAdopt(): void {
+    if (this.running || this.adoptScheduled || this.destroyed) return
+    this.adoptScheduled = true
+    requestAnimationFrame(() => {
+      this.adoptScheduled = false
+      if (this.destroyed || this.running) return
+      this.render()
+      if (this.pending) this.scheduleAdopt()
+    })
   }
 
   start(): void {
@@ -665,7 +903,12 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   async captureFrame(): Promise<AsciiFrame> {
     if (!this.source) throw new Error('captureFrame() requires a source — call setSource() first.')
-    if (this.matchDirty || !this.lastFrame) {
+    // A pending band job means lastFrame is one frame behind the source, and a
+    // capture that returns the previous frame is wrong rather than merely late.
+    // Match inline and drop the in-flight job, which is now redundant.
+    if (this.matchDirty || !this.lastFrame || this.pending) {
+      this.pool?.abandon()
+      this.pending = undefined
       this.lastFrame = matchFrame(this.extract(), this.matchOptions())
       this.hysteresisPrimed = true
       this.matchDirty = false
@@ -688,6 +931,10 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (this.fxRafId) cancelAnimationFrame(this.fxRafId)
     this.fxRafId = 0
     this.destroyed = true
+    this.glc?.destroy()
+    this.pool?.destroy()
+    this.pool = undefined
+    this.pending = undefined
     this.source = undefined
     this.lastFrame = undefined
     this.lastComposited = undefined

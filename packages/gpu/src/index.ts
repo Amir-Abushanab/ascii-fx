@@ -14,6 +14,7 @@ export {
   type StreamViewOptions,
 } from './engine.js'
 export type {
+  AsciiPipeline,
   AsciiPointer,
   AsciiRenderer,
   AsciiRendererOptions,

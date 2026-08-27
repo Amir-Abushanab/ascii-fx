@@ -47,10 +47,11 @@ async function probe(): Promise<AsciiSupport> {
 
   const worker = typeof Worker !== 'undefined'
   const offscreenCanvas = typeof OffscreenCanvas !== 'undefined'
-  if (!webgpu) {
-    limitations.push(
-      'Worker matcher backend is not yet implemented; CPU matching runs on the main thread.',
-    )
+  if (!webgpu && !worker) {
+    limitations.push('Workers are unavailable; CPU matching runs on the main thread.')
+  }
+  if (!webgpu && !webgl2) {
+    limitations.push('WebGL2 is unavailable; compositing runs on Canvas2D, on the main thread.')
   }
 
   return {
@@ -58,7 +59,7 @@ async function probe(): Promise<AsciiSupport> {
     webgl2,
     worker,
     offscreenCanvas,
-    recommendedBackend: webgpu ? 'webgpu' : 'cpu',
+    recommendedBackend: webgpu ? 'webgpu' : worker ? 'cpu-worker' : 'cpu',
     limitations,
   }
 }

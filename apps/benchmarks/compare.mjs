@@ -65,6 +65,11 @@ const browser = await chromium.launch({
 const openPage = async () => {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
   page.on('pageerror', (e) => console.error('pageerror:', e.message))
+  // A row that silently degrades — a worker that never starts, a backend that
+  // falls back — otherwise reports as a legitimate number for a path it never took.
+  page.on('console', (m) => {
+    if (m.type() === 'error') console.error('page console:', m.text())
+  })
   await page.goto(`http://localhost:${port}/`)
   await page.waitForFunction(() => document.getElementById('status').textContent === 'ready', {
     timeout: 30000,
@@ -72,8 +77,13 @@ const openPage = async () => {
   return page
 }
 
+// `--only <substring>[,<substring>]` restricts the run while iterating on one row.
+const onlyArg = process.argv.indexOf('--only')
+const only = onlyArg >= 0 ? process.argv[onlyArg + 1].split(',') : null
+
 const namesPage = await openPage()
-const names = await namesPage.evaluate(() => window.benchNames)
+const allNames = await namesPage.evaluate(() => window.benchNames)
+const names = only ? allNames.filter((n) => only.some((o) => n.includes(o))) : allNames
 const kinds = await namesPage.evaluate(() => window.benchKinds)
 await namesPage.close()
 
@@ -121,7 +131,7 @@ Generated ${new Date().toISOString()} · headless Chromium, vsync disabled · id
 
 ${table}
 
-Method notes: library rows are the real published packages — aalib.js 2.0 (reader → aa() → its canvas renderer), textmode.js 0.17 (WebGL, standalone; the successor its author points p5.asciify at), chafa-wasm 0.3 (raw ImageData → imageToHtml, default shape-aware symbol set), three.js AsciiEffect from three 0.185 (CanvasTexture quad, its DOM output). textmode.js is the one row not on the shared grid: it sizes cells from a font size and keeps them square, so fontSize 12 lands it on 106×60 rather than 160×42, about 5% fewer cells. ascii-fx webgpu/cpu rows run the exact structural matcher with per-cell color fitting ('foreground'). The shape6-lut row is the in-repo implementation of Alex Harri's shape-vector approach (a spec-credited influence, published as writing rather than a package) with its 3-bit LUT, and the ramp-matcher row is our cheapest opt-in — both through the real core path (matchFrame → compositeFrame) on the main thread. The "ramp reference" rows are not libraries: the standard brightness-ramp technique hand-optimized with zero library overhead, the technique's floor. What each computes differs: aalib and AsciiEffect map brightness to a ramp (aalib's colored mode adds per-cell color), textmode.js maps brightness to a colored textmode grid, chafa does shape-aware block/border selection with fg+bg colors — with Harri's descriptor, the two shape-aware influences this project credits. The spec's structural-reconstruction credit ("Ditherlab / chafa-style") is represented here by chafa-wasm: the credited 8×8 mask → Hamming prefilter → exact-rerank pipeline is chafa's documented algorithm, and no separately runnable Ditherlab artifact could be located to bench. Equal speed is not equal output.
+Method notes: library rows are the real published packages — aalib.js 2.0 (reader → aa() → its canvas renderer), textmode.js 0.17 (WebGL, standalone; the successor its author points p5.asciify at), chafa-wasm 0.3 (raw ImageData → imageToHtml, default shape-aware symbol set), three.js AsciiEffect from three 0.185 (CanvasTexture quad, its DOM output). textmode.js is the one row not on the shared grid: it sizes cells from a font size and keeps them square, so fontSize 12 lands it on 106×60 rather than 160×42, about 5% fewer cells. ascii-fx webgpu/cpu rows run the exact structural matcher with per-cell color fitting ('foreground'). The two CPU rows differ only in which thread matches: \`ascii-fx cpu\` pins the matcher to the main thread (\`workers: false\`), \`ascii-fx cpu (workers)\` puts it on the default worker pool. The cells are the same bytes either way, so the gap between them is the matcher leaving the main thread and nothing else — what remains on both is the Canvas2D composite, which the worker pool does not touch. The shape6-lut row is the in-repo implementation of Alex Harri's shape-vector approach (a spec-credited influence, published as writing rather than a package) with its 3-bit LUT, and the ramp-matcher row is our cheapest opt-in — both through the real core path (matchFrame → compositeFrame) on the main thread. The "ramp reference" rows are not libraries: the standard brightness-ramp technique hand-optimized with zero library overhead, the technique's floor. What each computes differs: aalib and AsciiEffect map brightness to a ramp (aalib's colored mode adds per-cell color), textmode.js maps brightness to a colored textmode grid, chafa does shape-aware block/border selection with fg+bg colors — with Harri's descriptor, the two shape-aware influences this project credits. The spec's structural-reconstruction credit ("Ditherlab / chafa-style") is represented here by chafa-wasm: the credited 8×8 mask → Hamming prefilter → exact-rerank pipeline is chafa's documented algorithm, and no separately runnable Ditherlab artifact could be located to bench. Equal speed is not equal output.
 `
 
 await upsertSection('## Cross-library render loop', section)
