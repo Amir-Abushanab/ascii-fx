@@ -51,7 +51,7 @@
     "@react-three/fiber": "^9.7.0",
     "@types/react": "^19.2.18",
     "@types/three": "0.185.4",
-    "@webgpu/types": "^0.1.71",
+    "@webgpu/types": "^0.1.72",
     "react": "^19.2.8",
     "three": "0.185.1",
     "tsup": "^8.5.1",

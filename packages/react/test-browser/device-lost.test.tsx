@@ -4,7 +4,7 @@
 // on a dead renderer. The hook closes it by remounting the canvas — a fresh
 // element is required, since one that has held a 'webgpu' context can never be
 // given a 2d one — which lets 'auto' run again against current conditions.
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AsciiProfile, AsciiRenderer } from '@ascii-fx/gpu'
@@ -41,7 +41,9 @@ describe.skipIf(!gpuAvailable)('useAscii device loss', () => {
     function Probe({ profile }: { profile: AsciiProfile }): React.ReactElement {
       const ref = useRef<HTMLCanvasElement>(null)
       const { renderer, canvasKey } = useAscii(ref, { profile, columns: 8 })
-      seen.renderer = renderer
+      useEffect(() => {
+        seen.renderer = renderer
+      }, [renderer])
       return <canvas key={canvasKey} ref={ref} data-role="out" />
     }
 
@@ -119,7 +121,9 @@ describe.skipIf(!gpuAvailable)('useAscii overlapping inits', () => {
     function Probe({ profile }: { profile: AsciiProfile }): React.ReactElement {
       const ref = useRef<HTMLCanvasElement>(null)
       const { renderer, canvasKey } = useAscii(ref, { profile, columns: 8, backend: 'webgpu' })
-      seen.renderer = renderer
+      useEffect(() => {
+        seen.renderer = renderer
+      }, [renderer])
       return <canvas key={canvasKey} ref={ref} width={64} height={64} />
     }
     try {

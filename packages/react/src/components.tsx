@@ -98,7 +98,12 @@ const fallbackStyle = (ready: boolean): CSSProperties => ({
  */
 function useErrorCallback(error: Error | null, onError?: (error: Error) => void): void {
   const ref = useRef(onError)
-  ref.current = onError
+  // Refreshed in an effect rather than during render. Effects run in
+  // declaration order, so a commit that changes both `onError` and `error`
+  // still fires the new callback.
+  useEffect(() => {
+    ref.current = onError
+  }, [onError])
   useEffect(() => {
     if (error) ref.current?.(error)
   }, [error])
@@ -292,6 +297,9 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
       img.removeEventListener('load', attach)
       setReady(false)
     }
+    // `src` is not read above, but it is a real dependency: swapping it has to
+    // run this cleanup so readiness resets and the new source re-attaches.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [renderer, src])
 
   useErrorCallback(error, onError)
@@ -372,6 +380,9 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
       renderer.stop()
       setReady(false)
     }
+    // `src` is not read above, but it is a real dependency: swapping it has to
+    // run this cleanup so readiness resets and the new source re-attaches.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [renderer, src])
 
   const reducedMotion = useContinuousPlayback(
