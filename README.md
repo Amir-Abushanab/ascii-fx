@@ -7,7 +7,7 @@
 
 Turn images and video into ASCII **that actually looks like the picture** — in real time, in the browser.
 
-![ASCII FX rendering an animated scene, every glyph picked by shape and coloured to match](assets/hero.gif)
+![ASCII FX rendering a 3D scene — spheres, prisms, a torus and a cone tumbling over a grid floor, every glyph picked by shape and coloured to match](assets/hero.webp)
 
 **▶ [Open the playground](https://amir-abushanab.github.io/ascii-fx/)**
 
