@@ -1,6 +1,6 @@
 {
   "name": "@ascii-fx/three",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Three.js adapter for ASCII FX: AsciiPass postprocessing for WebGPURenderer and an instanced AsciiGlyphs renderer.",
   "keywords": [
     "ascii",
