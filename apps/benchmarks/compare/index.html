@@ -248,6 +248,26 @@
         return { render: () => r.render(), teardown: () => (r.destroy(), canvas.remove()) }
       }
 
+      async function cpuContender(name, workers, compositor) {
+        const canvas = document.createElement('canvas')
+        canvas.width = W
+        canvas.height = H
+        stage.append(canvas)
+        const profile = await loadProfile('./default.asciip')
+        const r = await createAsciiRenderer({
+          canvas,
+          profile,
+          backend: 'cpu',
+          columns: COLS,
+          color: 'foreground',
+          ...(workers === undefined ? {} : { workers }),
+          ...(compositor === undefined ? {} : { compositor }),
+        })
+        r.setSource(scene)
+        gridNotes[name] = `${COLS}×${ROWS}`
+        return { render: () => r.render(), teardown: () => (r.destroy(), canvas.remove()) }
+      }
+
       const CONTENDERS = {
         // Loop floor: draw the scene and present it with zero ascii work.
         // Every other row includes this cost. (It must blit to a visible
@@ -279,23 +299,13 @@
           gridNotes['ascii-fx webgpu'] = `${COLS}×${ROWS}`
           return { render: () => r.render(), teardown: () => (r.destroy(), canvas.remove()) }
         },
-        'ascii-fx cpu': async () => {
-          const canvas = document.createElement('canvas')
-          canvas.width = W
-          canvas.height = H
-          stage.append(canvas)
-          const profile = await loadProfile('./default.asciip')
-          const r = await createAsciiRenderer({
-            canvas,
-            profile,
-            backend: 'cpu',
-            columns: COLS,
-            color: 'foreground',
-          })
-          r.setSource(scene)
-          gridNotes['ascii-fx cpu'] = `${COLS}×${ROWS}`
-          return { render: () => r.render(), teardown: () => (r.destroy(), canvas.remove()) }
-        },
+        // The fallback, decomposed. Same exact cells in all three; what moves
+        // is where the matching runs and how the grid is painted.
+        'ascii-fx cpu': async () => cpuContender('ascii-fx cpu', false, 'canvas2d'),
+        'ascii-fx cpu (workers)': async () =>
+          cpuContender('ascii-fx cpu (workers)', undefined, 'canvas2d'),
+        'ascii-fx cpu (workers+webgl)': async () =>
+          cpuContender('ascii-fx cpu (workers+webgl)', undefined, 'auto'),
         // The two approximate matchers our spec credits as influences, run
         // through the real core code path (matchFrame with matcher option →
         // compositeFrame). shape6 is the in-repo implementation of Alex

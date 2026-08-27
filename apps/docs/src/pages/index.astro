@@ -57,7 +57,9 @@ const TABLE_META: Record<string, RowMeta> = {
   'aalib.js colored': { label: 'aalib.js 2.0 · colored', picks: 'brightness + color', kind: 'brightness', color: '#8a8a99' },
   'ascii-fx ramp matcher': { label: 'ascii-fx ramp matcher', picks: 'brightness', kind: 'brightness', color: '#4d7d59', us: true, marker: '†' },
   'ascii-fx shape6-lut': { label: 'ascii-fx shape6-lut (Harri-style)', picks: '6-D shape vector', kind: 'shape', color: '#4d7d59', us: true, marker: '†' },
-  'ascii-fx cpu': { label: 'ascii-fx · CPU fallback', picks: 'shape, exact', kind: 'exact', color: '#4d7d59', us: true, marker: '†' },
+  'ascii-fx cpu (workers+webgl)': { label: 'ascii-fx · fallback, no GPU', picks: 'shape, exact', kind: 'exact', color: '#4d7d59', us: true, emphasis: true, marker: '‡' },
+  'ascii-fx cpu (workers)': { label: 'ascii-fx · fallback, Canvas2D paint', picks: 'shape, exact', kind: 'exact', color: '#4d7d59', us: true, marker: '†' },
+  'ascii-fx cpu': { label: 'ascii-fx · fallback, one thread', picks: 'shape, exact', kind: 'exact', color: '#4d7d59', us: true, marker: '†' },
   'chafa-wasm': { label: 'chafa-wasm 0.3', picks: 'shape-aware blocks', kind: 'shape', color: '#654ff0' },
 }
 
@@ -1236,6 +1238,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         <legend><i data-lucide="clapperboard"></i> Source</legend>
         <select id="source" aria-label="Source" title="What gets turned into ASCII: scenes, your webcam, or your own files (all client-side)">
           <option value="orbs" selected>Animated orbs</option>
+          <option value="solids">3D solids</option>
           <option value="dvd">DVD bounce</option>
           <option value="plasma">Plasma</option>
           <option value="starfield">Starfield</option>
@@ -1265,10 +1268,11 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       </fieldset>
       <fieldset>
         <legend><i data-lucide="cpu"></i> Backend</legend>
-        <select id="backend" aria-label="Backend" title="auto uses your GPU (WebGPU) when available and falls back to the exact CPU matcher. Same output, different speed">
+        <select id="backend" aria-label="Backend" title="auto uses your GPU (WebGPU) when available, and without it matches on worker threads and paints with WebGL2. Every option produces the same cells — what changes is what does the work. 'cpu (canvas2d)' is the last resort, where WebGL2 is unavailable too">
           <option value="auto" selected>auto</option>
           <option value="webgpu">webgpu</option>
-          <option value="cpu">cpu</option>
+          <option value="cpu">cpu + webgl2</option>
+          <option value="cpu-canvas2d">cpu (canvas2d)</option>
         </select>
         <label><input id="temporal" type="checkbox" checked /> <span class="hint" tabindex="0" data-hint="Skip re-matching cells whose pixels didn't change since the last frame. Exact, great for video (WebGPU only)">temporal</span></label>
         <label><input id="adaptive" type="checkbox" checked /> <span class="hint" tabindex="0" data-hint="Automatically lower the column count when the frame rate drops, and recover when it's smooth (WebGPU only)">adaptive</span></label>
@@ -1399,7 +1403,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         square-celled RGBA atlas.
       </p>
       <p>
-        The profile records SHA-256 hashes of the font, charset, and parameters. Frames reference profiles by
+        The profile records SHA-256 hashes of the font, charset, and parameters. Frames reference profiles by{' '}
         <strong>fingerprint</strong> — a short content hash that names this exact profile — so a frame can never
         decode against the wrong font.
       </p>
@@ -1491,7 +1495,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       <p>
         The <strong>Hamming distance</strong> between two masks is simply how many of their 64 bits disagree —
         computed as two XORs and two <strong>popcounts</strong> (count-the-1-bits, one instruction on either
-        backend). Keep the 8 smallest, ties to the lower glyph id; that shortlist is what the exact scorer
+        backend). Keep the 8 smallest, ties to the lower glyph id; that shortlist is what the exact scorer{' '}
         <strong>reranks</strong> next. Scoring a glyph exactly costs about 64 multiplies, so the split pays for
         itself: cheap filter over the whole charset, exact score over 8.
         Same winner, a fraction of the cost. In <code>full</code> mode the score is <code>min(d, 64−d)</code>,
@@ -1690,6 +1694,9 @@ mono: both colors fixed by the palette</code></pre>
         {' '}* Not libraries. The brightness-ramp technique hand-written with zero overhead, marking the floor any
         ramp library could reach. † Main-thread JavaScript, composite-bound at this glyph size: matching alone is
         {' '}~{matchMs('ascii-fx shape6-lut')}ms against ~{exactMs.toFixed(0)}ms for exact structural.
+        {' '}‡ No GPU at all: the exact matcher on worker threads, the grid painted by a WebGL2 fullscreen draw.
+        Same cells as every other ascii-fx row — the three fallback rows differ only in where the matching runs
+        and how the grid is painted.
       </p>
       </div>
 

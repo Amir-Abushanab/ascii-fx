@@ -21,13 +21,27 @@ ascii.setSource(video)
 ascii.start()
 ```
 
-~2.8 ms/frame on an M3 Pro at 160×42 — about 0.2 ms of that on the main thread, because matching and compositing overlap on the GPU.
+~2.6 ms/frame on an M3 Pro at 160×42 — indistinguishable from drawing the source alone, because matching and compositing overlap on the GPU.
 
 ## The fallback is not a downgrade
 
 `backend: 'auto'` picks WebGPU when there's an adapter and the CPU matcher when there isn't, and **both produce identical output** — same glyph ids, same colours, same flags, enforced by a browser conformance suite across colour modes, palettes, alpha modes, uneven reductions, temporal reuse, and dirty-region rematches.
 
 What it will never do is quietly swap in a cheaper, worse matcher to hold a frame rate. Approximate matchers exist in `@ascii-fx/core`, and you get one only by naming it. A slow frame is a slow frame; it isn't silently a different picture.
+
+## What runs without a GPU
+
+Spec §12's fallback, both halves of it. **Matching** goes to a pool of workers — one per core less one, capped at 8 — each running core's `reduceBand`/`matchBand` over a slice of cell rows. That is the same code a whole-frame `matchFrame` runs, so the assembled cells are byte-identical and the pool is a scheduling change, not an algorithm. **Painting** goes to a WebGL2 fullscreen draw of the glyph field against the atlas — the compositor shader from the WebGPU backend, ported to GLSL ES 3.00 — instead of building a full-resolution RGBA buffer on the CPU and blitting it. Pointer interactions come along with it, as the real shader rather than the Canvas2D path's cell-granular approximation.
+
+```ts
+await createAsciiRenderer({ canvas, profile, backend: 'cpu', workers: false }) // match on the main thread
+await createAsciiRenderer({ canvas, profile, backend: 'cpu', workers: 4 }) // pin the pool size
+await createAsciiRenderer({ canvas, profile, backend: 'cpu', compositor: 'canvas2d' }) // paint on Canvas2D
+```
+
+At 160×42 on an M3 Pro, taking those one at a time: 42.0 ms/frame on the main thread with Canvas2D, 31.9 with the worker pool, **2.8 with the WebGL2 composite as well** — the same number the WebGPU backend posts, and the scene-only floor is 2.7.
+
+A live source pays one frame of latency for the matcher: the renderer presents a frame while the next one matches. The first frame, static sources, and `captureFrame()` are matched inline and pay none. `chromatic` carries frame-to-frame hysteresis and stays on the main thread, though it is painted by the same WebGL2 composite.
 
 ## Device loss
 

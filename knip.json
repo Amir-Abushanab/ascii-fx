@@ -28,5 +28,5 @@
       "project": "src/**/*.{ts,astro}"
     }
   },
-  "ignoreBinaries": ["ffmpeg"]
+  "ignoreBinaries": ["ffmpeg", "img2webp"]
 }

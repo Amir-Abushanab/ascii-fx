@@ -1,5 +1,15 @@
 // Procedural demo scenes — all client-side, no assets, all recognizable.
-export type SceneKind = 'orbs' | 'dvd' | 'plasma' | 'starfield' | 'life' | 'clock' | 'marquee'
+import { createSolids3D } from './solids3d'
+
+export type SceneKind =
+  | 'orbs'
+  | 'solids'
+  | 'dvd'
+  | 'plasma'
+  | 'starfield'
+  | 'life'
+  | 'clock'
+  | 'marquee'
 
 export interface Scene {
   canvas: HTMLCanvasElement
@@ -271,8 +281,25 @@ function marquee(): Scene {
   return { canvas, tick }
 }
 
+// The 3D scene is a module of its own because `scripts/render-assets.mjs` renders the
+// README's hero loop from it too — one rasterizer, so the still on the page and the scene
+// in the playground cannot drift apart.
+function solids(): Scene {
+  const [canvas, ctx] = mk()
+  const img = ctx.createImageData(W, H)
+  // Rendering straight into the ImageData saves a full-frame copy every tick.
+  const scene = createSolids3D(W, H, img.data)
+  const tick = (t: number): void => {
+    scene.render(t)
+    ctx.putImageData(img, 0, 0)
+  }
+  tick(0)
+  return { canvas, tick }
+}
+
 export const SCENES: Record<SceneKind, { label: string; create: () => Scene }> = {
   orbs: { label: 'Animated orbs', create: orbs },
+  solids: { label: '3D solids', create: solids },
   dvd: { label: 'DVD bounce', create: dvd },
   plasma: { label: 'Plasma', create: plasma },
   starfield: { label: 'Starfield', create: starfield },

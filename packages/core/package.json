@@ -50,7 +50,7 @@
   },
   "devDependencies": {
     "@tanstack/intent": "^0.3.6",
-    "@webgpu/types": "^0.1.71",
+    "@webgpu/types": "^0.1.72",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"
   },

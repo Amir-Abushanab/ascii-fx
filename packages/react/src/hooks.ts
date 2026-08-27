@@ -79,6 +79,17 @@ export interface UseAsciiOptions extends AsciiRendererRuntimeOptions {
   /** Omit for a runtime 'monospace' profile (spec §14). */
   profile?: ProfileSource
   backend?: BackendChoice
+  /**
+   * CPU-backend matcher workers. Default: one per core less one, capped at 8.
+   * `false` matches on the main thread. Construction-time like `backend`, so
+   * changing it rebuilds the renderer.
+   */
+  workers?: number | false
+  /**
+   * How the CPU backend paints. Default 'auto': a WebGL2 fullscreen composite
+   * where WebGL2 exists, Canvas2D otherwise. Construction-time like `backend`.
+   */
+  compositor?: 'auto' | 'canvas2d'
   interaction?: InteractionOptions | null
   /** Default true: disable motion interactions when the OS requests reduced motion. */
   respectReducedMotion?: boolean
@@ -115,7 +126,15 @@ export function useAscii(
   const [renderer, setRenderer] = useState<AsciiRenderer | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const reducedMotion = usePrefersReducedMotion()
-  const { profile: _p, backend, interaction, respectReducedMotion = true, ...runtime } = options
+  const {
+    profile: _p,
+    backend,
+    workers,
+    compositor,
+    interaction,
+    respectReducedMotion = true,
+    ...runtime
+  } = options
   const runtimeRef = useRef(runtime)
   runtimeRef.current = runtime
 
@@ -159,6 +178,8 @@ export function useAscii(
           canvas,
           profile,
           backend,
+          workers,
+          compositor,
           onDeviceLost: handleDeviceLost,
           ...runtimeRef.current,
         })
@@ -180,7 +201,7 @@ export function useAscii(
       setRenderer(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, backend, canvasRef, lostGeneration])
+  }, [profile, backend, workers, compositor, canvasRef, lostGeneration])
 
   const runtimeKey = rendererOptionsKey(runtime)
   useEffect(() => {

@@ -23,6 +23,8 @@ const alias = {
 // half that needs no GPU.
 const CPU_BROWSER_TESTS = [
   'packages/gpu/test-browser/cpu-fx.test.ts',
+  'packages/gpu/test-browser/match-pool.test.ts',
+  'packages/gpu/test-browser/gl-composite.test.ts',
   'packages/three/test-browser/asciiGlyphs.test.ts',
   'packages/react/test-browser/on-error.test.tsx',
 ]

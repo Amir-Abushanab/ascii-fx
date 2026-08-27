@@ -27,6 +27,8 @@ export interface ExportState {
   characters?: string
   /** Only when the user forced a backend (auto is the default). */
   backend?: 'webgpu' | 'cpu'
+  /** Only when the user forced Canvas2D painting ('auto' is the default). */
+  compositor?: 'canvas2d'
   /** Renderer options that differ from library defaults. */
   options: Record<string, unknown>
   /** Interaction with non-default fields only; null when none. */
@@ -99,6 +101,7 @@ function mountLines(state: ExportState): string[] {
   const profile = profileSnippet(state)
   const rendererOpts: string[] = ['canvas', 'profile']
   if (state.backend) rendererOpts.push(`backend: ${literal(state.backend)}`)
+  if (state.compositor) rendererOpts.push(`compositor: ${literal(state.compositor)}`)
   for (const [k, v] of Object.entries(state.options)) rendererOpts.push(`${k}: ${literal(v)}`)
   // Assignment (not declaration): every wrapper declares `let renderer` in an
   // outer scope so its cleanup can reach it.
@@ -139,6 +142,7 @@ export function generateSnippet(target: FrameworkId, state: ExportState): string
   if (target === 'react') {
     const props: string[] = []
     if (state.backend) props.push(`backend=${literal(state.backend)}`)
+    if (state.compositor) props.push(`compositor=${literal(state.compositor)}`)
     for (const [k, v] of Object.entries(state.options)) props.push(`${k}={${literal(v)}}`)
     if (state.interaction) props.push(`interaction={${inlineObject(state.interaction)}}`)
     const propLines = props.map((p) => `      ${p}`).join('\n')

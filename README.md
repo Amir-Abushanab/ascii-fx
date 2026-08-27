@@ -7,7 +7,7 @@
 
 Turn images and video into ASCII **that actually looks like the picture** — in real time, in the browser.
 
-![ASCII FX rendering an animated scene, every glyph picked by shape and coloured to match](assets/hero.gif)
+![ASCII FX rendering a 3D scene — spheres, prisms, a torus and a cone tumbling over a grid floor, every glyph picked by shape and coloured to match](assets/hero.webp)
 
 **▶ [Open the playground](https://amir-abushanab.github.io/ascii-fx/)**
 
@@ -17,7 +17,7 @@ import { AsciiImage } from '@ascii-fx/react'
 ;<AsciiImage src="/cat.jpg" alt="Cat" />
 ```
 
-That is the whole zero-config path. It picks a font, compiles a profile at runtime, renders on the GPU where there is one and the CPU where there isn't — and if none of that works, the plain `<img>` underneath is still on screen.
+That is the whole zero-config path. It picks a font, compiles a profile at runtime, renders on the GPU where there is one and on worker threads plus a WebGL2 draw where there isn't — and if none of that works, the plain `<img>` underneath is still on screen.
 
 ## Shape, not brightness
 
@@ -65,6 +65,10 @@ ascii.start()
 
 `backend: 'auto'` picks WebGPU when it's there and the CPU matcher when it isn't — and the CPU path is **bit-identical**, not an approximation. It never quietly downgrades you to a worse matcher to hold a frame rate; approximate matchers exist, but only if you ask for one by name.
 
+Without WebGPU, both halves of the work still leave the main thread. The matcher runs on a pool of workers, one per core less one; they run the very same `matchBand` the main thread would, and assembling bands is byte-identical to matching the whole frame at once, so this buys throughput and a responsive page, never a different picture. The grid is then painted by a WebGL2 fullscreen draw — the same compositor shader the WebGPU backend runs, ported to GLSL — instead of a full-resolution RGBA buffer built on the CPU. That also makes the pointer interactions the real shader rather than an approximation of it at cell granularity.
+
+On a live source the matcher costs one frame of latency, since a frame is presented while the next one matches; the first frame, static sources, and `captureFrame()` are matched inline and cost none. `workers: false` and `compositor: 'canvas2d'` put either half back the way it was.
+
 ## Colour glyphs
 
 Emoji carry their own colour, which removes the move the main matcher is built on: with a free foreground and background, the best colours for a mask are the means of its two sample sets, and that is exactly what makes the rerank exact. Baked colour leaves nothing to fit — so `chromatic-v1` is a **separate algorithm**, comparing a cell's 64 samples against the glyph's own, composited over the backdrop it will be drawn on.
@@ -81,7 +85,7 @@ No flat path, no polarity, no prefilter. [`ALGORITHM.md §C`](./ALGORITHM.md) is
 | package                                           | what it owns                                                                            |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | [`@ascii-fx/core`](./packages/core)               | the exact CPU matchers (the oracle every backend is held to), codecs, charsets, exports |
-| [`@ascii-fx/gpu`](./packages/gpu)                 | WebGPU compute matching, one-draw compositor, interactions, exact CPU fallback          |
+| [`@ascii-fx/gpu`](./packages/gpu)                 | WebGPU compute matching, one-draw compositor, interactions, exact worker/CPU fallback   |
 | [`@ascii-fx/compiler`](./packages/compiler)       | deterministic font rasterization, atlases, `.asciip`/`.asciif`, CLI                     |
 | [`@ascii-fx/react`](./packages/react)             | `<AsciiImage>` `<AsciiVideo>` `<AsciiCanvas>` + hooks, SSR-safe                         |
 | [`@ascii-fx/three`](./packages/three)             | `AsciiPass` for `WebGPURenderer`, instanced `AsciiGlyphs`                               |
@@ -95,14 +99,22 @@ Real published libraries, identical animated 1280×720 source, same 160×42 glyp
 | approach                 | picks glyphs by                  | p50 ms/frame |    ~fps |
 | ------------------------ | -------------------------------- | -----------: | ------: |
 | **ascii-fx · WebGPU**    | **shape + fitted color (exact)** |      **2.8** | **357** |
-| textmode.js 0.17 (WebGL) | brightness + color               |          3.7 |     270 |
-| three.js AsciiEffect     | brightness                       |          6.0 |     167 |
-| aalib.js 2.0 · mono      | brightness                       |          9.1 |     110 |
-| aalib.js 2.0 · colored   | brightness + color               |         14.7 |      68 |
-| ascii-fx · CPU fallback  | shape + fitted color (exact)     |         39.8 |      25 |
-| chafa-wasm 0.3           | shape-aware blocks + fg/bg       |         47.1 |      21 |
+| **ascii-fx · no WebGPU** | **shape + fitted color (exact)** |      **2.8** | **357** |
+| textmode.js 0.17 (WebGL) | brightness + color               |          4.5 |     222 |
+| three.js AsciiEffect     | brightness                       |          8.2 |     122 |
+| aalib.js 2.0 · mono      | brightness                       |         10.3 |      97 |
+| aalib.js 2.0 · colored   | brightness + color               |         16.8 |      60 |
+| chafa-wasm 0.3           | shape-aware blocks + fg/bg       |         50.1 |      20 |
 
-The scene-only floor is 2.6 ms, so the WebGPU path costs the main thread ~0.2 ms — matching and compositing overlap on the GPU. Full table, methodology, and regeneration: [`RESULTS.md`](./apps/benchmarks/RESULTS.md).
+The scene-only floor is 2.7 ms, so **neither** path costs the main thread anything measurable. Without a GPU the work does not disappear, it moves: the matcher runs on worker threads and the grid is painted by a WebGL2 fullscreen draw, so the main thread is left holding one texture upload. Taking those away one at a time is what the difference is made of:
+
+| fallback, by stage                   | p50 ms/frame | ~fps |
+| ------------------------------------ | -----------: | ---: |
+| matcher on the main thread, Canvas2D |         42.0 |   24 |
+| matcher on workers, Canvas2D         |         31.9 |   31 |
+| matcher on workers, WebGL2 composite |          2.8 |  357 |
+
+Same exact cells in all three. Full table, methodology, and regeneration: [`RESULTS.md`](./apps/benchmarks/RESULTS.md).
 
 ## Documents
 
