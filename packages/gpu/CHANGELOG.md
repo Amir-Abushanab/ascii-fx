@@ -1,5 +1,61 @@
 # @ascii-fx/gpu
 
+## 0.4.0
+
+### Minor Changes
+
+- [#12](https://github.com/Amir-Abushanab/ascii-fx/pull/12) [`f6861a5`](https://github.com/Amir-Abushanab/ascii-fx/commit/f6861a583f9434717e7f826980ff0a57c4d06fb1) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Paint the CPU fallback with WebGL2 instead of Canvas2D.
+
+  This is the other half of spec §12's fallback ("CPU/Worker structural matcher →
+  compact glyph field → WebGL2 fullscreen composite"). The glyph field goes to a
+  uint texture and one fullscreen draw samples it against the atlas, rather than
+  `compositeFrame` building a full-resolution RGBA buffer on the CPU and
+  `putImageData` blitting it.
+
+  The shader is `COMPOSITE_WGSL` ported to GLSL ES 3.00 — the same compositor the
+  WebGPU backend runs — so the pointer interactions come with it as the real
+  shader, where the Canvas2D path approximated them at cell granularity.
+
+  At 160×42 on an M3 Pro the fallback goes from 31.9 ms/frame to **2.8**, which is
+  what the WebGPU backend posts and 0.1 ms off the scene-only floor. With the
+  worker matcher, that is 42.0 → 2.8 for the whole no-GPU path.
+
+  The canvas takes a `webgl2` context where it can, so `getContext('2d')` on it
+  returns null; `compositor: 'canvas2d'` opts out and is unchanged. Canvas2D is
+  still the automatic path wherever WebGL2 is unavailable, and the two are not
+  pixel-identical — Canvas2D builds the grid at native cell size and scales down,
+  WebGL2 samples a mipped atlas the way WebGPU does, so `auto` is also the closer
+  match to the GPU output.
+
+- [#12](https://github.com/Amir-Abushanab/ascii-fx/pull/12) [`f6861a5`](https://github.com/Amir-Abushanab/ascii-fx/commit/f6861a583f9434717e7f826980ff0a57c4d06fb1) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Move the CPU fallback's matcher off the main thread: 39.1 → 29.3 ms/frame at
+  160×42 on an M3 Pro (26 → 34 fps), with what remains being the Canvas2D
+  composite.
+
+  The CPU backend now matches on a pool of workers by default — one per core less
+  one, capped at 8 — and the main thread keeps only the extract and the composite.
+  This is spec §11's second tier ("Worker/CPU exact structural"), and it changes
+  when a live source's cells arrive, never what they are.
+
+  `@ascii-fx/core` gains the band primitives the pool is built from:
+  `reduceBand`, `matchBand`, and `bandSourceRows`. `matchBand` is the same code
+  `matchFrame` runs — `matchFrame` is now a whole-frame band — so a banded match
+  is byte-identical to a whole-frame one, and the new tests in `band.test.ts` and
+  `match-pool.test.ts` hold it there across colour modes, alpha modes, and uneven
+  splits.
+
+  Live sources trade one frame of latency for the parallelism: a frame is
+  presented while the next one matches. The first frame, static sources, and
+  `captureFrame()` are matched inline and carry none. `chromatic` keeps
+  frame-to-frame hysteresis and stays on the main thread.
+
+  New `workers` option on `createAsciiRenderer`: `false` pins matching to the main
+  thread, a number fixes the pool size.
+
+### Patch Changes
+
+- Updated dependencies [[`f6861a5`](https://github.com/Amir-Abushanab/ascii-fx/commit/f6861a583f9434717e7f826980ff0a57c4d06fb1)]:
+  - @ascii-fx/core@0.4.0
+
 ## 0.3.1
 
 ### Patch Changes
