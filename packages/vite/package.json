@@ -1,6 +1,6 @@
 {
   "name": "@ascii-fx/vite",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Vite integration for ASCII FX: build-time profile compilation and static frame generation as virtual modules.",
   "keywords": [
     "ascii",
