@@ -4,6 +4,7 @@ dist/
 .DS_Store
 apps/docs/public/default.asciip
 apps/docs/public/GeistMono-Regular.ttf
+apps/docs/public/og.png
 apps/benchmarks/results/
 .astro/
 apps/docs/public/bench/
