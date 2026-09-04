@@ -35,9 +35,32 @@ A renderer that can't be built is invisible by design — the fallback is alread
 
 It fires once per distinct failure, for a failed init and for a GPU device loss that couldn't be recovered from.
 
+## Painting the source
+
+The matcher is exact about the pixels it is handed and owns nothing upstream of them, so pixel
+effects — a contrast curve, grain, a channel shift — are not renderer options. They go on the
+source, and `draw` is where:
+
+```tsx
+<AsciiImage src="/portrait.jpg" alt="A portrait" columns={120} draw={drawGrain} animate fps={10} />
+```
+
+`draw(ctx, { image, width, height }, timeMs)` gets a 2D context over a buffer the image's natural
+size, so `fit`, `columns` and everything else behave exactly as they do without it. Nothing is
+painted into it for you — draw the image first if you want it there.
+
+One rule decides whether an effect survives the grid: a cell fits a single colour to
+`width / columns` source pixels, so anything finer than that arrives as its share of the average
+instead of as itself. Grain at 1px on a 2000px-wide image at 120 columns is invisible; the same
+grain in ~16px blocks is not.
+
+`animate` re-runs `draw` on a loop throttled to `fps` (default 12, not the display rate — every
+frame is a full re-match). Without it an image is matched once and left, which is why a still costs
+nothing per frame.
+
 ## Motion and cost
 
-`prefers-reduced-motion` disables autoplay and interactions while keeping a static frame. Rendering pauses when the component scrolls offscreen or the tab is hidden. Both are on by default; `respectReducedMotion` and `pauseWhenOffscreen` turn them off.
+`prefers-reduced-motion` disables autoplay, interactions and the `animate` loop while keeping a static frame. Rendering pauses when the component scrolls offscreen or the tab is hidden. Both are on by default; `respectReducedMotion` and `pauseWhenOffscreen` turn them off.
 
 ## Hooks
 

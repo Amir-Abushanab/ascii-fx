@@ -25,6 +25,7 @@ import {
   Cpu,
   Crop,
   FileText,
+  Grip,
   ImageDown,
   Package,
   ScanText,
@@ -36,6 +37,7 @@ import {
   createIcons,
 } from 'lucide'
 import { SCENES, type SceneKind } from './scenes'
+import { createGrainStage } from './grain'
 import { ExportComponentDialog } from './exportDialog'
 import { buildAgentBrief } from './agentBrief'
 import { createAgentCopyButton } from './agentCopyButton'
@@ -55,6 +57,7 @@ createIcons({
     Cpu,
     Crop,
     FileText,
+    Grip,
     ImageDown,
     Package,
     ScanText,
@@ -76,6 +79,10 @@ const els = {
   hystLab: $<HTMLElement>('hystLab'),
   source: $<HTMLSelectElement>('source'),
   animate: $<HTMLInputElement>('animate'),
+  grain: $<HTMLInputElement>('grain'),
+  grainOut: $<HTMLOutputElement>('grainOut'),
+  grainRate: $<HTMLInputElement>('grainRate'),
+  grainRateOut: $<HTMLOutputElement>('grainRateOut'),
   imageFile: $<HTMLInputElement>('imageFile'),
   videoFile: $<HTMLInputElement>('videoFile'),
   font: $<HTMLSelectElement>('font'),
@@ -190,6 +197,65 @@ interface ActiveSource {
   cleanup?: () => void
 }
 let active: ActiveSource | undefined
+
+// ————— grain —————
+// A source-side effect, and the playground is built to say so: the renderer never learns
+// about it. The stage is a canvas holding "the source, with grain over it", and the only
+// thing that changes downstream is which canvas `setSource` is pointed at.
+const grainOn = (): boolean => Number(els.grain.value) > 0
+
+const sourceDims = (source: RenderSource): [number, number] => {
+  if (source instanceof HTMLVideoElement) return [source.videoWidth, source.videoHeight]
+  if (typeof VideoFrame !== 'undefined' && source instanceof VideoFrame) {
+    return [source.displayWidth, source.displayHeight]
+  }
+  return [(source as { width: number }).width, (source as { height: number }).height]
+}
+
+/**
+ * Grain paints the source into a buffer, so the source has to be drawImage-able. Every kind
+ * the playground makes is (canvas, video, ImageBitmap); `RawImage` and `ImageData` are the
+ * two members of `RenderSource` that are not, and they are simply not reachable from here.
+ */
+const asDrawable = (source: RenderSource): CanvasImageSource | null =>
+  source instanceof HTMLVideoElement ||
+  source instanceof HTMLCanvasElement ||
+  source instanceof HTMLImageElement ||
+  (typeof OffscreenCanvas !== 'undefined' && source instanceof OffscreenCanvas) ||
+  (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) ||
+  (typeof VideoFrame !== 'undefined' && source instanceof VideoFrame)
+    ? (source as CanvasImageSource)
+    : null
+
+const grainStage = createGrainStage({
+  source: () => {
+    if (!active) return null
+    const base = asDrawable(active.source)
+    if (!base) return null
+    const [width, height] = sourceDims(active.source)
+    // A video before its metadata lands measures 0×0; painting that would resize the
+    // stage to nothing and take the grid with it.
+    if (!width || !height) return null
+    return { base, width, height, grid: renderer?.grid() ?? null }
+  },
+  options: () => ({ amount: Number(els.grain.value), rate: Number(els.grainRate.value) }),
+})
+
+/** Live in the sense the render loop cares about: something changes between frames. */
+const sourceIsLive = (): boolean => Boolean(active && (active.live || grainOn()))
+
+/** Point the renderer at the source, or at the grain stage standing in front of it. */
+function attachSource(): void {
+  if (!renderer || !active) return
+  if (!grainOn()) {
+    renderer.setSource(active.source)
+    return
+  }
+  // Paint before attaching: a stage that has never painted is still 0×0, and a source
+  // with no dimensions gives the matcher no grid to work from.
+  grainStage.paint(performance.now(), true)
+  renderer.setSource(grainStage.canvas)
+}
 
 async function createSource(kind: string): Promise<ActiveSource> {
   if (kind in SCENES) {
@@ -383,7 +449,9 @@ function updateStats(): void {
   children.push(
     document.createTextNode(`· ${grid ? `${grid.columns}×${grid.rows} cells` : '—'} · `),
     fpsSpan,
-    document.createTextNode(` · ${name}${subset} · ${active?.kind ?? '—'}`),
+    document.createTextNode(
+      ` · ${name}${subset} · ${active?.kind ?? '—'}${grainOn() ? ' + grain' : ''}`,
+    ),
   )
   stats.replaceChildren(...children)
 }
@@ -391,7 +459,7 @@ function updateStats(): void {
 function renderLoopPolicy(): void {
   if (!renderer || !active) return
   const pageVisible = document.visibilityState !== 'hidden'
-  const continuous = active.live && els.animate.checked && outputVisible && pageVisible
+  const continuous = sourceIsLive() && els.animate.checked && outputVisible && pageVisible
   if (active.source instanceof HTMLVideoElement) {
     if (continuous) void active.source.play().catch(() => {})
     else active.source.pause()
@@ -407,7 +475,7 @@ function renderLoopPolicy(): void {
 function syncMotionPolicy(): void {
   renderLoopPolicy()
   if (
-    active?.tick &&
+    (active?.tick || grainOn()) &&
     els.animate.checked &&
     outputVisible &&
     document.visibilityState !== 'hidden'
@@ -433,7 +501,7 @@ reducedMotionQuery.addEventListener('change', () => {
 
 const resizeObserver = new ResizeObserver(() => {
   syncCanvasSize()
-  if (renderer && active && !active.live) renderer.render()
+  if (renderer && active && !sourceIsLive()) renderer.render()
 })
 
 /**
@@ -550,7 +618,7 @@ async function rebuild(): Promise<void> {
     }
   }
   syncCanvasSize()
-  if (active) renderer.setSource(active.source)
+  attachSource()
   syncFxPanel()
   applyInteraction()
   syncInteractionAvailability()
@@ -567,7 +635,7 @@ async function switchSource(kind: string): Promise<void> {
     const next = await createSource(kind)
     active?.cleanup?.()
     active = next
-    renderer?.setSource(next.source)
+    attachSource()
     syncMotionPolicy()
     updateStats()
   } catch (err) {
@@ -718,7 +786,7 @@ for (const input of optionInputs) {
     els.flatOut.value = els.flat.value
     els.hystOut.value = Number(els.hyst.value).toFixed(2)
     renderer?.setOptions(matchOptions())
-    if (renderer && active && !(active.live && els.animate.checked && outputVisible))
+    if (renderer && active && !(sourceIsLive() && els.animate.checked && outputVisible))
       renderer.render()
     syncPanel()
     updateStats()
@@ -751,6 +819,19 @@ els.animate.addEventListener('change', () => {
   animatePreferenceTouched = true
   syncMotionPolicy()
 })
+
+for (const input of [els.grain, els.grainRate]) {
+  input.addEventListener('input', () => {
+    els.grainOut.value = Number(els.grain.value).toFixed(2)
+    els.grainRateOut.value = `${els.grainRate.value}/s`
+    els.grainRate.disabled = !grainOn()
+    // Crossing zero changes which canvas the renderer reads and whether a still counts
+    // as live at all, so the source has to be re-attached rather than just re-rendered.
+    attachSource()
+    syncMotionPolicy()
+    updateStats()
+  })
+}
 
 /** Current dials as a minimal diff from the library defaults (what a snippet needs). */
 function getExportState(): ExportState {
@@ -802,6 +883,11 @@ function getExportState(): ExportState {
     compositor: selectedBackend().compositor === 'canvas2d' ? 'canvas2d' : undefined,
     options,
     interaction,
+    // Source-side, so it is not a renderer option and never will be — the snippets carry
+    // it as the draw pass it is.
+    grain: grainOn()
+      ? { amount: Number(els.grain.value), rate: Number(els.grainRate.value) }
+      : undefined,
   }
 }
 
@@ -877,26 +963,22 @@ window.addEventListener('beforeunload', () => {
 
 // scene animation + fps meter
 function animationLoop(): void {
-  if (
-    sceneRaf ||
-    !active?.tick ||
-    !els.animate.checked ||
-    !outputVisible ||
-    document.visibilityState === 'hidden'
-  ) {
-    return
-  }
+  const wanted = (): boolean =>
+    Boolean(active?.tick || grainOn()) &&
+    els.animate.checked &&
+    outputVisible &&
+    document.visibilityState !== 'hidden'
+  if (sceneRaf || !wanted()) return
   const tick = (): void => {
-    if (
-      !active?.tick ||
-      !els.animate.checked ||
-      !outputVisible ||
-      document.visibilityState === 'hidden'
-    ) {
+    if (!wanted()) {
       sceneRaf = 0
       return
     }
-    active.tick(performance.now() / 1000)
+    active?.tick?.(performance.now() / 1000)
+    // Rate-limited inside the stage: the loop runs at display rate because the scene
+    // under the grain may need to, but glyph churn at 60/s reads as noise in the text
+    // rather than as movement in the picture.
+    if (grainOn()) grainStage.paint(performance.now())
     frames++
     const now = performance.now()
     if (now - fpsWindowStart > 500) {

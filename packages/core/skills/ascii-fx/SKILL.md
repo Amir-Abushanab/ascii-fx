@@ -172,6 +172,28 @@ Design the source for the grid you are matching into, not for the screen it will
 the opposite instinct to normal canvas work, and it is the difference between a picture and a panel
 with nothing on it.
 
+**Effects go on the source too, not in the renderer.** There is no `noise:` or `contrast:` option
+and there will not be: matching is exact about the pixels it is given, and `interaction` runs
+_downstream_ of it, so it can only move glyphs that were already chosen. An effect painted in
+before matching changes **which glyph wins** — a jittered cell lands on a different character
+rather than a tinted version of the same one. That is the difference between ASCII noise and a
+tinted picture, and it is only available upstream.
+
+The same cell rule governs the effect. Noise finer than a cell averages into the block and reads as
+a faint haze; paint it one block per cell — `width / columns` across — and it reads as glyph churn.
+
+With `<AsciiCanvas>` or the renderer directly you already own the source, so paint it and call
+`render()`. `<AsciiImage>` has `draw` for it:
+
+```tsx
+<AsciiImage src="/portrait.jpg" alt="A portrait" columns={120} draw={drawGrain} animate fps={10} />
+```
+
+`draw(ctx, { image, width, height }, timeMs)` gets a buffer the image's natural size; `animate`
+re-runs it on a loop capped at `fps` (default 12 — every frame is a full re-match, and churn above
+~15fps reads as noise in the text rather than movement in the picture). Without `animate` an image
+is matched once and left.
+
 ## Emoji mode (`chromatic-v1`)
 
 Colour emoji need a **different algorithm**, not a bigger charset. `structural-v1` matches a 1-bit

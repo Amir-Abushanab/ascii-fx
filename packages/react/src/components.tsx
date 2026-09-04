@@ -169,6 +169,55 @@ function usePointerForward(
   }, [wrapperRef, renderer])
 }
 
+/**
+ * Resolve document visibility, viewport intersection and the motion preference into the
+ * one boolean that decides whether a loop may run, and call `onChange` whenever it moves.
+ *
+ * Factored out because two loops now gate on it — the playback loop below and the source
+ * draw loop in `<AsciiImage>` — and they have to agree. A component that keeps re-matching
+ * while scrolled out of view, or that animates under `prefers-reduced-motion`, is a bug in
+ * whichever of the two grew its own copy of the predicate.
+ *
+ * `visible` is reported alongside because "must not run" and "is not on screen" are
+ * different: a loop stopped for reduced motion still owes a static frame to a component
+ * the user is looking at.
+ */
+function observeRunGate(
+  element: HTMLElement | null,
+  options: { pauseWhenOffscreen: boolean; motionAllowed: boolean },
+  onChange: (shouldRun: boolean, visible: boolean) => void,
+): () => void {
+  const { pauseWhenOffscreen, motionAllowed } = options
+  let intersecting = true
+
+  const sync = (): void => {
+    const documentVisible = typeof document === 'undefined' || document.visibilityState !== 'hidden'
+    const shouldRun = documentVisible && motionAllowed && (!pauseWhenOffscreen || intersecting)
+    onChange(shouldRun, documentVisible && intersecting)
+  }
+
+  const onVisibilityChange = (): void => sync()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
+  let observer: IntersectionObserver | undefined
+  if (pauseWhenOffscreen && element && typeof IntersectionObserver !== 'undefined') {
+    const rect = element.getBoundingClientRect()
+    intersecting =
+      rect.bottom >= 0 && rect.right >= 0 && rect.top <= innerHeight && rect.left <= innerWidth
+    observer = new IntersectionObserver(([entry]) => {
+      intersecting = entry?.isIntersecting ?? true
+      sync()
+    })
+    observer.observe(element)
+  }
+
+  sync()
+  return () => {
+    observer?.disconnect()
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+  }
+}
+
 /** Keep expensive render/media loops aligned with actual component visibility. */
 function useContinuousPlayback(
   wrapperRef: React.RefObject<HTMLDivElement | null>,
@@ -185,51 +234,32 @@ function useContinuousPlayback(
       renderer?.stop()
       return
     }
-    const element = wrapperRef.current
     // Captured here, not read in the cleanup: by teardown React may already have
     // detached the ref, and pausing whichever element this effect actually drove is
     // the point.
     const mediaElement = mediaRef?.current
-    let intersecting = true
     let running = false
 
-    const sync = (): void => {
-      const documentVisible =
-        typeof document === 'undefined' || document.visibilityState !== 'hidden'
-      const motionAllowed = !respectReducedMotion || !reducedMotion
-      const shouldRun = documentVisible && motionAllowed && (!pauseWhenOffscreen || intersecting)
-      const media = mediaRef?.current
-      if (shouldRun) {
-        if (!running) renderer.start()
-        if (media?.paused) void media.play().catch(() => {})
-      } else {
-        renderer.stop()
-        media?.pause()
-        // Reduced motion still gets a useful static frame when visible.
-        if (!running && documentVisible && intersecting) renderer.render()
-      }
-      running = shouldRun
-    }
+    const stopGate = observeRunGate(
+      wrapperRef.current,
+      { pauseWhenOffscreen, motionAllowed: !respectReducedMotion || !reducedMotion },
+      (shouldRun, visible) => {
+        const media = mediaRef?.current
+        if (shouldRun) {
+          if (!running) renderer.start()
+          if (media?.paused) void media.play().catch(() => {})
+        } else {
+          renderer.stop()
+          media?.pause()
+          // Reduced motion still gets a useful static frame when visible.
+          if (!running && visible) renderer.render()
+        }
+        running = shouldRun
+      },
+    )
 
-    const onVisibilityChange = (): void => sync()
-    document.addEventListener('visibilitychange', onVisibilityChange)
-
-    let observer: IntersectionObserver | undefined
-    if (pauseWhenOffscreen && element && typeof IntersectionObserver !== 'undefined') {
-      const rect = element.getBoundingClientRect()
-      intersecting =
-        rect.bottom >= 0 && rect.right >= 0 && rect.top <= innerHeight && rect.left <= innerWidth
-      observer = new IntersectionObserver(([entry]) => {
-        intersecting = entry?.isIntersecting ?? true
-        sync()
-      })
-      observer.observe(element)
-    }
-
-    sync()
     return () => {
-      observer?.disconnect()
-      document.removeEventListener('visibilitychange', onVisibilityChange)
+      stopGate()
       renderer.stop()
       mediaElement?.pause()
     }
@@ -246,11 +276,65 @@ function useContinuousPlayback(
   return reducedMotion
 }
 
+/**
+ * Paint the source yourself, instead of the image going to the matcher untouched.
+ *
+ * The matcher is exact about what it is given and deliberately owns nothing upstream of
+ * that, so every pixel effect — a contrast curve, a grain pass, a channel shift — belongs
+ * here rather than in a renderer option. `<AsciiImage>` had no seam for it at all: the
+ * `<img>` went straight to `setSource`, and wanting one changed pixel meant dropping to
+ * `<AsciiCanvas>` and hand-rolling the load, the buffer and the loop.
+ *
+ * `ctx` is a 2D context over a buffer the image's own natural size, so `fit`, `columns`
+ * and the rest behave exactly as they do without a `draw`. Nothing is drawn into it for
+ * you — paint the image first if you want it, which is what makes `draw` able to replace
+ * the picture rather than only decorate it. The buffer is not cleared between frames
+ * either, so a `draw` that means to start clean must say so.
+ *
+ * One rule decides whether an effect survives the grid: a cell samples `width / columns`
+ * source pixels across and fits a single colour to the whole block, so a feature finer
+ * than that arrives as its share of the average instead of as itself. Grain at 1px on a
+ * 2000px-wide image at 120 columns is invisible; the same grain in ~16px blocks is not.
+ *
+ * `timeMs` is the frame time from `requestAnimationFrame`, or 0 for the first paint.
+ */
+export type AsciiDraw = (
+  ctx: CanvasRenderingContext2D,
+  source: { image: HTMLImageElement; width: number; height: number },
+  timeMs: number,
+) => void
+
 export interface AsciiImageProps extends AsciiCommonProps {
   src: string
   /** Required; use alt="" for decorative images (spec §32). */
   alt: string
   crossOrigin?: 'anonymous' | 'use-credentials'
+  /**
+   * Paint the source instead of handing the `<img>` to the matcher as-is.
+   *
+   * Read fresh on every paint, so an animating image always calls the latest one. A
+   * still repaints when this changes identity — cheap for the stable function this
+   * expects, one extra match per parent render for an inline arrow, so wrap it in
+   * `useCallback` if the parent renders often.
+   */
+  draw?: AsciiDraw
+  /**
+   * Re-run `draw` on a loop. Default false: a still stays a still, matched once, which
+   * is the whole reason an image costs nothing per frame.
+   *
+   * The loop is this component's own, throttled to `fps` — not `renderer.start()`, which
+   * runs at display rate. It stops off-screen, on a hidden tab, and under
+   * `prefers-reduced-motion`, leaving the last painted frame up.
+   */
+  animate?: boolean
+  /**
+   * Ceiling for `animate`, in frames per second. Default 12.
+   *
+   * Deliberately not the display rate. Each frame is a full re-match, and glyph churn
+   * above roughly 15fps stops reading as movement in the picture and starts reading as
+   * noise in the text — so the default is both the cheaper and the better-looking one.
+   */
+  fps?: number
 }
 
 export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function AsciiImage(props, ref) {
@@ -258,13 +342,16 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
     src,
     alt,
     crossOrigin,
+    draw,
+    animate = false,
+    fps = 12,
     className,
     style,
     profile,
     backend,
     interaction,
-    pauseWhenOffscreen: _pauseWhenOffscreen,
-    respectReducedMotion,
+    pauseWhenOffscreen = true,
+    respectReducedMotion = true,
     onError,
     ...options
   } = props
@@ -280,27 +367,94 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
     ...options,
   })
 
+  const reducedMotion = usePrefersReducedMotion()
+  // Read at paint time rather than depended on: an inline `draw={(ctx) => …}` changes
+  // identity every commit, and re-running the effect on that would rebuild the buffer and
+  // re-`setSource` for a function that does the same thing.
+  const drawRef = useRef(draw)
+  const repaintRef = useRef<(() => void) | null>(null)
+  const drawSynced = useRef(false)
+  useEffect(() => {
+    drawRef.current = draw
+    // The attach below paints once with the current `draw`, so the first run of this
+    // effect has nothing to do; after that, a still has to be told the pixels changed.
+    // An animating one picks it up on its next frame by itself.
+    if (drawSynced.current && draw && !animate) repaintRef.current?.()
+    drawSynced.current = true
+  }, [draw, animate])
+
+  const drawn = Boolean(draw)
   useEffect(() => {
     const img = imgRef.current
     if (!renderer || !img) return
     let live = true
+    let raf = 0
+    let lastPaint = Number.NEGATIVE_INFINITY
+    let stopGate: (() => void) | undefined
+
     const attach = (): void => {
       if (!live || img.naturalWidth === 0) return
-      renderer.setSource(img)
-      renderer.render()
+      const buffer = drawn ? document.createElement('canvas') : undefined
+      if (buffer) {
+        buffer.width = img.naturalWidth
+        buffer.height = img.naturalHeight
+      }
+      const ctx = buffer?.getContext('2d') ?? null
+      if (!buffer || !ctx) {
+        // No `draw`, or a context this browser would not give us: the plain path, where
+        // the <img> is the source and one match is the entire cost.
+        renderer.setSource(img)
+        renderer.render()
+        setReady(true)
+        return
+      }
+      const meta = { image: img, width: buffer.width, height: buffer.height }
+      const paint = (timeMs: number): void => {
+        drawRef.current?.(ctx, meta, timeMs)
+        renderer.render()
+      }
+      renderer.setSource(buffer)
+      // Once, unconditionally — before any gate. Reduced motion and an off-screen mount
+      // both still owe the reader the picture; what they withhold is the movement.
+      paint(0)
+      repaintRef.current = () => paint(performance.now())
       setReady(true)
+
+      if (!animate) return
+      const interval = 1000 / Math.max(1, fps)
+      const step = (timeMs: number): void => {
+        raf = requestAnimationFrame(step)
+        if (timeMs - lastPaint < interval) return
+        lastPaint = timeMs
+        paint(timeMs)
+      }
+      stopGate = observeRunGate(
+        wrapperRef.current,
+        { pauseWhenOffscreen, motionAllowed: !respectReducedMotion || !reducedMotion },
+        (shouldRun) => {
+          if (shouldRun && !raf) raf = requestAnimationFrame(step)
+          else if (!shouldRun && raf) {
+            cancelAnimationFrame(raf)
+            raf = 0
+          }
+        },
+      )
     }
+
     if (img.complete) attach()
     img.addEventListener('load', attach)
     return () => {
       live = false
       img.removeEventListener('load', attach)
+      if (raf) cancelAnimationFrame(raf)
+      stopGate?.()
+      repaintRef.current = null
       setReady(false)
     }
     // `src` is not read above, but it is a real dependency: swapping it has to
     // run this cleanup so readiness resets and the new source re-attaches.
     // oxlint-disable-next-line react/exhaustive-effect-dependencies
-  }, [renderer, src])
+  }, [renderer, src, drawn, animate, fps, pauseWhenOffscreen, respectReducedMotion, reducedMotion])
 
   useErrorCallback(error, onError)
   useCanvasAutosize(canvasRef, renderer)

@@ -4,6 +4,7 @@ export {
   AsciiVideo,
   type AsciiCanvasProps,
   type AsciiCommonProps,
+  type AsciiDraw,
   type AsciiHandle,
   type AsciiImageProps,
   type AsciiVideoProps,
