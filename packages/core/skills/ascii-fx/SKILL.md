@@ -144,6 +144,34 @@ hands the matcher 256 distinct shapes.
 `matcher: 'shape6' | 'ramp'` are cheaper, visibly approximate matchers. They are explicit opt-ins,
 never automatic fallbacks — `auto` backend selection never silently degrades quality.
 
+## Authoring the source
+
+Everything above is about the renderer. This is about what you feed it, and it is where a correct
+drawing most often arrives as an empty panel.
+
+**The cell is the pixel.** One cell samples `sourceWidth / columns` pixels across (and the cell
+aspect again down), and `mono`/`foreground` fit **one** colour to the whole block. So a feature
+narrower than a cell does not render thinly — it renders as its own share of that average.
+
+Worked, because the arithmetic is the whole point. A 960px-wide source at `columns: 164` gives a
+cell about 6px across. A 3px orbit line crossing one fills 31% of it, so `#66779c` (luma 118)
+composites at luma ~37: the panel's own colour, invisible, however opaque it was.
+
+**Raising the colour cannot fix low coverage.** At 31% you would need a luma above 255 to land
+mid-grey. Only coverage fixes coverage:
+
+- **Bead a path instead of stroking it.** A row of dots, each filling the one cell it lands in,
+  reads where a hairline of the same ink does not — and the gaps cost nothing, since an empty cell
+  was always going to be empty.
+- **Draw discs, not pixels.** A 1.5px star is a quarter of a cell and comes out as panel.
+- **Or raise `columns`** so the cell shrinks around the feature you already have. Watch the other
+  end of that trade: past roughly 4 CSS px per glyph the output stops reading as type and starts
+  reading as a dot field, which is usually not why anyone reached for this.
+
+Design the source for the grid you are matching into, not for the screen it will be shown on. It is
+the opposite instinct to normal canvas work, and it is the difference between a picture and a panel
+with nothing on it.
+
 ## Emoji mode (`chromatic-v1`)
 
 Colour emoji need a **different algorithm**, not a bigger charset. `structural-v1` matches a 1-bit
@@ -194,6 +222,17 @@ as scene geometry instead of as a post-pass.
 
 ## Gotchas
 
+- **`foreground` is `mono` only.** In `color: 'foreground'` the glyph colour is fitted per cell from
+  the source and the option is ignored — passing it looks like pinning an ink and does nothing. (In
+  that mode the `background` option is the backdrop.) A one-colour source is what makes `foreground`
+  output _look_ like a fixed ink; feed it a colour photo and the colour comes through.
+- **`alpha: 'mask'` gates on opacity, not on colour.** A cell that is not opaque is dropped before it
+  is ever matched, so anything structural has to be drawn opaque — faintness belongs in the colour,
+  not the alpha. Gradients laid ON TOP of an already-opaque fill are fine: they composite before the
+  mask looks.
+- **When the output is sparse, look at the source before touching the renderer.** `toDataURL` the
+  canvas you are feeding in and open it. It separates "drew it wrong" from "drew it too small for
+  the grid", which look identical from the output side and have nothing to do with each other.
 - **A canvas is bound to its first context type.** Switching backend needs a fresh `<canvas>`
   element, not just a new renderer. Note the CPU backend takes a **`webgl2`** context by default, so
   `getContext('2d')` on its canvas returns null — read it back with `drawImage` onto your own 2D
