@@ -19,6 +19,57 @@ import {
 
 const base = import.meta.env.BASE_URL
 
+// Where this page actually lives once published. Crawlers resolve nothing relative, so
+// the canonical, og:url and og:image below all have to be absolute — and pointing them at
+// a dev server's origin would tell an indexer the wrong home. The deploy derives
+// DOCS_SITE (Astro.site) from the repository owner so a fork canonicalises to itself; a
+// build without it falls back to where this repo's own Pages site is.
+const PUBLISHED = 'https://amir-abushanab.github.io/ascii-fx/'
+const canonical = Astro.site ? new URL(base, Astro.site).href : PUBLISHED
+const ogImage = new URL('og.png', canonical).href
+const repository = 'https://github.com/Amir-Abushanab/ascii-fx'
+
+// One sentence, written for a search result and a link preview rather than for the page:
+// what it does, then the one thing that makes it different. Reused by every tag below and
+// by the structured data, so the three can never disagree.
+const TITLE = 'ASCII FX — real-time ASCII rendering for the web'
+const DESCRIPTION =
+  'Turn images and video into ASCII that actually looks like the picture. Glyphs matched ' +
+  'by 8×8 shape, not a brightness ramp — in real time on WebGPU, with an exact CPU fallback.'
+const OG_ALT =
+  'ASCII FX: a 3D scene of tumbling solids rendered entirely in coloured ASCII characters.'
+
+// schema.org, so a crawler can tell that the playground, the repository and the packages
+// are one thing rather than three. No aggregateRating or offers — there are none, and
+// inventing them is what gets structured data ignored.
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebSite',
+      '@id': `${canonical}#website`,
+      url: canonical,
+      name: 'ASCII FX',
+      description: DESCRIPTION,
+      inLanguage: 'en',
+    },
+    {
+      '@type': 'SoftwareSourceCode',
+      '@id': `${canonical}#software`,
+      name: 'ASCII FX',
+      description: DESCRIPTION,
+      url: canonical,
+      image: ogImage,
+      codeRepository: repository,
+      programmingLanguage: ['TypeScript', 'WGSL', 'GLSL'],
+      runtimePlatform: 'Web browser',
+      license: 'https://spdx.org/licenses/MIT.html',
+      author: { '@type': 'Person', name: 'Amir Abushanab', url: 'https://github.com/Amir-Abushanab' },
+      keywords: 'ASCII art, ASCII rendering, WebGPU, image to ASCII, video to ASCII, React',
+    },
+  ],
+}
+
 // The page speaks the same font the default profile was compiled from. The URL
 // has to carry the site base, so this rule is built here rather than sitting in
 // the static stylesheet below.
@@ -179,9 +230,33 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ASCII FX · structural ASCII rendering for the web</title>
-    <meta name="description" content="High-fidelity structural ASCII rendering for the web." />
+    <title>{TITLE}</title>
+    <meta name="description" content={DESCRIPTION} />
+    <link rel="canonical" href={canonical} />
     <link rel="icon" href={base + 'favicon.svg'} type="image/svg+xml" />
+    <meta name="theme-color" content="#0b0b0f" />
+    <meta name="author" content="Amir Abushanab" />
+
+    {/* The card is assets/og.png, rendered by `pnpm assets` with this library and copied
+        into public/ by prep.mjs — the preview is the renderer's own output. Width and
+        height are declared so a crawler can lay the card out before it has fetched it. */}
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ASCII FX" />
+    <meta property="og:title" content={TITLE} />
+    <meta property="og:description" content={DESCRIPTION} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="640" />
+    <meta property="og:image:alt" content={OG_ALT} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={TITLE} />
+    <meta name="twitter:description" content={DESCRIPTION} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content={OG_ALT} />
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(structuredData)} />
     <style is:global set:html={fontFace}></style>
     <style is:global>
       :root {
@@ -1209,9 +1284,13 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
     </style>
   </head>
   <body>
-    <h1>ASCII FX playground</h1>
+    {/* The one heading a search engine weighs most, so it says what this is rather than
+        what part of it you are looking at — the playground is the thing under it. */}
+    <h1>ASCII FX — structural ASCII rendering for the web</h1>
     <div id="heroStage" class="hero-stage">
-      <canvas id="out"></canvas>
+      {/* A canvas has no accessible name of its own, and this one is the page's subject. */}
+      <canvas id="out" role="img" aria-label="Live ASCII rendering of the selected source"
+      ></canvas>
       <div class="hero-busy" role="status" aria-live="polite">
         <span class="hero-ring"></span>
         <span id="heroBusyLabel" class="hero-busy-label">switching…</span>
@@ -1787,9 +1866,13 @@ mono: both colors fixed by the palette</code></pre>
     </section>
     <footer>
       <p>
+        {/* A text node that is nothing but a line break is dropped, taking the sentence
+            space with it — so an anchor has to open on the line of the word before it.
+            "underneath.Geist" was live for exactly that reason. */}
         ASCII FX matches glyphs by shape rather than brightness, exactly, on WebGPU, with a bit-identical CPU
-        reference underneath.
-        <a href="https://vercel.com/font" rel="noopener">Geist Mono</a> under
+        reference underneath. The source, the algorithm spec and the packages are <a
+          href={repository} rel="noopener">on GitHub</a>, under the MIT licence. <a
+          href="https://vercel.com/font" rel="noopener">Geist Mono</a> under
         the <a href="https://openfontlicense.org" rel="noopener">SIL Open Font License</a>. The structural
         approach follows the Ditherlab/<a href="https://hpjansson.org/chafa/" rel="noopener">chafa</a> lineage,
         and <a href="https://github.com/hectorm/chafa-wasm" rel="noopener">chafa-wasm</a> is in the table above.
