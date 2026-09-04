@@ -13,10 +13,18 @@
  * `changeset publish` is itself only a wrapper around `pnpm publish` (which rewrites workspace: deps
  * and performs npm OIDC trusted publishing) plus a local `git tag` per published package, so we do
  * both directly — but only for versions the registry confirms are missing, so we never provoke the
- * E403. For each package we publish we create the tag and print the `New tag:` line;
- * changesets/action scans this script's stdout for those (it ignores our exit code), runs
- * `git push origin <tag>` for each — which is why the tag must already exist in this checkout —
- * and then cuts the GitHub Releases.
+ * E403.
+ *
+ * Telling changesets/action what shipped is a separate contract, and the one this script got wrong
+ * for three releases. v1 scanned stdout for `New tag:` lines. v2 does not read stdout at all: it
+ * creates an ndjson file, hands the path over as CHANGESETS_OUTPUT, and after this script exits
+ * reads one `{ packageName, tag }` object per line — that list is what it pushes tags for and cuts
+ * GitHub Releases from. Printing `New tag:` and writing nothing to that file is exactly how 0.4.0,
+ * 0.4.1 and 0.5.0 reached npm with no tag and no Release while the job stayed green. So every tag
+ * we make is recorded there as well as printed; the printing is now only for the log.
+ *
+ * The tag must also exist in this checkout, because the action runs `git push origin <tag>` for
+ * each line rather than creating it.
  *
  * Also self-heals: an already-on-npm version whose git tag never made it to origin (a past run
  * that published, then died before tags were pushed) gets its tag and `New tag:` line restored,
@@ -26,7 +34,7 @@
  * Run via `pnpm release`, which builds the packages first. Pass `--dry-run` to preview.
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { appendFileSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const dryRun = process.argv.includes('--dry-run')
@@ -74,6 +82,26 @@ function isPublished(name, version) {
   }
 }
 
+/**
+ * Tell changesets/action about a tag we made, on the channel it actually reads.
+ *
+ * Appended rather than rewritten: publish and tag-restore both call this, and the action reads the
+ * file once after we exit. Absent when the script is run by hand (`pnpm release` locally, or
+ * --dry-run), where there is no action to tell.
+ */
+function recordTag(packageName, tag) {
+  const out = process.env.CHANGESETS_OUTPUT
+  if (!out) return
+  try {
+    appendFileSync(out, `${JSON.stringify({ packageName, tag })}\n`)
+  } catch (err) {
+    // Loud, but not fatal: the packages are already on npm by this point, and failing the run
+    // would not un-publish them. A missing tag is recoverable on the next run; a red job that
+    // published anyway is the state this whole script exists to avoid.
+    console.error(`warning: could not record ${tag} in CHANGESETS_OUTPUT: ${String(err)}`)
+  }
+}
+
 /** Annotated tag at HEAD, like `changeset publish` makes; a pre-existing tag only warns. */
 function ensureLocalTag(tag) {
   try {
@@ -84,22 +112,29 @@ function ensureLocalTag(tag) {
 }
 
 /**
- * Versions deliberately left untagged. 0.2.0 was published from a laptop before this pipeline
- * worked; the commit it was cut from is not recoverable from a CI checkout, so restoring it would
- * pin seven tags and seven GitHub Releases to whatever commit the run happens to check out. An
- * inaccurate tag is worse than no tag, so it stays absent by choice rather than by accident.
- * Every package shares one version (the `fixed` group in .changeset/config.json), so one entry
- * covers all seven.
+ * Versions deliberately left untagged. Restoring a tag pins it to whatever commit the run happens
+ * to check out, not the commit the version was cut from — so for a version whose release commit is
+ * no longer identifiable, a restore would put seven tags and seven GitHub Releases on the wrong
+ * one. An inaccurate tag is worse than no tag, so these stay absent by choice rather than by
+ * accident. Every package shares one version (the `fixed` group in .changeset/config.json), so one
+ * entry covers all seven.
+ *
+ * - 0.2.0 — published from a laptop before this pipeline worked.
+ * - 0.4.0, 0.4.1 — lost their tags to the CHANGESETS_OUTPUT mismatch above. They are far enough
+ *   back that the restore would land them on a commit that has nothing to do with either release.
+ *   0.5.0 hit the same bug but was tagged by hand at its real release commit, so it needs no
+ *   restore and is not listed.
  */
-const NEVER_RESTORE = new Set(['0.2.0'])
+const NEVER_RESTORE = new Set(['0.2.0', '0.4.0', '0.4.1'])
 
 /**
  * A version can be live on npm yet have no git tag or GitHub Release: a previous run published,
  * then died before changesets/action pushed the tags (0.3.0 lost its tags to the changesets↔npm 11
- * crash, 0.4.1 to this script not creating them), or the first publish ran from a laptop. Such a
- * version never re-enters `pending`, so without this pass its tag would stay lost on every future
- * run. Re-create it here (at this run's commit — the original release commit isn't knowable) and
- * re-print `New tag:` so changesets/action pushes it and cuts the Release. Never fails the run.
+ * crash, 0.4.x and 0.5.0 to the CHANGESETS_OUTPUT mismatch), or the first publish ran from a
+ * laptop. Such a version never re-enters `pending`, so without this pass its tag would stay lost on
+ * every future run. Re-create it here (at this run's commit — the original release commit isn't
+ * knowable) and record it, so changesets/action pushes it and cuts the Release. Never fails the
+ * run.
  */
 function restoreMissingTags(onNpm) {
   if (onNpm.length === 0) return
@@ -131,6 +166,7 @@ function restoreMissingTags(onNpm) {
     }
     console.log(`Restoring missing tag for already-published ${tag}`)
     ensureLocalTag(tag)
+    recordTag(p.name, tag)
     console.log(`New tag: ${tag}`)
   }
 }
@@ -167,6 +203,7 @@ for (const p of pending) {
     // changesets/action will `git push origin <tag>`, so the tag must exist locally.
     const tag = `${p.name}@${p.version}`
     ensureLocalTag(tag)
+    recordTag(p.name, tag)
     console.log(`New tag: ${tag}`)
     published.push(p)
   } catch {
