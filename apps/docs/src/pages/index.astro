@@ -1332,6 +1332,12 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         <input id="imageFile" class="file-input" type="file" accept="image/*" tabindex="-1" aria-label="Choose an image file" />
         <input id="videoFile" class="file-input" type="file" accept="video/*" tabindex="-1" aria-label="Choose a video file" />
       </fieldset>
+      <fieldset>
+        <legend><i data-lucide="grip"></i> Grain</legend>
+        <label><span class="hint" tabindex="0" data-hint="Jitters each cell's brightness before matching, which pushes cells across glyph boundaries. Painted one block per cell — finer than that and the cell averages it away">amount</span> <input id="grain" type="range" min="0" max="0.8" step="0.02" value="0" /><output id="grainOut">0.00</output></label>
+        <label><span class="hint" tabindex="0" data-hint="How often the noise is redrawn. Above ~15/s the churn stops reading as movement in the picture and starts reading as noise in the text">rate</span> <input id="grainRate" type="range" min="1" max="24" step="1" value="10" disabled /><output id="grainRateOut">10/s</output></label>
+        <p class="fx-note">Not a renderer option: the noise is painted onto the source before the matcher ever sees it, so it changes which glyphs get picked rather than tinting the ones already chosen. Turning it up makes a still image live — every frame is a full re-match.</p>
+      </fieldset>
       <fieldset id="fontBox">
         <legend><i data-lucide="type"></i> Font</legend>
         <select id="font" aria-label="Font" title="The glyph set. Compiled profiles render identically everywhere; system fonts are profiled at runtime in your browser">
