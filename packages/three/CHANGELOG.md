@@ -1,5 +1,13 @@
 # @ascii-fx/three
 
+## 0.6.0
+
+### Patch Changes
+
+- Updated dependencies [[`364b51e`](https://github.com/Amir-Abushanab/ascii-fx/commit/364b51e262b3c72bc85337f780b8533b8fedb1cc)]:
+  - @ascii-fx/gpu@0.6.0
+  - @ascii-fx/core@0.6.0
+
 ## 0.5.0
 
 ### Patch Changes
