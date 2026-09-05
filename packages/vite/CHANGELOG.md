@@ -1,5 +1,13 @@
 # @ascii-fx/vite
 
+## 0.6.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ascii-fx/compiler@0.6.0
+  - @ascii-fx/core@0.6.0
+
 ## 0.5.0
 
 ### Patch Changes
