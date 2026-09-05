@@ -12,7 +12,11 @@ const shared = {
 export default defineConfig([
   {
     ...shared,
-    entry: ['src/index.ts'],
+    // `./tilt` is its OWN entry, not just a re-export from the index: it is the one part of the
+    // package a page can want without wanting the renderer, and the one part a page that uses the
+    // renderer can skip entirely. Its own file is what lets `import('@ascii-fx/gpu/tilt')` in
+    // `<AsciiImage tilt>` be a chunk instead of dead weight in every bundle (spec §9).
+    entry: ['src/index.ts', 'src/tilt.ts'],
     clean: true,
   },
   {

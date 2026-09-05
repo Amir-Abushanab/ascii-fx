@@ -10,6 +10,9 @@ import { defineConfig } from 'vitest/config'
 const alias = {
   '@ascii-fx/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
   '@ascii-fx/compiler': fileURLToPath(new URL('./packages/compiler/src/index.ts', import.meta.url)),
+  // The subpath MUST come first: a string alias matches by prefix, so '@ascii-fx/gpu' would
+  // otherwise swallow '@ascii-fx/gpu/tilt' and resolve it to `index.ts/tilt`.
+  '@ascii-fx/gpu/tilt': fileURLToPath(new URL('./packages/gpu/src/tilt.ts', import.meta.url)),
   '@ascii-fx/gpu': fileURLToPath(new URL('./packages/gpu/src/index.ts', import.meta.url)),
   '@ascii-fx/three': fileURLToPath(new URL('./packages/three/src/index.ts', import.meta.url)),
   '@ascii-fx/react': fileURLToPath(new URL('./packages/react/src/index.ts', import.meta.url)),

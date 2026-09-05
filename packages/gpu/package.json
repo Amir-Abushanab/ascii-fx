@@ -32,6 +32,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./tilt": {
+      "types": "./dist/tilt.d.ts",
+      "default": "./dist/tilt.js"
     }
   },
   "publishConfig": {
