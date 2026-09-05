@@ -18,7 +18,9 @@
  * Telling changesets/action what shipped is a separate contract, and the one this script got wrong
  * for three releases. v1 scanned stdout for `New tag:` lines. v2 does not read stdout at all: it
  * creates an ndjson file, hands the path over as CHANGESETS_OUTPUT, and after this script exits
- * reads one `{ packageName, tag }` object per line — that list is what it pushes tags for and cuts
+ * reads one `{ type: 'git-tag', tag, packageName }` object per line — the `type` discriminator is
+ * what it matches on, and a line without it is read and dropped in silence — that list is what it
+ * pushes tags for and cuts
  * GitHub Releases from. Printing `New tag:` and writing nothing to that file is exactly how 0.4.0,
  * 0.4.1 and 0.5.0 reached npm with no tag and no Release while the job stayed green. So every tag
  * we make is recorded there as well as printed; the printing is now only for the log.
@@ -93,7 +95,7 @@ function recordTag(packageName, tag) {
   const out = process.env.CHANGESETS_OUTPUT
   if (!out) return
   try {
-    appendFileSync(out, `${JSON.stringify({ packageName, tag })}\n`)
+    appendFileSync(out, `${JSON.stringify({ type: 'git-tag', tag, packageName })}\n`)
   } catch (err) {
     // Loud, but not fatal: the packages are already on npm by this point, and failing the run
     // would not un-publish them. A missing tag is recoverable on the next run; a red job that
