@@ -15,8 +15,18 @@ import type {
   ProfileSource,
   RGB,
 } from '@ascii-fx/core'
-import type { AsciiRenderer, BackendChoice, FitMode, InteractionOptions } from '@ascii-fx/gpu'
+import type {
+  AsciiRenderer,
+  BackendChoice,
+  FitMode,
+  InteractionOptions,
+  TiltOptions,
+  TiltStatus,
+} from '@ascii-fx/gpu'
 import { getAsciiSupport } from '@ascii-fx/gpu'
+// The tilt runtime is NOT imported here: `useTiltForward` fetches '@ascii-fx/gpu/tilt' only when a
+// component actually asks for tilt, so the ~1.1 KB sensor stays out of every bundle that doesn't.
+import type { TiltSource } from '@ascii-fx/gpu/tilt'
 import { useAscii, usePrefersReducedMotion } from './hooks.js'
 
 export interface AsciiCommonProps {
@@ -43,6 +53,21 @@ export interface AsciiCommonProps {
   fit?: FitMode
   clearColor?: readonly [number, number, number, number]
   interaction?: InteractionOptions | null
+  /**
+   * Drive the pointer from the device's orientation sensor, so the `interaction` effect above works
+   * on a phone — which has no cursor to give it. `true` takes the defaults; an object tunes `range`
+   * (degrees to the edges, default 25), `smoothing` (default 0.18) and `invertX` / `invertY`.
+   *
+   * On iOS this does nothing, on purpose. Safari gates the sensor behind a modal permission dialog
+   * and nothing here opens one, so the pointer simply stays where it was and the component looks
+   * exactly as it does without `tilt`. Treat tilt as an enhancement some phones don't get, the way
+   * you would a hover state — a decorative effect is not worth interrupting a reader to ask for a
+   * sensor. (A page where tilt IS the point can call `enableTilt()` on the handle from a tap.)
+   * Elsewhere it starts as soon as the renderer exists. Suppressed, like autoplay, while
+   * `respectReducedMotion` holds and the reader asked for reduced motion: a page that shifts
+   * whenever the phone moves is the kind of motion that preference is about.
+   */
+  tilt?: boolean | TiltOptions
   temporal?: boolean
   adaptiveResolution?: boolean
   /** Pause continuous rendering while the component is outside the viewport. Default true. */
@@ -66,6 +91,22 @@ export interface AsciiHandle {
   render(): void
   capture(): Promise<AsciiFrame>
   getSupport(): Promise<AsciiSupport>
+  /**
+   * Explicitly ask for the orientation sensor behind the `tilt` prop. OPTIONAL, and on iOS it opens
+   * a modal permission dialog — nothing calls it for you, and a decorative effect should simply go
+   * without tilt there rather than interrupt the reader.
+   *
+   * CALL IT FROM A USER GESTURE: iOS 13+ only grants the sensor from inside a tap handler, and
+   * awaiting anything before it spends the gesture. Resolves true once readings can flow — false
+   * when the platform has no sensor, `tilt` is off, or the reader refused. Where no permission is
+   * required tilt is already live and this resolves true.
+   */
+  enableTilt(): Promise<boolean>
+  /** Where the tilt sensor stands. `'prompt'` means the platform has a sensor but gates it, and
+   *  tilt stays inert unless the page explicitly asks — information, not an instruction to ask. */
+  tiltStatus(): TiltStatus
+  /** Take the next orientation reading as the neutral pose (the reader has changed grip). */
+  recenterTilt(): void
 }
 
 const wrapperStyle = (style?: CSSProperties): CSSProperties => ({
@@ -133,7 +174,11 @@ function useCanvasAutosize(
   }, [canvasRef, renderer])
 }
 
-function useHandle(ref: React.ForwardedRef<AsciiHandle>, renderer: AsciiRenderer | null): void {
+function useHandle(
+  ref: React.ForwardedRef<AsciiHandle>,
+  renderer: AsciiRenderer | null,
+  tilt: React.RefObject<TiltSource | null>,
+): void {
   useImperativeHandle(
     ref,
     () => ({
@@ -144,9 +189,72 @@ function useHandle(ref: React.ForwardedRef<AsciiHandle>, renderer: AsciiRenderer
         return renderer.captureFrame()
       },
       getSupport: () => getAsciiSupport(),
+      enableTilt: () => tilt.current?.enable() ?? Promise.resolve(false),
+      // Before the chunk lands there is no sensor to ask, but the platform check needs no chunk.
+      tiltStatus: () => tilt.current?.status ?? (sensorPresent() ? 'prompt' : 'unsupported'),
+      recenterTilt: () => tilt.current?.recenter(),
     }),
-    [renderer],
+    [renderer, tilt],
   )
+}
+
+/**
+ * Drive the renderer's pointer from the device's orientation sensor while the `tilt` prop asks for
+ * it, and hand back the live source so the imperative handle can prompt for permission and
+ * recenter it.
+ *
+ * The source is built from `renderer` and the on/off state ALONE, never from the options object:
+ * an inline `tilt={{ range: 20 }}` is a new object every commit, and rebuilding on that would drop
+ * the neutral pose the reader had settled into — and, on iOS, the permission they had granted.
+ * Retuning pushes the new numbers into the object both the source and the follow loop already hold.
+ */
+function useTiltForward(
+  renderer: AsciiRenderer | null,
+  tilt: boolean | TiltOptions | undefined,
+  respectReducedMotion: boolean,
+): React.RefObject<TiltSource | null> {
+  const reducedMotion = usePrefersReducedMotion()
+  const sourceRef = useRef<TiltSource | null>(null)
+  const optionsRef = useRef<TiltOptions>({})
+  const on = Boolean(tilt) && !(respectReducedMotion && reducedMotion)
+
+  // Retuning is a push, never a rebuild. Runs before the effect below on mount, so a source is
+  // always constructed with the options of the render that asked for it.
+  useEffect(() => {
+    const next = tilt === true || !tilt ? {} : tilt
+    optionsRef.current = next
+    sourceRef.current?.setOptions(next)
+  }, [tilt])
+
+  useEffect(() => {
+    if (!renderer || !on) return
+    let stop: (() => void) | undefined
+    let cancelled = false
+    void import('@ascii-fx/gpu/tilt')
+      .then(({ TiltSource, forwardTiltToPointer }) => {
+        if (cancelled) return
+        const source = new TiltSource(optionsRef.current)
+        sourceRef.current = source
+        stop = forwardTiltToPointer(source, renderer.pointer)
+      })
+      .catch(() => {
+        // Chunk unavailable (offline, a stale deploy): the pointer simply stays where it was.
+      })
+    return () => {
+      cancelled = true
+      stop?.()
+      sourceRef.current?.dispose()
+      sourceRef.current = null
+    }
+  }, [renderer, on])
+
+  return sourceRef
+}
+
+/** Whether the platform has an orientation sensor at all — the one tilt question answerable without
+ *  fetching the tilt chunk, and the one an app needs before deciding whether to offer tilt. */
+function sensorPresent(): boolean {
+  return typeof window !== 'undefined' && typeof window.DeviceOrientationEvent !== 'undefined'
 }
 
 function usePointerForward(
@@ -352,6 +460,7 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
     interaction,
     pauseWhenOffscreen = true,
     respectReducedMotion = true,
+    tilt,
     onError,
     ...options
   } = props
@@ -459,7 +568,7 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
   useErrorCallback(error, onError)
   useCanvasAutosize(canvasRef, renderer)
   usePointerForward(wrapperRef, renderer)
-  useHandle(ref, renderer)
+  useHandle(ref, renderer, useTiltForward(renderer, tilt, respectReducedMotion))
 
   return (
     <div ref={wrapperRef} className={className} style={wrapperStyle(style)}>
@@ -501,6 +610,7 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
     interaction,
     pauseWhenOffscreen = true,
     respectReducedMotion = true,
+    tilt,
     onError,
     ...options
   } = props
@@ -551,7 +661,7 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
   useErrorCallback(error, onError)
   useCanvasAutosize(canvasRef, renderer)
   usePointerForward(wrapperRef, renderer)
-  useHandle(ref, renderer)
+  useHandle(ref, renderer, useTiltForward(renderer, tilt, respectReducedMotion))
 
   return (
     <div ref={wrapperRef} className={className} style={wrapperStyle(style)}>
@@ -591,6 +701,7 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(
       interaction,
       pauseWhenOffscreen = true,
       respectReducedMotion = true,
+      tilt,
       onError,
       ...options
     } = props
@@ -622,7 +733,7 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(
     useErrorCallback(error, onError)
     useCanvasAutosize(canvasRef, renderer)
     usePointerForward(wrapperRef, renderer)
-    useHandle(ref, renderer)
+    useHandle(ref, renderer, useTiltForward(renderer, tilt, respectReducedMotion))
 
     return (
       <div ref={wrapperRef} className={className} style={wrapperStyle(style)}>

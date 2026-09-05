@@ -69,6 +69,27 @@ Without WebGPU, both halves of the work still leave the main thread. The matcher
 
 On a live source the matcher costs one frame of latency, since a frame is presented while the next one matches; the first frame, static sources, and `captureFrame()` are matched inline and cost none. `workers: false` and `compositor: 'canvas2d'` put either half back the way it was.
 
+## Tilt: the pointer a phone doesn't have
+
+Every `interaction` type is driven by the pointer, so an effect tuned on a desktop does nothing at
+all on a phone. `tilt` fills that in from the orientation sensor:
+
+```tsx
+<AsciiImage src="/cat.jpg" alt="Cat" interaction={{ type: 'glyph-swell' }} tilt />
+```
+
+Readings are normalized to canvas coordinates the way a ball would roll on the screen, rotated by
+the screen angle so "right" stays right in landscape, and centred on whatever pose the reader was
+already holding — a phone at the usual 50° starts in the middle of the canvas, not pinned to a
+corner. The pointer eases toward each new pose on a frame loop that parks itself once it arrives.
+
+iOS gets no tilt on purpose: Safari gates the sensor behind a modal permission dialog and nothing
+here opens one, so the component looks exactly as it does without `tilt`. Treat it as an enhancement
+some phones don't get. A page where tilt is the point can call `handle.enableTilt()` from a tap to
+ask explicitly. Outside React, `@ascii-fx/gpu/tilt`
+exports `TiltSource` and `forwardTiltToPointer` to wire by hand — its own subpath, so the sensor is
+a chunk the components fetch on demand rather than bytes in every bundle that never tilts.
+
 ## Colour glyphs
 
 Emoji carry their own colour, which removes the move the main matcher is built on: with a free foreground and background, the best colours for a mask are the means of its two sample sets, and that is exactly what makes the rerank exact. Baked colour leaves nothing to fit — so `chromatic-v1` is a **separate algorithm**, comparing a cell's 64 samples against the glyph's own, composited over the backdrop it will be drawn on.

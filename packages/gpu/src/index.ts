@@ -3,6 +3,7 @@ import { WebGpuAsciiRenderer } from './renderer.js'
 import type { AsciiRenderer, AsciiRendererOptions } from './types.js'
 
 export { getAsciiSupport } from './support.js'
+export { forwardTiltToPointer, TiltSource, type TiltOptions, type TiltStatus } from './tilt.js'
 export { MAX_GPU_GLYPHS } from './shaders.js'
 export { CpuAsciiRenderer } from './cpuBackend.js'
 export { WebGpuAsciiRenderer } from './renderer.js'

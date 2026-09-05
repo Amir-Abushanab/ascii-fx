@@ -140,9 +140,43 @@ hands the matcher 256 distinct shapes.
 | `temporal`           | Skip re-matching cells whose pixels did not change. Exact, great for video, WebGPU only.                                                                                   |
 | `adaptiveResolution` | Lower `columns` under frame pressure and recover. **WebGPU only** — so two backends can land on different grids.                                                           |
 | `interaction`        | Pointer/time effects composited on top (`reveal`, `displace`, `wave`, `push`…). Never re-runs matching.                                                                    |
+| `tilt`               | React only: drive the pointer from the device's orientation sensor, so `interaction` works on a phone. `true`, or `{ range, smoothing, invertX, invertY }`.                |
 
 `matcher: 'shape6' | 'ramp'` are cheaper, visibly approximate matchers. They are explicit opt-ins,
 never automatic fallbacks — `auto` backend selection never silently degrades quality.
+
+### Tilt: the pointer a phone doesn't have
+
+Every `interaction` type is driven by the pointer, so on a phone the effect you tuned on a desktop
+does nothing at all. `tilt` fills that in from the orientation sensor: readings are normalized to
+canvas coordinates the way a ball would roll on the screen, rotated by the screen angle so "right"
+stays right in landscape, and centred on whatever pose the reader was already holding — a phone at
+the usual 50° starts in the middle of the canvas, not pinned to a corner. The pointer eases toward
+each new pose on a frame loop that parks itself once it arrives, so a phone lying still costs
+nothing.
+
+**iOS gets no tilt, on purpose.** Safari gates the sensor behind a modal permission dialog, and
+nothing in this library opens one — the pointer stays where it was and the component looks exactly
+as it does without `tilt`. Treat tilt as an enhancement some phones don't get, the way you would a
+hover state; don't build a fallback for it and don't build a permission button for it. Elsewhere
+tilt starts as soon as the renderer exists, and reduced motion suppresses it like autoplay unless
+`respectReducedMotion={false}`.
+
+If a page genuinely warrants asking — an interactive piece a reader came to play with, not a
+background — `handle.enableTilt()` is the explicit opt-in: call it from a tap, directly, without
+awaiting anything first or the gesture is spent. `handle.tiltStatus()` reports `'unsupported'` (no
+sensor), `'prompt'` (gated, inert unless you ask), `'denied'`, `'listening'` or `'live'`;
+`handle.recenterTilt()` re-takes the neutral pose after a change of grip.
+
+Outside React, the same two pieces wire by hand — from the `/tilt` subpath, which is also what the
+components fetch, so the sensor is a chunk rather than dead weight in a bundle that never tilts:
+
+```ts
+import { TiltSource, forwardTiltToPointer } from '@ascii-fx/gpu/tilt'
+const tilt = new TiltSource({ range: 20 })
+const stop = forwardTiltToPointer(tilt, renderer.pointer)
+button.onclick = () => void tilt.enable() // iOS: must be the gesture itself
+```
 
 ## Authoring the source
 
