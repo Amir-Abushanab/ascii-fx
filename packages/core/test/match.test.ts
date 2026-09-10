@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { AsciiProfile, ColorMode, RGB } from '@ascii-fx/core'
 import { FLAG_FLAT, FLAG_TRANSPARENT, luma8, matchFrame, rdiv, reduceSource } from '@ascii-fx/core'
-import { STANDARD_SIX, makeCell, makeProfile, randomImage, randomProfile } from './synthetic.js'
+import {
+  STANDARD_SIX,
+  makeCell,
+  makeProfile,
+  randomImage,
+  randomProfile,
+  sweepProfile,
+} from './synthetic.js'
 
 const profile6 = makeProfile(STANDARD_SIX)
 // glyph ids: 0=' ' 1='█' 2='▀' 3='▄' 4='▌' 5='▐'
@@ -270,7 +277,11 @@ function naiveCell(
 }
 
 describe('oracle conformance: matchFrame ≡ naive sort-based implementation', () => {
-  const profiles = [profile6, randomProfile(40, 7)]
+  // profile6 is 6 solid blocks and randomProfile is uniform ~50% ink; neither is
+  // shaped like a font. sweepProfile is the realistic case — 95 glyphs of varying
+  // sparse coverage, where the §9 shortlist is a near-tie plateau rather than a
+  // clear winner, and the rerank is what actually separates candidates.
+  const profiles = [profile6, randomProfile(40, 7), sweepProfile(95, 11)]
   const modes: Array<[string, ColorMode, RGB, RGB]> = [
     ['mono white-on-black', 'mono', [255, 255, 255], [0, 0, 0]],
     ['mono black-on-white', 'mono', [0, 0, 0], [255, 255, 255]],
