@@ -21,14 +21,21 @@ import { fileURLToPath } from 'node:url'
 const repo = fileURLToPath(new URL('..', import.meta.url))
 const PACKAGES = ['core', 'gpu', 'compiler', 'three', 'react', 'react-three', 'vite']
 
-// Peers the tarballs declare but do not bring. Pinned to what the workspace develops
-// against, so a smoke failure means our packaging broke, not that a peer moved.
+// Peers the tarballs declare but do not bring. Exact versions, matching what the
+// workspace lockfile resolves, so a smoke failure means our packaging broke and not
+// that a peer moved underneath us.
+//
+// These were caret ranges, which defeated the point: react 19.3.0 was published and
+// `^19.2.8` began resolving to it, outside @react-three/fiber@9.7.0's `>=19 <19.3`
+// peer bound, and the install died on ERESOLVE with nothing in the repo changed.
+// pnpm only warns on a peer mismatch, so nothing caught it before this npm install.
+// Refresh these alongside the workspace versions they mirror.
 const PEERS = {
-  react: '^19.2.8',
-  'react-dom': '^19.2.8',
+  react: '19.2.8',
+  'react-dom': '19.2.8',
   three: '0.185.1',
-  '@react-three/fiber': '^9.7.0',
-  vite: '^8.2.1',
+  '@react-three/fiber': '9.7.0',
+  vite: '8.2.2',
 }
 
 // pnpm exports its own settings to child processes as npm_config_* environment
