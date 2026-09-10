@@ -449,6 +449,53 @@ Runtime uses `lut3` when present, else brute-force 6D. `lut3TopK` remains reserv
 
 `matcher: 'ramp'`: every non-transparent cell uses the flat-path coverage mapping (§6) on its mean luma — no structure at all. Colors are fitted from the winning glyph's mask partition exactly as §10 (same rule as shape6). Branded as an effect, not as quality (spec §5).
 
+## 20. jitter-v1 (effect, explicit opt-in)
+
+An effect layered on structural-v1's rerank, selected by `jitter` ∈ 1..255. At `jitter = 0` (the default) nothing below runs and §10 stands unchanged — off means untouched, not a degenerate case of the formula, because the tolerance at 0 would still admit exact ties that §10 pins to the earlier candidate.
+
+Motivation: §10 takes the argmin, so a cell whose top candidates reconstruct it almost equally well always resolves to the same one. Measured on Geist Mono, the shortlist is a near-tie plateau — best 27, eighth-best 29 at p50 — so large regions of similar content lock to a single glyph and read as banding. jitter varies the pick among candidates that are nearly as good, weighted toward the better ones.
+
+Applies only to cells that reach §10. Flat (§6) and transparent (§5) cells are untouched, and it is an error to combine `jitter` with shape6-v1, ramp-v1, or chromatic-v1 — none of them produces rerank candidates.
+
+### Full errors
+
+§10's early exit is not permitted under jitter: every candidate's complete `err(g)` is needed, along with **its own** fitted colors, which are emitted with it if it wins the draw.
+
+### Weights
+
+`bestErr` is the §10 winner's error and `err[c]` the error of candidate `c` in prefilter order:
+
+```text
+tol    = rdiv(bestErr · jitter, 255)
+w[c]   = (err[c] − bestErr) ≤ tol  ?  tol + 1 − (err[c] − bestErr)  :  0
+total  = Σ w[c]                                           (≥ tol + 1, the winner is always in)
+```
+
+Linear falloff rather than a softmax: `exp` is implementation-defined in ECMAScript and differs again on a GPU, so a softmax could not be specified bit-for-bit. Over K = 8 candidates the two are visually indistinguishable, and this one stays inside §0's integer arithmetic.
+
+### Draw
+
+```text
+h = jitterHash(cx, rowOffset + cy, jitterSeed)
+r = h mod total
+```
+
+Walk candidates in prefilter order, subtracting `w[c]` from `r`; the first candidate with `r < w[c]` wins and supplies the glyph id and both fitted colors. (`h` is uniform over u32 and `total` does not divide it evenly, so the draw carries a modulo bias of order `total / 2³²` — negligible at these magnitudes and part of the definition.)
+
+```text
+jitterHash(cx, cy, seed):
+  h = (seed XOR (cx · 0x27d4eb2d) XOR (cy · 0x165667b1)) mod 2³²
+  h = ((h XOR (h >> 15)) · 0x2545f491) mod 2³²
+  h = ((h XOR (h >> 13)) · 0x27d4eb2d) mod 2³²
+  h = (h XOR (h >> 16)) mod 2³²
+```
+
+Multiplications are u32-wrapping (`Math.imul`), shifts are logical. Position, never `Math.random`: §17 conformance applies to jitter unchanged, and a shader can reproduce the draw exactly rather than approximate it.
+
+**`rowOffset` is frame-global.** `cy` is band-local, so a band must be given the frame row its first cell row sits at or its cells hash differently than they would in a whole-frame match, and band concatenation stops being byte-identical. It is inert at `jitter = 0`, which is why §§5–10 never mention it.
+
+Hold `jitterSeed` constant for a dither that is stable frame to frame; pass a frame counter for one that moves. No GPU backend implements §20 yet, so it is reachable through `@ascii-fx/core` only.
+
 ---
 
 ## C. chromatic-v1

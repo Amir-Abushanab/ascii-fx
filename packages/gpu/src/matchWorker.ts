@@ -52,6 +52,11 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>): void => {
       flatThreshold: msg.options.flatThreshold,
       foreground: msg.options.foreground,
       background: msg.options.background,
+      // Inert for every option this backend exposes, but this is the only place
+      // that splits a frame into bands — so if a row-dependent effect
+      // (ALGORITHM.md §20) ever reaches BandOptions, it hashes against frame
+      // rows rather than band-local ones and assembly stays byte-identical.
+      rowOffset: msg.rowStart,
     })
     const reply: CellsResponse = {
       type: 'cells',

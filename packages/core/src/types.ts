@@ -116,6 +116,27 @@ export interface MatchOptions {
   /** Integer luma units; default 15. */
   flatThreshold?: number
   /**
+   * jitter-v1 (ALGORITHM.md §20), structural matcher only. 0..255, default 0
+   * (off, exactly the §10 argmin). Above 0 a cell picks among the rerank
+   * candidates that reconstruct it nearly as well as the winner does, weighted
+   * toward the closer ones — near-ties vary instead of every cell locking to one
+   * glyph. The pick is a hash of the cell's position, never `Math.random`, so
+   * the result stays reproducible and band-splitting stays byte-identical.
+   */
+  jitter?: number
+  /**
+   * jitter-v1 seed, default 0. Hold it constant for a stable dither; pass a
+   * frame counter for a pattern that moves frame to frame.
+   */
+  jitterSeed?: number
+  /**
+   * Frame-global row index of this band's first cell row, default 0. Only
+   * jitter-v1 reads it — §§5–10 are per-cell and row-independent — and only so
+   * that a band's cells hash to the same values they would in a whole-frame
+   * match. `matchFrame` always passes 0; the worker pool passes its band start.
+   */
+  rowOffset?: number
+  /**
    * chromatic-v1 only: the previous frame's glyph ids on the same grid. Enables
    * hysteresis; ignored without it. Must come from the *same* source — passing
    * ids from a different one ghosts it into the result, since hysteresis is

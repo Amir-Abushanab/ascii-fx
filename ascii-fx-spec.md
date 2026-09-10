@@ -2569,6 +2569,7 @@ Credit conceptual influences in docs:
 
 - Alex Harri — shape-vector and directional contrast work
 - Ditherlab / chafa-style structural reconstruction inspiration
+- vercel-labs/arcade — sampling near-tie glyph matches rather than always taking the argmin (jitter-v1)
 
 ---
 

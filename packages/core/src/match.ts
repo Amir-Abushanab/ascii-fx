@@ -6,6 +6,7 @@ import { reduceSource } from './reduce.js'
 import { AsciiFrame } from './frame.js'
 import { blankGlyphId } from './blankGlyph.js'
 import { deriveGrid } from './grid.js'
+import { jitterHash } from './jitter.js'
 import { matchFrameRamp, matchFrameShape6 } from './shape6.js'
 import { matchFrameChromatic } from './chromatic.js'
 
@@ -33,6 +34,12 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
   if (options.color === 'glyph' && matcher !== 'chromatic') {
     throw new Error(
       `color: 'glyph' is produced by matcher: 'chromatic'; ${matcher} fits colour to a mask.`,
+    )
+  }
+  if ((options.jitter ?? 0) > 0 && matcher !== 'structural') {
+    throw new Error(
+      `jitter is a structural-v1 effect (ALGORITHM.md §20); matcher: '${matcher}' has no rerank ` +
+        'candidates to vary among.',
     )
   }
   if (matcher === 'shape6') return matchFrameShape6(source, options)
@@ -82,6 +89,15 @@ export function matchBand(
   const flatT = options.flatThreshold ?? 15
   const fgOpt = options.foreground ?? [255, 255, 255]
   const bgOpt = options.background ?? [0, 0, 0]
+  const jitter = options.jitter ?? 0
+  const jitterSeed = options.jitterSeed ?? 0
+  const rowOffset = options.rowOffset ?? 0
+  if (jitter < 0 || jitter > 255 || !Number.isInteger(jitter))
+    throw new Error(`jitter must be an integer 0..255; got ${jitter}`)
+  // 0 is a bypass rather than a degenerate case of the formula: at 0 the
+  // tolerance admits exact ties too, and §10 pins those to the earlier
+  // candidate. Off has to mean untouched.
+  const jitterOn = jitter > 0
 
   // Polarity derives from the reconstruction objective (ALGORITHM.md §8):
   // there is no invert flag — swapping the fixed colors flips it coherently.
@@ -118,6 +134,11 @@ export function matchBand(
   const sb = new Uint8Array(64)
   const candId = new Int32Array(8)
   const candScore = new Int32Array(8)
+  // jitter-v1 needs every candidate's error and its own fitted colours, not just
+  // the winner's, so it carries them out of the rerank loop.
+  const candErr = jitterOn ? new Int32Array(8) : undefined
+  const candFg = jitterOn ? new Uint32Array(8) : undefined
+  const candBg = jitterOn ? new Uint32Array(8) : undefined
 
   for (let cy = 0; cy < bandRows; cy++) {
     for (let cx = 0; cx < columns; cx++) {
@@ -325,6 +346,11 @@ export function matchBand(
             bB = bgOpt[2]
           }
         }
+        // §10 permits stopping a candidate that has already lost. jitter-v1
+        // weights every candidate, so it needs the full error and raises the
+        // limit past anything reachable (max 64·3·255² = 12,484,800) instead of
+        // branching inside the loop.
+        const errLimit = jitterOn ? 0x7fffffff : bestErr
         let err = 0
         for (let k = 0; k < 64; k++) {
           const on = k < 32 ? (gLo >>> k) & 1 : (gHi >>> (k - 32)) & 1
@@ -332,13 +358,41 @@ export function matchBand(
           const e1 = sg[k] - (on ? fG : bG)
           const e2 = sb[k] - (on ? fB : bB)
           err += e0 * e0 + e1 * e1 + e2 * e2
-          if (err >= bestErr) break
+          if (err >= errLimit) break
+        }
+        if (jitterOn) {
+          candErr![c] = err
+          candFg![c] = packRGBA(fR, fG, fB)
+          candBg![c] = packRGBA(bR, bG, bB)
         }
         if (err < bestErr) {
           bestErr = err
           bestId = g
           bestFg = packRGBA(fR, fG, fB)
           bestBg = packRGBA(bR, bG, bB)
+        }
+      }
+
+      // jitter-v1 (§20): swap the argmin for a hash-chosen candidate within a
+      // tolerance of it, weighted linearly toward the winner.
+      if (jitterOn) {
+        const tol = rdiv(bestErr * jitter, 255)
+        let total = 0
+        for (let c = 0; c < count; c++) {
+          const delta = candErr![c] - bestErr
+          total += delta <= tol ? tol + 1 - delta : 0
+        }
+        let r = jitterHash(cx, rowOffset + cy, jitterSeed) % total
+        for (let c = 0; c < count; c++) {
+          const delta = candErr![c] - bestErr
+          const w = delta <= tol ? tol + 1 - delta : 0
+          if (r < w) {
+            bestId = candId[c]
+            bestFg = candFg![c]
+            bestBg = candBg![c]
+            break
+          }
+          r -= w
         }
       }
 
