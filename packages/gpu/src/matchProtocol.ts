@@ -10,6 +10,12 @@ export interface BandOptions {
   flatThreshold?: number
   foreground?: RGB
   background?: RGB
+  /**
+   * Exact temporal reuse (spec §21). Each worker keeps its own band's previous
+   * samples and cells and skips the ones that did not move, which is why the
+   * pool has to hand a band to the same worker every frame.
+   */
+  temporal?: boolean
 }
 
 export interface InitRequest {

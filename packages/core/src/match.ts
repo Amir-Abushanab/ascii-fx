@@ -22,6 +22,24 @@ export interface StructuralCells {
 }
 
 /**
+ * The previous match of the same band, for exact temporal reuse (spec §21).
+ *
+ * A cell's result is a pure function of its 64 source samples and the options,
+ * so a cell whose samples are byte-identical to last time already has its answer
+ * — comparing 256 bytes is far cheaper than a prefilter over the charset plus a
+ * rerank. The caller owns the "identical options" half of that precondition:
+ * pass `reuse` only when `options`, `columns`, and `bandRows` all match the
+ * match these cells came from. Nothing here can detect an option change, and
+ * reusing across one silently serves stale cells.
+ */
+export interface BandReuse {
+  /** The reduced samples those cells were matched from; same layout as `reduced`. */
+  reduced: Uint8Array
+  /** That match's band-local outputs. */
+  cells: StructuralCells
+}
+
+/**
  * structural-v1 reference matcher (ALGORITHM.md §§3–11). Deterministic and
  * all-integer; this implementation defines correctness for every backend.
  * Approximate matchers (§18–19) are explicit opt-ins, never fallbacks.
@@ -80,6 +98,7 @@ export function matchBand(
   columns: number,
   bandRows: number,
   options: MatchOptions,
+  reuse?: BandReuse,
 ): StructuralCells {
   const profile = options.profile
   if (!profile)
@@ -116,6 +135,25 @@ export function matchBand(
   const bgArr = needBg ? new Uint32Array(N) : undefined
   const flags = new Uint16Array(N)
 
+  // Exact temporal reuse (spec §21). Shape is checked rather than trusted: a
+  // caller that got the grid wrong would otherwise read another frame's cells
+  // at the wrong offsets and emit a plausible-looking wrong picture.
+  if (reuse) {
+    const prevIds = reuse.cells.glyphIds
+    if (reuse.reduced.length !== reduced.length)
+      throw new Error(
+        `reuse.reduced has ${reuse.reduced.length} bytes; this band's samples have ${reduced.length}.`,
+      )
+    if (prevIds.length !== N)
+      throw new Error(`reuse.cells holds ${prevIds.length} cells; this band has ${N}.`)
+    if (needFg && !reuse.cells.foreground)
+      throw new Error(`reuse.cells carries no foreground, which color: '${color}' emits.`)
+    if (needBg && !reuse.cells.background)
+      throw new Error(`reuse.cells carries no background, which color: '${color}' emits.`)
+  }
+  const prev = reuse?.reduced
+  const prevCells = reuse?.cells
+
   const { masksLo, masksHi, coverage } = profile.structural
   // The flat ramp (§6) maps mean luma onto glyph ink coverage, so its ceiling has to be
   // the densest glyph this profile actually has — not the 65535 a full block would score.
@@ -143,6 +181,30 @@ export function matchBand(
   for (let cy = 0; cy < bandRows; cy++) {
     for (let cx = 0; cx < columns; cx++) {
       const ci = cy * columns + cx
+
+      // Exact temporal reuse (spec §21): a cell's result depends on nothing but
+      // its own 64 samples and the options, so byte-identical samples already
+      // have their answer. 256 byte compares — and on a changed cell usually one
+      // or two, since the scan stops at the first difference.
+      if (prev !== undefined) {
+        let same = true
+        for (let j = 0; j < 8 && same; j++) {
+          const row = ((cy * 8 + j) * SW + cx * 8) * 4
+          for (let p = row; p < row + 32; p++) {
+            if (reduced[p] !== prev[p]) {
+              same = false
+              break
+            }
+          }
+        }
+        if (same) {
+          glyphIds[ci] = prevCells!.glyphIds[ci]
+          flags[ci] = prevCells!.flags[ci]
+          if (needFg) fgArr![ci] = prevCells!.foreground![ci]
+          if (needBg) bgArr![ci] = prevCells!.background![ci]
+          continue
+        }
+      }
 
       // Cell features (§5).
       let minL = 256

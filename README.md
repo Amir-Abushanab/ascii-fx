@@ -69,6 +69,8 @@ Without WebGPU, both halves of the work still leave the main thread. The matcher
 
 On a live source the matcher costs one frame of latency, since a frame is presented while the next one matches; the first frame, static sources, and `captureFrame()` are matched inline and cost none. `workers: false` and `compositor: 'canvas2d'` put either half back the way it was.
 
+`temporal: true` then skips the cells that did not move. A cell's glyph and colours depend on nothing but its own 64 samples and the options, so samples that are byte-identical to last frame already have their answer — each worker keeps its own band and compares. It is a skip, not an approximation: the cells are the same bytes either way, which is what `pnpm test:browser` holds it to. At 320×84 over Geist Mono, matching a frame where nothing moved costs 8.9 ms instead of 125.7 ms, a quarter-changed frame 37.4 ms, and a wholly changed one the full 129.6 ms — the comparison stops at the first differing byte, so there is nothing to lose by leaving it on. Honoured by the WebGPU backend and the CPU worker pool; the inline path (first frame, `captureFrame()`, or a frame the pool is too busy to take) always matches in full.
+
 ## Tilt: the pointer a phone doesn't have
 
 Every `interaction` type is driven by the pointer, so an effect tuned on a desktop does nothing at

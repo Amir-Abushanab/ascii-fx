@@ -105,7 +105,16 @@ export interface AsciiRendererOptions {
    */
   compositor?: 'auto' | 'canvas2d'
 
-  /** Exact temporal reuse for video/live sources (spec §21). WebGPU backend only. */
+  /**
+   * Exact temporal reuse for video/live sources (spec §21): a cell whose source
+   * samples have not moved keeps the result it already had. The cells are the
+   * same bytes either way — it skips work, it does not approximate.
+   *
+   * Honoured by the WebGPU backend and by the CPU backend's worker pool. The CPU
+   * backend's inline path (the first frame, `captureFrame()`, and any frame the
+   * pool is too busy to take) matches in full regardless, and chromatic-v1
+   * ignores it on both backends.
+   */
   temporal?: boolean
   /**
    * Adapt columns downward under sustained frame pressure with hysteresis
