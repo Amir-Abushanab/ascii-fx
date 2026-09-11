@@ -822,6 +822,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         flatThreshold: this.opts.flatThreshold,
         foreground: this.opts.foreground,
         background: this.opts.background,
+        temporal: this.opts.temporal,
       }
       if (pool.submit(source, columns, rows, options)) {
         this.pending = { columns, rows, colorMode }

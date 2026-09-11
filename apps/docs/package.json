@@ -19,7 +19,7 @@
   "devDependencies": {
     "@ascii-fx/compiler": "workspace:*",
     "@ascii-fx/vite": "workspace:*",
-    "astro": "^7.2.4",
+    "astro": "^7.3.1",
     "typescript": "^7.0.2"
   }
 }

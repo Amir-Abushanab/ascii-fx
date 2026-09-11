@@ -127,20 +127,21 @@ hands the matcher 256 distinct shapes.
 
 ## Options that matter
 
-| Option               | Effect                                                                                                                                                                     |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `columns`            | Characters per row; rows follow from the source aspect and the cell aspect.                                                                                                |
-| `color`              | `mono` (one ink colour) · `foreground` (fitted colour per glyph) · `full` (fitted glyph **and** background per cell — closest to the original).                            |
-| `alpha`              | `mask` (transparent cells stay transparent) or `ignore`.                                                                                                                   |
-| `clearColor`         | Letterbox/ground colour (rgba 0..1). Alpha < 1 turns the render into an overlay: the page shows through the letterbox and — in `mono` and chromatic — through glyph gaps.  |
-| `flatThreshold`      | Cells with less contrast than this render as one tone instead of a shape.                                                                                                  |
-| `backend`            | `auto` (default) takes WebGPU and falls back to the exact CPU matcher. Chosen once, at construction — see the device-loss gotcha for what happens when the GPU dies later. |
-| `workers`            | CPU-backend matcher threads; default one per core less one, `false` pins it to the main thread. Costs one frame of latency on live sources, never a different cell.        |
-| `compositor`         | How the CPU backend paints: `auto` (WebGL2 where available) or `canvas2d`. Escape hatch only.                                                                              |
-| `temporal`           | Skip re-matching cells whose pixels did not change. Exact, great for video, WebGPU only.                                                                                   |
-| `adaptiveResolution` | Lower `columns` under frame pressure and recover. **WebGPU only** — so two backends can land on different grids.                                                           |
-| `interaction`        | Pointer/time effects composited on top (`reveal`, `displace`, `wave`, `push`…). Never re-runs matching.                                                                    |
-| `tilt`               | React only: drive the pointer from the device's orientation sensor, so `interaction` works on a phone. `true`, or `{ range, smoothing, invertX, invertY }`.                |
+| Option               | Effect                                                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `columns`            | Characters per row; rows follow from the source aspect and the cell aspect.                                                                                                 |
+| `color`              | `mono` (one ink colour) · `foreground` (fitted colour per glyph) · `full` (fitted glyph **and** background per cell — closest to the original).                             |
+| `alpha`              | `mask` (transparent cells stay transparent) or `ignore`.                                                                                                                    |
+| `clearColor`         | Letterbox/ground colour (rgba 0..1). Alpha < 1 turns the render into an overlay: the page shows through the letterbox and — in `mono` and chromatic — through glyph gaps.   |
+| `flatThreshold`      | Cells with less contrast than this render as one tone instead of a shape.                                                                                                   |
+| `backend`            | `auto` (default) takes WebGPU and falls back to the exact CPU matcher. Chosen once, at construction — see the device-loss gotcha for what happens when the GPU dies later.  |
+| `workers`            | CPU-backend matcher threads; default one per core less one, `false` pins it to the main thread. Costs one frame of latency on live sources, never a different cell.         |
+| `compositor`         | How the CPU backend paints: `auto` (WebGL2 where available) or `canvas2d`. Escape hatch only.                                                                               |
+| `temporal`           | Skip re-matching cells whose pixels did not change. Exact, great for video. WebGPU and the CPU worker pool; the CPU inline path always matches in full.                     |
+| `adaptiveResolution` | Lower `columns` under frame pressure and recover. **WebGPU only** — so two backends can land on different grids.                                                            |
+| `jitter`             | `0` (default, off) to `255`. Vary a cell's glyph among the candidates that reconstruct it nearly as well, so near-ties stop banding. `@ascii-fx/core` only, no GPU backend. |
+| `interaction`        | Pointer/time effects composited on top (`reveal`, `displace`, `wave`, `push`…). Never re-runs matching.                                                                     |
+| `tilt`               | React only: drive the pointer from the device's orientation sensor, so `interaction` works on a phone. `true`, or `{ range, smoothing, invertX, invertY }`.                 |
 
 `matcher: 'shape6' | 'ramp'` are cheaper, visibly approximate matchers. They are explicit opt-ins,
 never automatic fallbacks — `auto` backend selection never silently degrades quality.

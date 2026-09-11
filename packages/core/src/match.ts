@@ -6,6 +6,7 @@ import { reduceSource } from './reduce.js'
 import { AsciiFrame } from './frame.js'
 import { blankGlyphId } from './blankGlyph.js'
 import { deriveGrid } from './grid.js'
+import { jitterHash } from './jitter.js'
 import { matchFrameRamp, matchFrameShape6 } from './shape6.js'
 import { matchFrameChromatic } from './chromatic.js'
 
@@ -21,6 +22,24 @@ export interface StructuralCells {
 }
 
 /**
+ * The previous match of the same band, for exact temporal reuse (spec §21).
+ *
+ * A cell's result is a pure function of its 64 source samples and the options,
+ * so a cell whose samples are byte-identical to last time already has its answer
+ * — comparing 256 bytes is far cheaper than a prefilter over the charset plus a
+ * rerank. The caller owns the "identical options" half of that precondition:
+ * pass `reuse` only when `options`, `columns`, and `bandRows` all match the
+ * match these cells came from. Nothing here can detect an option change, and
+ * reusing across one silently serves stale cells.
+ */
+export interface BandReuse {
+  /** The reduced samples those cells were matched from; same layout as `reduced`. */
+  reduced: Uint8Array
+  /** That match's band-local outputs. */
+  cells: StructuralCells
+}
+
+/**
  * structural-v1 reference matcher (ALGORITHM.md §§3–11). Deterministic and
  * all-integer; this implementation defines correctness for every backend.
  * Approximate matchers (§18–19) are explicit opt-ins, never fallbacks.
@@ -33,6 +52,12 @@ export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame 
   if (options.color === 'glyph' && matcher !== 'chromatic') {
     throw new Error(
       `color: 'glyph' is produced by matcher: 'chromatic'; ${matcher} fits colour to a mask.`,
+    )
+  }
+  if ((options.jitter ?? 0) > 0 && matcher !== 'structural') {
+    throw new Error(
+      `jitter is a structural-v1 effect (ALGORITHM.md §20); matcher: '${matcher}' has no rerank ` +
+        'candidates to vary among.',
     )
   }
   if (matcher === 'shape6') return matchFrameShape6(source, options)
@@ -73,6 +98,7 @@ export function matchBand(
   columns: number,
   bandRows: number,
   options: MatchOptions,
+  reuse?: BandReuse,
 ): StructuralCells {
   const profile = options.profile
   if (!profile)
@@ -82,6 +108,15 @@ export function matchBand(
   const flatT = options.flatThreshold ?? 15
   const fgOpt = options.foreground ?? [255, 255, 255]
   const bgOpt = options.background ?? [0, 0, 0]
+  const jitter = options.jitter ?? 0
+  const jitterSeed = options.jitterSeed ?? 0
+  const rowOffset = options.rowOffset ?? 0
+  if (jitter < 0 || jitter > 255 || !Number.isInteger(jitter))
+    throw new Error(`jitter must be an integer 0..255; got ${jitter}`)
+  // 0 is a bypass rather than a degenerate case of the formula: at 0 the
+  // tolerance admits exact ties too, and §10 pins those to the earlier
+  // candidate. Off has to mean untouched.
+  const jitterOn = jitter > 0
 
   // Polarity derives from the reconstruction objective (ALGORITHM.md §8):
   // there is no invert flag — swapping the fixed colors flips it coherently.
@@ -99,6 +134,25 @@ export function matchBand(
   const fgArr = needFg ? new Uint32Array(N) : undefined
   const bgArr = needBg ? new Uint32Array(N) : undefined
   const flags = new Uint16Array(N)
+
+  // Exact temporal reuse (spec §21). Shape is checked rather than trusted: a
+  // caller that got the grid wrong would otherwise read another frame's cells
+  // at the wrong offsets and emit a plausible-looking wrong picture.
+  if (reuse) {
+    const prevIds = reuse.cells.glyphIds
+    if (reuse.reduced.length !== reduced.length)
+      throw new Error(
+        `reuse.reduced has ${reuse.reduced.length} bytes; this band's samples have ${reduced.length}.`,
+      )
+    if (prevIds.length !== N)
+      throw new Error(`reuse.cells holds ${prevIds.length} cells; this band has ${N}.`)
+    if (needFg && !reuse.cells.foreground)
+      throw new Error(`reuse.cells carries no foreground, which color: '${color}' emits.`)
+    if (needBg && !reuse.cells.background)
+      throw new Error(`reuse.cells carries no background, which color: '${color}' emits.`)
+  }
+  const prev = reuse?.reduced
+  const prevCells = reuse?.cells
 
   const { masksLo, masksHi, coverage } = profile.structural
   // The flat ramp (§6) maps mean luma onto glyph ink coverage, so its ceiling has to be
@@ -118,10 +172,39 @@ export function matchBand(
   const sb = new Uint8Array(64)
   const candId = new Int32Array(8)
   const candScore = new Int32Array(8)
+  // jitter-v1 needs every candidate's error and its own fitted colours, not just
+  // the winner's, so it carries them out of the rerank loop.
+  const candErr = jitterOn ? new Int32Array(8) : undefined
+  const candFg = jitterOn ? new Uint32Array(8) : undefined
+  const candBg = jitterOn ? new Uint32Array(8) : undefined
 
   for (let cy = 0; cy < bandRows; cy++) {
     for (let cx = 0; cx < columns; cx++) {
       const ci = cy * columns + cx
+
+      // Exact temporal reuse (spec §21): a cell's result depends on nothing but
+      // its own 64 samples and the options, so byte-identical samples already
+      // have their answer. 256 byte compares — and on a changed cell usually one
+      // or two, since the scan stops at the first difference.
+      if (prev !== undefined) {
+        let same = true
+        for (let j = 0; j < 8 && same; j++) {
+          const row = ((cy * 8 + j) * SW + cx * 8) * 4
+          for (let p = row; p < row + 32; p++) {
+            if (reduced[p] !== prev[p]) {
+              same = false
+              break
+            }
+          }
+        }
+        if (same) {
+          glyphIds[ci] = prevCells!.glyphIds[ci]
+          flags[ci] = prevCells!.flags[ci]
+          if (needFg) fgArr![ci] = prevCells!.foreground![ci]
+          if (needBg) bgArr![ci] = prevCells!.background![ci]
+          continue
+        }
+      }
 
       // Cell features (§5).
       let minL = 256
@@ -325,6 +408,11 @@ export function matchBand(
             bB = bgOpt[2]
           }
         }
+        // §10 permits stopping a candidate that has already lost. jitter-v1
+        // weights every candidate, so it needs the full error and raises the
+        // limit past anything reachable (max 64·3·255² = 12,484,800) instead of
+        // branching inside the loop.
+        const errLimit = jitterOn ? 0x7fffffff : bestErr
         let err = 0
         for (let k = 0; k < 64; k++) {
           const on = k < 32 ? (gLo >>> k) & 1 : (gHi >>> (k - 32)) & 1
@@ -332,13 +420,41 @@ export function matchBand(
           const e1 = sg[k] - (on ? fG : bG)
           const e2 = sb[k] - (on ? fB : bB)
           err += e0 * e0 + e1 * e1 + e2 * e2
-          if (err >= bestErr) break
+          if (err >= errLimit) break
+        }
+        if (jitterOn) {
+          candErr![c] = err
+          candFg![c] = packRGBA(fR, fG, fB)
+          candBg![c] = packRGBA(bR, bG, bB)
         }
         if (err < bestErr) {
           bestErr = err
           bestId = g
           bestFg = packRGBA(fR, fG, fB)
           bestBg = packRGBA(bR, bG, bB)
+        }
+      }
+
+      // jitter-v1 (§20): swap the argmin for a hash-chosen candidate within a
+      // tolerance of it, weighted linearly toward the winner.
+      if (jitterOn) {
+        const tol = rdiv(bestErr * jitter, 255)
+        let total = 0
+        for (let c = 0; c < count; c++) {
+          const delta = candErr![c] - bestErr
+          total += delta <= tol ? tol + 1 - delta : 0
+        }
+        let r = jitterHash(cx, rowOffset + cy, jitterSeed) % total
+        for (let c = 0; c < count; c++) {
+          const delta = candErr![c] - bestErr
+          const w = delta <= tol ? tol + 1 - delta : 0
+          if (r < w) {
+            bestId = candId[c]
+            bestFg = candFg![c]
+            bestBg = candBg![c]
+            break
+          }
+          r -= w
         }
       }
 

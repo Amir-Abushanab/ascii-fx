@@ -19,6 +19,14 @@ allowBuilds:
   sharp: true
 
 overrides:
-  sharp: ^0.35.0
+  # Advisory floors for astro's transitive tree. astro pulls these itself and had not
+  # released a bump past them, so the floor is here rather than waiting on it:
+  #   sharp   >=0.35.4  GHSA-g89c-p67h-r497  (libheif)
+  #   js-yaml >=4.3.2   GHSA-2883-xcg3-v3hh  (maxTotalMergeKeys CPU use)
+  #   svgo    >=4.1.0   GHSA-w27v-7q3p-w38r  (removeScripts bypasses)
+  # Drop each one once astro's own range clears it.
+  sharp: ^0.35.4
+  js-yaml: ^4.3.2
+  svgo: ^4.1.0
   esbuild: ^0.28.2
   aalib.js>vue: '-'

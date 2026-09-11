@@ -149,6 +149,30 @@ export function randomProfile(glyphCount: number, seed: number): AsciiProfile {
   return makeProfile(glyphs)
 }
 
+/**
+ * Random glyphs whose ink density sweeps 0 → 60% across the charset, the way a
+ * real font runs from ' ' to '@'. `randomProfile` fixes every glyph at ~50%
+ * density, which no real charset does — measured on Geist Mono, masks run 0..19
+ * of 64 bits with a mean of 7.7. Sparse masks spread the §9 scores much more
+ * tightly than dense ones, so this is the profile shape to reach for when a test
+ * should see the prefilter behave the way it does on a real font.
+ */
+export function sweepProfile(glyphCount: number, seed: number): AsciiProfile {
+  const rnd = mulberry32(seed)
+  const glyphs: SynthGlyph[] = []
+  for (let g = 0; g < glyphCount; g++) {
+    const density = glyphCount > 1 ? (g / (glyphCount - 1)) * 0.6 : 0.3
+    const rows: string[] = []
+    for (let j = 0; j < 8; j++) {
+      let row = ''
+      for (let i = 0; i < 8; i++) row += rnd() < density ? '1' : '0'
+      rows.push(row)
+    }
+    glyphs.push({ char: String.fromCharCode(0x21 + g), rows })
+  }
+  return makeProfile(glyphs)
+}
+
 export function randomImage(
   width: number,
   height: number,

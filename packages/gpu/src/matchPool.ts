@@ -36,7 +36,6 @@ export class MatchPool {
   private assembling?: StructuralCells
   private latest?: StructuralCells
   private dead = false
-  private nextWorker = 0
   private readyTimer?: ReturnType<typeof setTimeout>
 
   private constructor(
@@ -152,9 +151,14 @@ export class MatchPool {
     }
 
     this.outstanding = jobs.length
-    for (const job of jobs) {
-      const worker = this.workers[this.nextWorker++ % this.workers.length]
-      worker.postMessage(job, [job.strip])
+    // Band index, not round-robin: temporal reuse (spec §21) lives in the worker
+    // and is keyed on the band it last matched, so band i has to keep landing on
+    // the same worker or every frame looks like a fresh one to it. Band count is
+    // derived from (rows, worker count), so a grid change reshuffles bands and
+    // the workers invalidate themselves on the mismatch.
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i]
+      this.workers[i % this.workers.length].postMessage(job, [job.strip])
     }
     return true
   }

@@ -28,6 +28,19 @@ const waitFor = async (predicate: () => boolean, timeout = 10_000): Promise<void
   }
 }
 
+/** Overwrite the left half of `base` with `patch`, leaving the rest byte-identical. */
+const patchHalf = (
+  base: ReturnType<typeof randomImage>,
+  patch: ReturnType<typeof randomImage>,
+): ReturnType<typeof randomImage> => {
+  const data = new Uint8Array(base.data)
+  for (let y = 0; y < base.height; y++) {
+    const row = y * base.width * 4
+    data.set(patch.data.slice(row, row + (base.width >> 1) * 4), row)
+  }
+  return { width: base.width, height: base.height, data }
+}
+
 describe('matcher worker pool', () => {
   it('starts real workers and reports ready', async () => {
     const pool = MatchPool.create(makeProfile(STANDARD_SIX), 3)
@@ -143,5 +156,89 @@ describe('captureFrame with a worker pool', () => {
     const expected = matchFrame(second, { profile, columns: 16, color: 'full' })
     expect(captured.glyphIds).toEqual(expected.glyphIds)
     renderer.destroy()
+  })
+
+  // Exact temporal reuse (spec §21) skips cells whose samples have not moved. A
+  // skip that changed a single byte would be a silent wrong picture, so every
+  // frame of a sequence is held against a full match of that same frame.
+  describe('temporal reuse', () => {
+    const columns = 19
+    const rows = 11
+
+    const submitAndTake = async (
+      pool: MatchPool,
+      source: ReturnType<typeof randomImage>,
+      cols: number,
+      rws: number,
+      options: Parameters<MatchPool['submit']>[3],
+    ) => {
+      expect(pool.submit(source, cols, rws, options)).toBe(true)
+      await waitFor(() => !pool.busy)
+      return pool.take()!
+    }
+
+    it('matches a changed frame exactly after reusing an unchanged one', async () => {
+      const profile = randomProfile(40, 11)
+      const a = randomImage(157, 91, 23, true)
+      const options = { color: 'full', alpha: 'mask', temporal: true } as const
+
+      const pool = MatchPool.create(profile, 4)!
+      await waitFor(() => pool.ready)
+      // a → a (every cell reused) → half of a replaced → an unrelated frame.
+      for (const source of [
+        a,
+        a,
+        patchHalf(a, randomImage(157, 91, 24, true)),
+        randomImage(157, 91, 25, true),
+      ]) {
+        const cells = await submitAndTake(pool, source, columns, rows, options)
+        const expected = matchFrame(source, { profile, columns, rows, ...options })
+        expect(cells.glyphIds).toEqual(expected.glyphIds)
+        expect(cells.flags).toEqual(expected.flags)
+        expect(cells.foreground).toEqual(expected.foreground)
+        expect(cells.background).toEqual(expected.background)
+      }
+      pool.destroy()
+    })
+
+    it('does not serve cells across a grid change', async () => {
+      const profile = randomProfile(40, 11)
+      const source = randomImage(157, 91, 31, true)
+      const options = { color: 'mono', alpha: 'mask', temporal: true } as const
+
+      const pool = MatchPool.create(profile, 4)!
+      await waitFor(() => pool.ready)
+      await submitAndTake(pool, source, columns, rows, options)
+      // Same source, different grid: the bands are cut elsewhere, so every
+      // worker's retained band describes a region that no longer exists.
+      const cells = await submitAndTake(pool, source, 23, 13, options)
+      const expected = matchFrame(source, { profile, columns: 23, rows: 13, ...options })
+      expect(cells.glyphIds).toEqual(expected.glyphIds)
+      pool.destroy()
+    })
+
+    it('does not serve cells across an option change', async () => {
+      const profile = randomProfile(40, 11)
+      const source = randomImage(157, 91, 37, true)
+
+      const pool = MatchPool.create(profile, 4)!
+      await waitFor(() => pool.ready)
+      await submitAndTake(pool, source, columns, rows, {
+        color: 'mono',
+        alpha: 'mask',
+        temporal: true,
+      })
+      // Identical samples, different colour mode — the cells are not the ones
+      // this frame wants, however unchanged the source is.
+      const cells = await submitAndTake(pool, source, columns, rows, {
+        color: 'full',
+        alpha: 'mask',
+        temporal: true,
+      })
+      const expected = matchFrame(source, { profile, columns, rows, color: 'full', alpha: 'mask' })
+      expect(cells.glyphIds).toEqual(expected.glyphIds)
+      expect(cells.foreground).toEqual(expected.foreground)
+      pool.destroy()
+    })
   })
 })
