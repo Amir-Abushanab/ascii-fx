@@ -1,5 +1,25 @@
 # @ascii-fx/core
 
+## 0.7.0
+
+### Minor Changes
+
+- [#22](https://github.com/Amir-Abushanab/ascii-fx/pull/22) [`c95c9f7`](https://github.com/Amir-Abushanab/ascii-fx/commit/c95c9f78373d4b3a2b44527fe64d21d5c3357c55) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Add `jitter`, an opt-in effect that varies a cell's glyph among the rerank candidates that reconstruct it nearly as well as the winner does.
+
+  `structural-v1` takes the argmin, so a cell whose top candidates score almost identically always resolves to the same one. On Geist Mono the shortlist is a near-tie plateau — best 27, eighth-best 29 at p50 — so wide regions of similar content lock to a single glyph and read as banding. `jitter: 1..255` widens that to a weighted draw over the candidates within a tolerance of the winner, emitting the colours fitted to whichever one it picks.
+
+  The draw is a hash of the cell's position rather than `Math.random`, so §17 conformance still applies, and the weighting is linear rather than a softmax because `exp` is implementation-defined and could not be specified bit-for-bit. `jitterSeed` shifts the pattern — hold it constant for a stable dither, pass a frame counter for one that moves. `jitter: 0` remains the default and bypasses the path entirely.
+
+  Also adds `rowOffset`, which a band must pass so its cells hash against frame rows rather than band-local ones; it is inert unless `jitter` is set. Specified as jitter-v1 in `ALGORITHM.md §20`. `@ascii-fx/core` only — no GPU backend implements it yet.
+
+- [#22](https://github.com/Amir-Abushanab/ascii-fx/pull/22) [`580b9bf`](https://github.com/Amir-Abushanab/ascii-fx/commit/580b9bf1bf93613ee03f1c907af99b409c1a0290) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Bring exact temporal reuse (spec §21) to the CPU worker pool, where it was previously WebGPU-only.
+
+  A cell's glyph, colours, and flags depend on nothing but its own 64 source samples and the options, so a cell whose samples are byte-identical to the previous match already has its answer. `matchBand` takes an optional fifth argument carrying the previous band's samples and cells and copies through the ones that did not move; comparing 256 bytes — usually one or two, since the scan stops at the first difference — costs far less than a prefilter over the charset plus a rerank.
+
+  At 320×84 over Geist Mono in `full`, a frame where nothing moved matches in 8.9 ms instead of 125.7 ms, a quarter-changed frame in 37.4 ms, and a wholly changed one in the full 129.6 ms. It is a skip, not an approximation: output is byte-identical at every fraction.
+
+  `@ascii-fx/gpu` passes `temporal` through to its workers, each of which retains its own band keyed on the grid, band bounds, colour mode, alpha mode, thresholds, palette, and profile — so a resize, an option change, or a re-init re-matches from scratch rather than serving cells matched against something else. Bands are now assigned to workers by index rather than round-robin so a worker sees the same band each frame. The CPU backend's inline path (the first frame, `captureFrame()`, and any frame the pool is too busy to take) still matches in full.
+
 ## 0.6.0
 
 ## 0.5.0
