@@ -795,10 +795,10 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         columns: this.pending.columns,
         rows: this.pending.rows,
         colorMode: this.pending.colorMode,
-        glyphIds: done.glyphIds,
-        foreground: done.foreground,
-        background: done.background,
-        flags: done.flags,
+        glyphIds: done.cells.glyphIds,
+        foreground: done.cells.foreground,
+        background: done.cells.background,
+        flags: done.cells.flags,
         profile: this.profile,
       })
       this.hysteresisPrimed = true

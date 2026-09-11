@@ -1,4 +1,4 @@
-import type { AlphaMode, AsciiProfile, ColorMode, RGB } from '@ascii-fx/core'
+import type { AlphaMode, AsciiProfile, ColorMode, MotionOptions, RGB } from '@ascii-fx/core'
 
 /**
  * The scalar half of MatchOptions — everything `matchBand` reads that is not
@@ -16,6 +16,12 @@ export interface BandOptions {
    * pool has to hand a band to the same worker every frame.
    */
   temporal?: boolean
+  /**
+   * Ask each band for a motion field (ALGORITHM.md §21) alongside its cells.
+   * Independent of `temporal` — the field carries its own previous-luma state
+   * rather than reading the retained samples.
+   */
+  motion?: MotionOptions | false
 }
 
 export interface InitRequest {
@@ -55,6 +61,8 @@ export interface CellsResponse {
   foreground?: Uint32Array
   background?: Uint32Array
   flags: Uint16Array
+  /** Per-cell motion (§21), present only when the request asked for it. */
+  motion?: Uint8Array
 }
 
 export interface ErrorResponse {

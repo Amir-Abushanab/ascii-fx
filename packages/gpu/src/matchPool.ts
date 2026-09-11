@@ -2,6 +2,17 @@ import type { AsciiProfile, RawImage, StructuralCells } from '@ascii-fx/core'
 import { bandSourceRows } from '@ascii-fx/core'
 import type { BandOptions, CellsResponse, MatchRequest, WorkerResponse } from './matchProtocol.js'
 
+/**
+ * One assembled frame from the pool: the cells, and the motion field (§21)
+ * when the request asked for one. They travel together because they describe
+ * the same frame — taking them separately would let a composite pair a field
+ * with cells from a different one.
+ */
+export interface PoolFrame {
+  cells: StructuralCells
+  motion?: Uint8Array
+}
+
 /** Bands are whole cell rows, so a grid shorter than the pool just uses fewer workers. */
 const DEFAULT_WORKERS = 4
 const MAX_WORKERS = 8
@@ -33,8 +44,8 @@ export class MatchPool {
   private readyCount = 0
   private generation = 0
   private outstanding = 0
-  private assembling?: StructuralCells
-  private latest?: StructuralCells
+  private assembling?: PoolFrame
+  private latest?: PoolFrame
   private dead = false
   private readyTimer?: ReturnType<typeof setTimeout>
 
@@ -101,7 +112,7 @@ export class MatchPool {
   }
 
   /** Consume the newest completed match, if one has landed since the last call. */
-  take(): StructuralCells | undefined {
+  take(): PoolFrame | undefined {
     const out = this.latest
     this.latest = undefined
     return out
@@ -120,10 +131,13 @@ export class MatchPool {
     const n = columns * rows
     const generation = ++this.generation
     this.assembling = {
-      glyphIds: new Uint16Array(n),
-      flags: new Uint16Array(n),
-      foreground: options.color !== 'mono' ? new Uint32Array(n) : undefined,
-      background: options.color === 'full' ? new Uint32Array(n) : undefined,
+      cells: {
+        glyphIds: new Uint16Array(n),
+        flags: new Uint16Array(n),
+        foreground: options.color !== 'mono' ? new Uint32Array(n) : undefined,
+        background: options.color === 'full' ? new Uint32Array(n) : undefined,
+      },
+      motion: options.motion ? new Uint8Array(n) : undefined,
     }
 
     const jobs: MatchRequest[] = []
@@ -212,10 +226,12 @@ export class MatchPool {
     if (!target) return
     const columns = msg.glyphIds.length / (msg.rowEnd - msg.rowStart)
     const at = msg.rowStart * columns
-    target.glyphIds.set(msg.glyphIds, at)
-    target.flags.set(msg.flags, at)
-    if (target.foreground && msg.foreground) target.foreground.set(msg.foreground, at)
-    if (target.background && msg.background) target.background.set(msg.background, at)
+    const cells = target.cells
+    cells.glyphIds.set(msg.glyphIds, at)
+    cells.flags.set(msg.flags, at)
+    if (cells.foreground && msg.foreground) cells.foreground.set(msg.foreground, at)
+    if (cells.background && msg.background) cells.background.set(msg.background, at)
+    if (target.motion && msg.motion) target.motion.set(msg.motion, at)
   }
 
   private fail(err: Error): void {
