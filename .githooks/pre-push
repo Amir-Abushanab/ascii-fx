@@ -1,0 +1,80 @@
+#!/bin/sh
+
+# GPU conformance, before code leaves this machine.
+#
+# `pnpm test:gpu` is the one gate CI cannot hold: a GitHub runner reports a
+# *software* adapter that passes every availability check and then dies partway
+# through the workload (RELEASING.md). It is not in `pnpm check` either, so
+# nothing else runs it.
+#
+# This cannot gate a release directly — release.yml publishes from a runner, not
+# from a laptop. It does not need to. The changesets "Version Packages" PR only
+# touches package.json, CHANGELOG.md and .changeset/, so matcher code reaches
+# main only through a push that comes through here; verify every one of those and
+# what ships is verified with it. What this does NOT cover is a contributor
+# without a real adapter — for that the answer is still a self-hosted GPU runner
+# on the check job.
+#
+# Escape hatches: `git push --no-verify`, or `SKIP_GPU_TESTS=1 git push`.
+
+[ -n "$CI" ] && exit 0
+[ -n "$SKIP_GPU_TESTS" ] && exit 0
+
+main_sha="$(git rev-parse --verify --quiet origin/main)" || main_sha=''
+
+touched=0
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  # All-zero local sha means a branch deletion — nothing to check.
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+  case "$remote_sha" in
+    # Existing branch: just what this push adds.
+    *[!0]*) range="$remote_sha..$local_sha" ;;
+    # New branch: against main, not every commit it happens to contain.
+    *) range="${main_sha:-HEAD}..$local_sha" ;;
+  esac
+  # Fail closed. A diff that errors — an unreachable sha, a shallow clone — tells
+  # us nothing about whether the matcher moved, and "nothing to check" is the one
+  # answer that must never be a guess.
+  if changed="$(git diff --name-only "$range" -- packages/ 2>&1)"; then
+    [ -n "$changed" ] && touched=1
+  else
+    echo "pre-push: cannot diff $range — $changed"
+    echo "pre-push: running conformance rather than assuming nothing changed"
+    touched=1
+  fi
+done
+
+[ "$touched" -eq 0 ] && exit 0
+
+echo "pre-push: packages/ changed — running GPU conformance (~30s, RELEASING.md)"
+log="$(mktemp)"
+# --reporter=verbose because the default one prints counts but not the names
+# of skipped tests, and the name is the only place the adapter check below can
+# read that the suite opted itself out.
+if ! pnpm test:gpu --reporter=verbose >"$log" 2>&1; then
+  cat "$log"
+  rm -f "$log"
+  exit 1
+fi
+
+# `describe.runIf(gpuAvailable)` means a machine without a real adapter runs none
+# of the suite and still exits 0. A green run that proved nothing is worse than
+# no run at all.
+#
+# The signal is the "no adapter" placeholder's own state, not its presence — its
+# name is printed either way. It is `describe.skipIf(gpuAvailable)`, so it is
+# SKIPPED (↓) when an adapter is there and PASSES (✓) when one is not. If vitest
+# ever changes those glyphs this stops detecting an adapterless machine, though
+# the suite itself still runs.
+if grep 'no adapter' "$log" | grep -q '✓'; then
+  cat "$log"
+  rm -f "$log"
+  echo
+  echo "pre-push: no real WebGPU adapter here — the conformance suite did not run."
+  echo "Push from a machine with one, or SKIP_GPU_TESTS=1 git push to override."
+  exit 1
+fi
+
+grep -E 'Test Files|Tests ' "$log"
+rm -f "$log"
+echo "pre-push: GPU conformance passed"
