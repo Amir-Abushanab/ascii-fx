@@ -50,6 +50,10 @@ export interface GlFxParams {
   time: number
   /** Only reveal (1) and original-mix (8) sample it. */
   source?: TexImageSource
+  /** 0 pointer, 1 motion. */
+  sourceKind: number
+  /** Per-cell motion (§21), `columns · rows`. Required when sourceKind is 1. */
+  motion?: Uint8Array
 }
 
 const UNIFORMS = [
@@ -57,6 +61,7 @@ const UNIFORMS = [
   'uAtlas',
   'uAtlasRgba',
   'uSrc',
+  'uMotion',
   'uGrid',
   'uAtlasLayout',
   'uCell',
@@ -75,6 +80,7 @@ const UNIFORMS = [
   'uFxFeather',
   'uFxIntensity',
   'uFxTime',
+  'uFxSource',
 ] as const
 
 type UniformName = (typeof UNIFORMS)[number]
@@ -111,6 +117,7 @@ export class GlCompositor {
   private atlasRgbaTex!: WebGLTexture
   private cellsTex!: WebGLTexture
   private srcTex!: WebGLTexture
+  private motionTex!: WebGLTexture
   private cellData?: Uint32Array
   private cellDims = { columns: 0, rows: 0 }
   private lost = false
@@ -265,6 +272,15 @@ export class GlCompositor {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4))
     this.setSampling(gl.LINEAR)
 
+    // Motion field. NEAREST because it is one texel per cell and the effect
+    // should land on cell boundaries rather than bleed across them. Always
+    // bound — a 1×1 of zero stands in when nothing asked for a field, since a
+    // sampler left unbound reads as undefined behaviour rather than as black.
+    this.motionTex = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, this.motionTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(1))
+    this.setSampling(gl.NEAREST)
+
     gl.disable(gl.BLEND)
     gl.disable(gl.DEPTH_TEST)
   }
@@ -346,9 +362,30 @@ export class GlCompositor {
     gl.activeTexture(gl.TEXTURE2)
     gl.bindTexture(gl.TEXTURE_2D, this.atlasRgbaTex)
     gl.uniform1i(u('uAtlasRgba'), 2)
+    if (fx.motion) {
+      gl.bindTexture(gl.TEXTURE_2D, this.motionTex)
+      // R8 rows are not 4-byte aligned at most grid widths; without this the
+      // upload walks off by a few bytes per row and the field shears.
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.R8,
+        frame.columns,
+        frame.rows,
+        0,
+        gl.RED,
+        gl.UNSIGNED_BYTE,
+        fx.motion,
+      )
+    }
+
     gl.activeTexture(gl.TEXTURE3)
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex)
     gl.uniform1i(u('uSrc'), 3)
+    gl.activeTexture(gl.TEXTURE4)
+    gl.bindTexture(gl.TEXTURE_2D, this.motionTex)
+    gl.uniform1i(u('uMotion'), 4)
 
     gl.uniform2ui(u('uGrid'), frame.columns, frame.rows)
     gl.uniform4ui(
@@ -381,6 +418,7 @@ export class GlCompositor {
     gl.uniform1f(u('uFxFeather'), fx.featherPx)
     gl.uniform1f(u('uFxIntensity'), fx.intensity)
     gl.uniform1f(u('uFxTime'), fx.time)
+    gl.uniform1ui(u('uFxSource'), fx.motion ? fx.sourceKind : 0)
 
     // Every pixel is written by the triangle — including the letterbox, which
     // the shader returns clearColor for — so there is nothing to clear first.

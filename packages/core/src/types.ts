@@ -152,6 +152,25 @@ export interface MatchOptions {
   hysteresis?: number
 }
 
+/**
+ * Per-cell motion field (ALGORITHM.md §22). Both are 0..1 and are quantized to
+ * 0..255 before anything reads them — the quantization is part of the
+ * definition, not a rounding detail, so that a GPU field can agree bit-for-bit.
+ */
+export interface MotionOptions {
+  /**
+   * Mean-luma change below which a cell reads as still, as a fraction of full
+   * range. Default 0.02. Sensor noise and compression both sit around here, so
+   * a field with this at 0 is mostly noise.
+   */
+  threshold?: number
+  /**
+   * How much of a cell's trail survives each frame, 0..1. Default 0.85. Lower
+   * is a shorter wake; 0 leaves only what is moving right now.
+   */
+  decay?: number
+}
+
 export const FLAG_FLAT = 1
 export const FLAG_TRANSPARENT = 2
 

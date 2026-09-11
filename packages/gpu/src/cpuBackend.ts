@@ -1,5 +1,15 @@
 import type { AsciiProfile, ColorMode, MatchOptions, RawImage } from '@ascii-fx/core'
-import { AsciiFrame, compositeFrame, deriveGrid, matchFrame } from '@ascii-fx/core'
+import type { MotionState } from '@ascii-fx/core'
+import {
+  AsciiFrame,
+  compositeFrame,
+  createMotionState,
+  deriveGrid,
+  matchBand,
+  matchFrame,
+  motionField,
+  reduceSource,
+} from '@ascii-fx/core'
 import type { BandOptions } from './matchProtocol.js'
 import { MatchPool } from './matchPool.js'
 import type { GlFxParams, GlViewParams } from './glCompositor.js'
@@ -13,7 +23,13 @@ import type {
   InteractionOptions,
   RenderSource,
 } from './types.js'
-import { isLiveSource, isRawImage, outputCanBeTransparent, sourceDims } from './types.js'
+import {
+  assertInteraction,
+  isLiveSource,
+  isRawImage,
+  outputCanBeTransparent,
+  sourceDims,
+} from './types.js'
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
@@ -52,6 +68,13 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private source?: RenderSource
   private sourceLive = false
   private lastFrame?: AsciiFrame
+  /**
+   * The motion field (§21) for `lastFrame`, and the state behind the inline
+   * path's copy of it. The pool keeps its own per-band state; this one is only
+   * for frames matched on the main thread, so the two never interleave.
+   */
+  private lastMotion?: Uint8Array
+  private inlineMotion?: MotionState
   /**
    * Whether lastFrame belongs to the current source and options. Hysteresis is
    * biased toward the incumbent and does not self-correct, so feeding it a
@@ -99,6 +122,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.profile = options.profile
     const { canvas: _c, profile: _p, backend: _b, interaction, ...rest } = options
     this.opts = rest
+    assertInteraction(interaction ?? null)
     this.interaction = interaction ?? null
     if (options.compositor !== 'canvas2d') {
       this.glc = GlCompositor.tryCreate(this.canvas, this.profile)
@@ -211,7 +235,19 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.matchDirty = true
   }
 
+  /** Whether this frame needs a motion field computed for it. */
+  private get motionWanted(): boolean {
+    return this.interaction?.source === 'motion'
+  }
+
   setInteraction(interaction: InteractionOptions | null): void {
+    assertInteraction(interaction)
+    // A field describes the frames it was accumulated over; changing what is
+    // being asked for restarts it rather than carrying a stale wake across.
+    if (interaction?.source !== this.interaction?.source) {
+      this.lastMotion = undefined
+      this.inlineMotion = undefined
+    }
     this.interaction = interaction
     this.scheduleFxPresent()
     this.ensureFxLoop()
@@ -399,6 +435,11 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       intensity: interaction?.intensity ?? 1,
       time: (performance.now() - this.t0) / 1000,
       source: kind === 1 || kind === 8 ? this.sourceTexture() : undefined,
+      sourceKind: this.motionWanted ? 1 : 0,
+      motion:
+        this.motionWanted && this.lastMotion?.length === frame.columns * frame.rows
+          ? this.lastMotion
+          : undefined,
     }
     this.glc!.present(frame, view, fx)
   }
@@ -535,6 +576,26 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     const cellW = dw / frame.columns
     const cellH = dh / frame.rows
 
+    // The mask this effect is driven by, at a canvas pixel. Motion reads the
+    // field at that pixel's cell; everything else is the pointer's radial
+    // falloff. Written once so the warp and the per-cell loop below cannot
+    // disagree about what is driving them.
+    const field =
+      this.motionWanted && this.lastMotion?.length === frame.columns * frame.rows
+        ? this.lastMotion
+        : undefined
+    const fallAt = (x: number, y: number): number => {
+      if (field) {
+        const c = Math.floor((x - dx) / cellW)
+        const r = Math.floor((y - dy) / cellH)
+        if (c < 0 || r < 0 || c >= frame.columns || r >= frame.rows) return 0
+        return field[r * frame.columns + c] / 255
+      }
+      return (
+        1 - smoothstep(Math.max(radius - feather, 0), radius + feather, Math.hypot(x - px, y - py))
+      )
+    }
+
     if (kind === 'wave') {
       // Horizontal strip warp, one strip per cell row. The shader offsets the
       // *sampling* position (display(x) = base(x + off)), so the strip lands
@@ -581,18 +642,35 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         ctx.globalAlpha = 1
       } else {
         layer.globalCompositeOperation = 'destination-in'
-        const grad = layer.createRadialGradient(
-          px,
-          py,
-          Math.max(radius - feather, 0),
-          px,
-          py,
-          radius + feather,
-        )
-        grad.addColorStop(0, `rgba(255,255,255,${m})`)
-        grad.addColorStop(1, 'rgba(255,255,255,0)')
-        layer.fillStyle = grad
-        layer.fillRect(0, 0, cw, ch)
+        if (field) {
+          // One texel per cell, scaled up unsmoothed: the mask should land on
+          // cell boundaries the way the shader's does, not blur across them.
+          const mask = new ImageData(frame.columns, frame.rows)
+          for (let i = 0; i < field.length; i++) {
+            mask.data[i * 4] = 255
+            mask.data[i * 4 + 1] = 255
+            mask.data[i * 4 + 2] = 255
+            mask.data[i * 4 + 3] = Math.round(field[i] * m)
+          }
+          const maskCanvas = this.mkCanvas(frame.columns, frame.rows)
+          ;(maskCanvas.getContext('2d') as Ctx2D).putImageData(mask, 0, 0)
+          layer.imageSmoothingEnabled = false
+          layer.drawImage(maskCanvas, dx, dy, dw, dh)
+          layer.imageSmoothingEnabled = true
+        } else {
+          const grad = layer.createRadialGradient(
+            px,
+            py,
+            Math.max(radius - feather, 0),
+            px,
+            py,
+            radius + feather,
+          )
+          grad.addColorStop(0, `rgba(255,255,255,${m})`)
+          grad.addColorStop(1, 'rgba(255,255,255,0)')
+          layer.fillStyle = grad
+          layer.fillRect(0, 0, cw, ch)
+        }
         layer.globalCompositeOperation = 'source-over'
         ctx.drawImage(this.fxLayer, 0, 0)
       }
@@ -615,10 +693,15 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       const scaleY = dh / base.height
       const baseCellW = base.width / frame.columns
       const baseCellH = base.height / frame.rows
-      const c0 = Math.max(0, Math.floor((px - R - dx) / cellW) - 1)
-      const c1 = Math.min(frame.columns - 1, Math.ceil((px + R - dx) / cellW))
-      const r0 = Math.max(0, Math.floor((py - R - dy) / cellH) - 1)
-      const r1 = Math.min(frame.rows - 1, Math.ceil((py + R - dy) / cellH))
+      // The pointer's influence is bounded by its radius; a field's is not, so
+      // motion sweeps the whole grid and leans on the per-cell `fall < 0.02`
+      // skip below to stay cheap on a mostly-still frame.
+      const c0 = field ? 0 : Math.max(0, Math.floor((px - R - dx) / cellW) - 1)
+      const c1 = field
+        ? frame.columns - 1
+        : Math.min(frame.columns - 1, Math.ceil((px + R - dx) / cellW))
+      const r0 = field ? 0 : Math.max(0, Math.floor((py - R - dy) / cellH) - 1)
+      const r1 = field ? frame.rows - 1 : Math.min(frame.rows - 1, Math.ceil((py + R - dy) / cellH))
       const clearFill =
         clear[3] > 0
           ? `rgba(${(clear[0] * 255) | 0},${(clear[1] * 255) | 0},${(clear[2] * 255) | 0},${clear[3]})`
@@ -626,8 +709,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       // The shader's warp in canvas coords: where display pixel (x, y) samples.
       const warpAt = (x: number, y: number): [number, number] => {
         if (kind === 'displace') {
-          const f = 1 - smoothstep(innerEdge, R, Math.hypot(x - px, y - py))
-          const amp = f * intensity * cellW * 0.8
+          const amp = fallAt(x, y) * intensity * cellW * 0.8
           return [x + Math.sin(y * 0.11 + time * 2) * amp, y + Math.cos(x * 0.13 + time * 2) * amp]
         }
         if (kind === 'push') {
@@ -648,8 +730,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         for (let c = c0; c <= c1; c++) {
           const cxp = dx + (c + 0.5) * cellW
           const cyp = dy + (r + 0.5) * cellH
-          const d = Math.hypot(cxp - px, cyp - py)
-          const fall = 1 - smoothstep(innerEdge, R, d)
+          const fall = fallAt(cxp, cyp)
           const destX = dx + c * cellW
           const destY = dy + r * cellH
 
@@ -765,12 +846,59 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (this.destroyed || !this.source) return
     if (this.matchDirty || this.sourceLive || !this.lastFrame) {
       if (!this.matchOnWorkers()) {
-        this.lastFrame = matchFrame(this.extract(), this.matchOptions())
+        this.lastFrame = this.matchInline()
         this.hysteresisPrimed = true
         this.matchDirty = false
       }
     }
     if (this.lastFrame) this.present(this.lastFrame)
+  }
+
+  /**
+   * Match on the main thread.
+   *
+   * Plain `matchFrame` unless a motion field is wanted, in which case this runs
+   * the same steps it runs — derive the grid, reduce, match — and takes the
+   * field off the reduced samples on the way past, rather than reducing twice.
+   * Without this, `workers: false` would leave motion silently doing nothing.
+   */
+  private matchInline(): AsciiFrame {
+    const source = this.extract()
+    const options = this.matchOptions()
+    if (!this.motionWanted || this.opts.matcher === 'chromatic') {
+      this.lastMotion = undefined
+      return matchFrame(source, options)
+    }
+
+    const { columns, rows } = deriveGrid(
+      source.width,
+      source.height,
+      this.profile,
+      options.columns,
+      options.rows,
+    )
+    const reduced = reduceSource(source, columns, rows, (options.alpha ?? 'mask') === 'ignore')
+    if (this.inlineMotion?.columns !== columns || this.inlineMotion?.rows !== rows) {
+      this.inlineMotion = createMotionState(columns, rows)
+    }
+    this.lastMotion = motionField(
+      reduced,
+      columns,
+      rows,
+      this.inlineMotion,
+      this.interaction?.motion ?? {},
+    ).magnitude
+    const cells = matchBand(reduced, columns, rows, options)
+    return new AsciiFrame({
+      columns,
+      rows,
+      colorMode: options.color ?? 'mono',
+      glyphIds: cells.glyphIds,
+      foreground: cells.foreground,
+      background: cells.background,
+      flags: cells.flags,
+      profile: this.profile,
+    })
   }
 
   /**
@@ -795,12 +923,13 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         columns: this.pending.columns,
         rows: this.pending.rows,
         colorMode: this.pending.colorMode,
-        glyphIds: done.glyphIds,
-        foreground: done.foreground,
-        background: done.background,
-        flags: done.flags,
+        glyphIds: done.cells.glyphIds,
+        foreground: done.cells.foreground,
+        background: done.cells.background,
+        flags: done.cells.flags,
         profile: this.profile,
       })
+      this.lastMotion = done.motion
       this.hysteresisPrimed = true
       this.pending = undefined
       this.matchDirty = false
@@ -823,6 +952,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         foreground: this.opts.foreground,
         background: this.opts.background,
         temporal: this.opts.temporal,
+        motion: this.motionWanted ? (this.interaction?.motion ?? {}) : false,
       }
       if (pool.submit(source, columns, rows, options)) {
         this.pending = { columns, rows, colorMode }
@@ -910,7 +1040,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (this.matchDirty || !this.lastFrame || this.pending) {
       this.pool?.abandon()
       this.pending = undefined
-      this.lastFrame = matchFrame(this.extract(), this.matchOptions())
+      this.lastFrame = this.matchInline()
       this.hysteresisPrimed = true
       this.matchDirty = false
     }

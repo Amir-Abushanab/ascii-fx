@@ -496,6 +496,61 @@ Multiplications are u32-wrapping (`Math.imul`), shifts are logical. Position, ne
 
 Hold `jitterSeed` constant for a dither that is stable frame to frame; pass a frame counter for one that moves. No GPU backend implements §20 yet, so it is reachable through `@ascii-fx/core` only.
 
+## 21. motion-v1 (per-cell motion field)
+
+A per-cell measure of how much a cell's content has moved since the previous frame, for the interaction stage (spec §9) to drive an effect with instead of the pointer. It reads reduce-v1 samples (§4) and never touches the matcher, so structural-v1 and §17 conformance are unaffected by it.
+
+Integer throughout (§0). The effect is usually written with a float `smoothstep` and `sqrt`; both are in fixed point here so a GPU field can agree with the CPU one bit-for-bit rather than drift.
+
+### Options
+
+```text
+threshold   0..1, default 0.02      T     = max(1, round(threshold · 255))
+decay       0..1, default 0.85      D     = clamp(round(decay · 255), 0, 255)
+```
+
+The quantization is part of the definition, not a rounding detail. `T` is floored at 1 because a threshold of 0 would put the smoothstep's two edges on the same value.
+
+### State
+
+Per grid: `prevLuma[cell]` (u8), `trail[cell]` (u8), and a `primed` flag. State is band-local and belongs to the band it describes, the same contract §9's `BandReuse` carries. An unprimed state has no previous frame, so its `delta` is 0 for every cell — without that, the first frame reads as motion everywhere.
+
+### Per cell
+
+`meanLuma` is exactly §5's, over the same 64 samples:
+
+```text
+meanLuma = rdiv(Σ luma[k], 64)                                   0..255
+delta    = primed ? |meanLuma − prevLuma[cell]| : 0              0..255
+
+ONE = 1023
+
+t        = delta ≤ T ? 0 : min(rdiv((delta − T) · ONE, 3T), ONE)  smoothstep edges T, 4T
+s        = rdiv(t² · (3·ONE − 2t), ONE²)                          0..ONE
+amount   = isqrt(s · ONE) >> 2                                    0..255, square-root lift
+
+decayed  = max(rdiv(trail[cell] · D, 255) − 6, 0)
+trail[cell]    = max(decayed, amount)
+prevLuma[cell] = meanLuma
+magnitude[cell] = trail[cell]
+```
+
+`ONE` is 10 bits rather than 16 so that every intermediate fits in 32 bits unsigned: `t² · (3·ONE − 2t)` peaks at `ONE³`, which is ~1.07·10⁹ here and would be ~8.4·10¹⁴ at 65535 — exact in a float64 and an overflow in the u32 a shader computes it in. The output is 8-bit regardless, so the cost is under one level of quantization. `t` is guarded against `delta ≤ T` rather than clamped afterwards, because that subtraction wraps in u32 instead of going negative.
+
+The square-root lift keeps subtle movement visible instead of crushed toward zero. The trail is what makes a moving edge leave a wake rather than flicker; the constant `6` subtracted alongside the geometric decay is what makes it reach 0 instead of asymptoting to a permanent dim smear.
+
+### isqrt
+
+`floor(sqrt(n))`, exact. `Math.sqrt` is correctly rounded and a shader's is not, so neither can simply be floored near a perfect square. Take any close estimate and correct it:
+
+```text
+r = floor(sqrt(n))
+while ((r+1)² ≤ n) r++
+while (r² > n)     r--
+```
+
+Both implementations run the correction, which is what lets them agree.
+
 ---
 
 ## C. chromatic-v1

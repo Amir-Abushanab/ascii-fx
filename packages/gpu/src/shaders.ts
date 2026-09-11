@@ -25,6 +25,9 @@ struct Params {
   temporal: u32,       // 1 = prevReduced holds last frame's samples; identical cells skip (spec §21, exact)
   hysteresisMilli: u32, // chromatic-v1 §C5, in thousandths; 0 = off
   covMax: u32,         // densest glyph's coverage (§6); the flat ramp's ceiling
+  motionT: u32,        // §21 threshold, 0..255 (floored at 1 by the caller)
+  motionDecay: u32,    // §21 trail retention, 0..255
+  motionPrimed: u32,   // 1 = the state buffer holds a previous frame's luma
 }
 
 fn luma8(r: u32, g: u32, b: u32) -> u32 {
@@ -469,6 +472,90 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k
 }
 `
 
+export const MOTION_WGSL = /* wgsl */ `
+${COMMON}
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read> reduced: array<u32>;
+// One u32 per cell: trail in bits 8..15, previous mean luma in bits 0..7. The
+// composite reads the trail straight out of this, so there is no second buffer
+// to keep in step with it.
+@group(0) @binding(2) var<storage, read_write> motion: array<u32>;
+
+const MONE: u32 = 1023u;
+
+// floor(sqrt(n)), exact (ALGORITHM.md §21). WGSL's sqrt is not correctly
+// rounded, so the estimate is corrected instead of trusted — which is what
+// makes this agree with the CPU field bit for bit.
+fn isqrtU(n: u32) -> u32 {
+  if (n == 0u) { return 0u; }
+  var r = u32(sqrt(f32(n)));
+  loop {
+    if ((r + 1u) * (r + 1u) > n) { break; }
+    r = r + 1u;
+  }
+  loop {
+    if (r == 0u || r * r <= n) { break; }
+    r = r - 1u;
+  }
+  return r;
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let cx = gid.x;
+  let cy = gid.y;
+  if (cx >= P.cols || cy >= P.rows) {
+    return;
+  }
+  let ci = cy * P.cols + cx;
+
+  let SW = P.cols * 8u;
+  var sumL = 0u;
+  for (var j = 0u; j < 8u; j = j + 1u) {
+    let row = (cy * 8u + j) * SW + cx * 8u;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+      let s = reduced[row + i];
+      sumL = sumL + luma8(s & 0xffu, (s >> 8u) & 0xffu, (s >> 16u) & 0xffu);
+    }
+  }
+  let meanL = rdivU(sumL, 64u);
+
+  let state = motion[ci];
+  let prevLuma = state & 0xffu;
+  let prevTrail = (state >> 8u) & 0xffu;
+
+  var delta = 0u;
+  if (P.motionPrimed == 1u) {
+    if (meanL > prevLuma) {
+      delta = meanL - prevLuma;
+    } else {
+      delta = prevLuma - meanL;
+    }
+  }
+
+  // Guarded, not clamped: delta - T wraps in u32 rather than going negative.
+  var t = 0u;
+  if (delta > P.motionT) {
+    t = rdivU((delta - P.motionT) * MONE, 3u * P.motionT);
+    if (t > MONE) {
+      t = MONE;
+    }
+  }
+  let sm = rdivU(t * t * (3u * MONE - 2u * t), MONE * MONE);
+  let amount = isqrtU(sm * MONE) >> 2u;
+
+  var decayed = rdivU(prevTrail * P.motionDecay, 255u);
+  if (decayed > 6u) {
+    decayed = decayed - 6u;
+  } else {
+    decayed = 0u;
+  }
+  let trail = max(decayed, amount);
+
+  motion[ci] = (trail << 8u) | meanL;
+}
+`
+
 export const COMPOSITE_WGSL = /* wgsl */ `
 struct CompParams {
   cols: u32,
@@ -508,6 +595,10 @@ struct FxParams {
   featherPx: f32,
   intensity: f32,
   time: f32,
+  source: u32,         // 0 pointer, 1 motion (§21)
+  _s1: u32,
+  _s2: u32,
+  _s3: u32,
 }
 
 @group(0) @binding(0) var<uniform> C: CompParams;
@@ -519,6 +610,9 @@ struct FxParams {
 @group(0) @binding(3) var samp: sampler;
 @group(0) @binding(4) var<uniform> FX: FxParams;
 @group(0) @binding(5) var srcTex: texture_2d<f32>;
+// Always bound; a one-element placeholder when no field was computed, since a
+// bind group layout cannot vary per draw.
+@group(0) @binding(7) var<storage, read> motion: array<u32>;
 
 struct VSOut {
   @builtin(position) pos: vec4<f32>,
@@ -541,7 +635,21 @@ fn unpack3(c: u32) -> vec3<f32> {
   return vec3<f32>(f32(c & 0xffu), f32((c >> 8u) & 0xffu), f32((c >> 16u) & 0xffu)) / 255.0;
 }
 
+// The field is per cell, so this does its own screen-to-cell mapping: falloff()
+// is called both before grid mapping and after it, and only has the pixel.
+fn motionAt(px: vec2<f32>) -> f32 {
+  let cf = floor((px - vec2<f32>(C.originX, C.originY)) / vec2<f32>(C.cellScreenW, C.cellScreenH));
+  if (cf.x < 0.0 || cf.y < 0.0 || cf.x >= f32(C.cols) || cf.y >= f32(C.rows)) {
+    return 0.0;
+  }
+  let ci = u32(cf.y) * C.cols + u32(cf.x);
+  return f32((motion[ci] >> 8u) & 0xffu) / 255.0;
+}
+
 fn falloff(px: vec2<f32>) -> f32 {
+  if (FX.source == 1u) {
+    return motionAt(px);
+  }
   let d = distance(px, FX.pointer);
   return 1.0 - smoothstep(max(FX.radiusPx - FX.featherPx, 0.0), FX.radiusPx + FX.featherPx, d);
 }

@@ -9,7 +9,13 @@ import type {
   InteractionOptions,
   RenderSource,
 } from './types.js'
-import { isLiveSource, isRawImage, outputCanBeTransparent, sourceDims } from './types.js'
+import {
+  assertInteraction,
+  isLiveSource,
+  isRawImage,
+  outputCanBeTransparent,
+  sourceDims,
+} from './types.js'
 
 /** Recovery cascade bound: consecutive attempts allowed inside one incident window. */
 const MAX_RECOVERY_ATTEMPTS = 3
@@ -90,6 +96,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       ...rest
     } = options
     this.opts = rest
+    assertInteraction(interaction)
     this.interaction = interaction ?? null
     this.onDeviceLost = onDeviceLost
     this.onError = onError
@@ -355,6 +362,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   }
 
   setInteraction(interaction: InteractionOptions | null): void {
+    assertInteraction(interaction)
+    // The field is allocated by configure(), which reads this.
+    if (interaction?.source !== this.interaction?.source) this.matchDirty = true
     this.interaction = interaction
     this.scheduleRender()
   }
@@ -401,6 +411,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       flatThreshold: this.opts.flatThreshold,
       hysteresis: this.opts.hysteresis,
       temporal: this.opts.temporal,
+      motion: this.interaction?.source === 'motion' ? (this.interaction.motion ?? {}) : undefined,
     })
     if (gridChanged) this.compositeDirty = true
   }
