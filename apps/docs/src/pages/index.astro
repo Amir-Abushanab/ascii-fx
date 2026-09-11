@@ -1359,7 +1359,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
           <option value="cpu">cpu + webgl2</option>
           <option value="cpu-canvas2d">cpu (canvas2d)</option>
         </select>
-        <label><input id="temporal" type="checkbox" checked /> <span class="hint" tabindex="0" data-hint="Skip re-matching cells whose pixels didn't change since the last frame. Exact, great for video (WebGPU only)">temporal</span></label>
+        <label><input id="temporal" type="checkbox" checked /> <span class="hint" tabindex="0" data-hint="Skip re-matching cells whose pixels didn't change since the last frame. Exact, great for video. WebGPU and the CPU worker pool; the single-thread CPU path always matches in full">temporal</span></label>
         <label><input id="adaptive" type="checkbox" checked /> <span class="hint" tabindex="0" data-hint="Automatically lower the column count when the frame rate drops, and recover when it's smooth (WebGPU only)">adaptive</span></label>
       </fieldset>
       <fieldset>

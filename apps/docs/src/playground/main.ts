@@ -381,14 +381,16 @@ function syncFxPanel(): void {
   els.fxNote.textContent = FX_NOTES[value] ?? ''
 }
 
-/** Every interaction runs on both backends; temporal/adaptive are WebGPU features. */
+/** Every interaction runs on both backends; adaptive resolution is a WebGPU feature. */
 function syncInteractionAvailability(): void {
   const cpu = renderer?.backend === 'cpu'
   // Exact temporal reuse skips cells whose samples are unchanged, which only
   // pays against structural-v1's prefilter — chromatic-v1 never reads the
   // previous frame's samples, so the control is disabled rather than left
-  // looking effective.
-  els.temporal.disabled = cpu || emojiOn()
+  // looking effective. Both backends honour it: WebGPU in the shader, the CPU
+  // backend in its worker pool (the main-thread path always matches in full,
+  // and the pool spins up on first use, so it is not gated on `pipeline`).
+  els.temporal.disabled = emojiOn()
   els.adaptive.disabled = cpu
   syncPanel()
 }
