@@ -29,6 +29,7 @@ uniform usampler2D uCells;
 uniform sampler2D uAtlas;
 uniform sampler2D uAtlasRgba;
 uniform sampler2D uSrc;
+uniform sampler2D uMotion;   // R8, one texel per cell (ALGORITHM.md §21)
 
 uniform uvec2 uGrid;          // cols, rows
 uniform uvec4 uAtlasLayout;   // atlasCols, pitchW, pitchH, pad
@@ -49,6 +50,7 @@ uniform float uFxRadius;
 uniform float uFxFeather;
 uniform float uFxIntensity;
 uniform float uFxTime;
+uniform uint uFxSource;       // 0 pointer, 1 motion
 
 out vec4 fragColor;
 
@@ -56,7 +58,17 @@ vec3 unpack3(uint c) {
   return vec3(float(c & 0xffu), float((c >> 8) & 0xffu), float((c >> 16) & 0xffu)) / 255.0;
 }
 
+// The motion field is per cell, so this does its own screen-to-cell mapping:
+// falloff() is called both before grid mapping (coordinate-space effects) and
+// after it (glyph-local ones), and only has the pixel in hand either way.
+float motionAt(vec2 px) {
+  vec2 cf = floor((px - uOrigin) / uCellScreen);
+  if (cf.x < 0.0 || cf.y < 0.0 || cf.x >= float(uGrid.x) || cf.y >= float(uGrid.y)) return 0.0;
+  return texelFetch(uMotion, ivec2(int(cf.x), int(cf.y)), 0).r;
+}
+
 float falloff(vec2 px) {
+  if (uFxSource == 1u) return motionAt(px);
   float d = distance(px, uFxPointer);
   return 1.0 - smoothstep(max(uFxRadius - uFxFeather, 0.0), uFxRadius + uFxFeather, d);
 }

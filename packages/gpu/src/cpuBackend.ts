@@ -1,5 +1,15 @@
 import type { AsciiProfile, ColorMode, MatchOptions, RawImage } from '@ascii-fx/core'
-import { AsciiFrame, compositeFrame, deriveGrid, matchFrame } from '@ascii-fx/core'
+import type { MotionState } from '@ascii-fx/core'
+import {
+  AsciiFrame,
+  compositeFrame,
+  createMotionState,
+  deriveGrid,
+  matchBand,
+  matchFrame,
+  motionField,
+  reduceSource,
+} from '@ascii-fx/core'
 import type { BandOptions } from './matchProtocol.js'
 import { MatchPool } from './matchPool.js'
 import type { GlFxParams, GlViewParams } from './glCompositor.js'
@@ -34,6 +44,24 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
  * and that cell is redrawn from its warped source, so geometry matches the
  * GPU up to cell quantization.
  */
+/**
+ * `wave` ignores the mask entirely, and `push` and `resolution` need one origin
+ * to push away from or magnify about. A field has neither a single origin nor
+ * any influence on wave, so asking for motion on these is a mistake worth
+ * naming rather than a no-op to discover later.
+ */
+const MOTION_INCOMPATIBLE = new Set(['wave', 'push', 'resolution'])
+
+function assertInteraction(interaction: InteractionOptions | null): void {
+  if (interaction?.source === 'motion' && MOTION_INCOMPATIBLE.has(interaction.type)) {
+    throw new Error(
+      `interaction { type: '${interaction.type}', source: 'motion' } has nothing to act on: ` +
+        `'wave' ignores the mask, and 'push' and 'resolution' need a single origin that a ` +
+        "per-cell field does not have. Use source: 'pointer' for these.",
+    )
+  }
+}
+
 export class CpuAsciiRenderer implements AsciiRenderer {
   readonly backend = 'cpu' as const
   readonly profile: AsciiProfile
@@ -52,6 +80,13 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private source?: RenderSource
   private sourceLive = false
   private lastFrame?: AsciiFrame
+  /**
+   * The motion field (§21) for `lastFrame`, and the state behind the inline
+   * path's copy of it. The pool keeps its own per-band state; this one is only
+   * for frames matched on the main thread, so the two never interleave.
+   */
+  private lastMotion?: Uint8Array
+  private inlineMotion?: MotionState
   /**
    * Whether lastFrame belongs to the current source and options. Hysteresis is
    * biased toward the incumbent and does not self-correct, so feeding it a
@@ -99,6 +134,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.profile = options.profile
     const { canvas: _c, profile: _p, backend: _b, interaction, ...rest } = options
     this.opts = rest
+    assertInteraction(interaction ?? null)
     this.interaction = interaction ?? null
     if (options.compositor !== 'canvas2d') {
       this.glc = GlCompositor.tryCreate(this.canvas, this.profile)
@@ -211,7 +247,25 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.matchDirty = true
   }
 
+  /** Whether this frame needs a motion field computed for it. */
+  private get motionWanted(): boolean {
+    return this.interaction?.source === 'motion'
+  }
+
   setInteraction(interaction: InteractionOptions | null): void {
+    if (interaction?.source === 'motion' && MOTION_INCOMPATIBLE.has(interaction.type)) {
+      throw new Error(
+        `interaction { type: '${interaction.type}', source: 'motion' } has nothing to act on: ` +
+          `'wave' ignores the mask, and 'push' and 'resolution' need a single origin that a ` +
+          "per-cell field does not have. Use source: 'pointer' for these.",
+      )
+    }
+    // A field describes the frames it was accumulated over; changing what is
+    // being asked for restarts it rather than carrying a stale wake across.
+    if (interaction?.source !== this.interaction?.source) {
+      this.lastMotion = undefined
+      this.inlineMotion = undefined
+    }
     this.interaction = interaction
     this.scheduleFxPresent()
     this.ensureFxLoop()
@@ -399,6 +453,11 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       intensity: interaction?.intensity ?? 1,
       time: (performance.now() - this.t0) / 1000,
       source: kind === 1 || kind === 8 ? this.sourceTexture() : undefined,
+      sourceKind: this.motionWanted ? 1 : 0,
+      motion:
+        this.motionWanted && this.lastMotion?.length === frame.columns * frame.rows
+          ? this.lastMotion
+          : undefined,
     }
     this.glc!.present(frame, view, fx)
   }
@@ -765,12 +824,59 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (this.destroyed || !this.source) return
     if (this.matchDirty || this.sourceLive || !this.lastFrame) {
       if (!this.matchOnWorkers()) {
-        this.lastFrame = matchFrame(this.extract(), this.matchOptions())
+        this.lastFrame = this.matchInline()
         this.hysteresisPrimed = true
         this.matchDirty = false
       }
     }
     if (this.lastFrame) this.present(this.lastFrame)
+  }
+
+  /**
+   * Match on the main thread.
+   *
+   * Plain `matchFrame` unless a motion field is wanted, in which case this runs
+   * the same steps it runs — derive the grid, reduce, match — and takes the
+   * field off the reduced samples on the way past, rather than reducing twice.
+   * Without this, `workers: false` would leave motion silently doing nothing.
+   */
+  private matchInline(): AsciiFrame {
+    const source = this.extract()
+    const options = this.matchOptions()
+    if (!this.motionWanted || this.opts.matcher === 'chromatic') {
+      this.lastMotion = undefined
+      return matchFrame(source, options)
+    }
+
+    const { columns, rows } = deriveGrid(
+      source.width,
+      source.height,
+      this.profile,
+      options.columns,
+      options.rows,
+    )
+    const reduced = reduceSource(source, columns, rows, (options.alpha ?? 'mask') === 'ignore')
+    if (this.inlineMotion?.columns !== columns || this.inlineMotion?.rows !== rows) {
+      this.inlineMotion = createMotionState(columns, rows)
+    }
+    this.lastMotion = motionField(
+      reduced,
+      columns,
+      rows,
+      this.inlineMotion,
+      this.interaction?.motion ?? {},
+    ).magnitude
+    const cells = matchBand(reduced, columns, rows, options)
+    return new AsciiFrame({
+      columns,
+      rows,
+      colorMode: options.color ?? 'mono',
+      glyphIds: cells.glyphIds,
+      foreground: cells.foreground,
+      background: cells.background,
+      flags: cells.flags,
+      profile: this.profile,
+    })
   }
 
   /**
@@ -801,6 +907,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         flags: done.cells.flags,
         profile: this.profile,
       })
+      this.lastMotion = done.motion
       this.hysteresisPrimed = true
       this.pending = undefined
       this.matchDirty = false
@@ -823,6 +930,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         foreground: this.opts.foreground,
         background: this.opts.background,
         temporal: this.opts.temporal,
+        motion: this.motionWanted ? (this.interaction?.motion ?? {}) : false,
       }
       if (pool.submit(source, columns, rows, options)) {
         this.pending = { columns, rows, colorMode }
@@ -910,7 +1018,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (this.matchDirty || !this.lastFrame || this.pending) {
       this.pool?.abandon()
       this.pending = undefined
-      this.lastFrame = matchFrame(this.extract(), this.matchOptions())
+      this.lastFrame = this.matchInline()
       this.hysteresisPrimed = true
       this.matchDirty = false
     }

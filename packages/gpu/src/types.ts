@@ -1,4 +1,12 @@
-import type { AlphaMode, AsciiFrame, AsciiProfile, ColorMode, RGB, RawImage } from '@ascii-fx/core'
+import type {
+  AlphaMode,
+  AsciiFrame,
+  AsciiProfile,
+  ColorMode,
+  MotionOptions,
+  RGB,
+  RawImage,
+} from '@ascii-fx/core'
 
 export type BackendChoice = 'auto' | 'webgpu' | 'cpu'
 export type FitMode = 'cover' | 'contain' | 'stretch'
@@ -24,6 +32,16 @@ export type InteractionType =
   | 'original-mix'
   | 'resolution'
 
+/**
+ * What drives the effect's 0..1 mask.
+ *
+ * 'pointer' is a radial falloff around the pointer. 'motion' is the per-cell
+ * motion field (ALGORITHM.md §21): the effect lands wherever the source is
+ * moving, shaped like the moving thing rather than like a circle, and fades
+ * behind it as the trail decays.
+ */
+export type InteractionSource = 'pointer' | 'motion'
+
 /** Composite-stage interaction (spec §9). Never triggers rematching. */
 export interface InteractionOptions {
   type: InteractionType
@@ -33,6 +51,14 @@ export interface InteractionOptions {
   feather?: number
   /** Effect strength. Default 1. */
   intensity?: number
+  /**
+   * Default 'pointer'. 'motion' is rejected for `wave`, `push` and `resolution`:
+   * wave ignores the mask entirely, and the other two need a single origin to
+   * push away from or magnify about, which a field does not have.
+   */
+  source?: InteractionSource
+  /** Tuning for `source: 'motion'`. Ignored otherwise. */
+  motion?: MotionOptions
 }
 
 export interface AsciiPointer {

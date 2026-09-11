@@ -355,6 +355,14 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   }
 
   setInteraction(interaction: InteractionOptions | null): void {
+    // TODO(motion): the WGSL field pass. Until it exists this refuses rather
+    // than quietly composites a pointer falloff the caller did not ask for.
+    if (interaction?.source === 'motion') {
+      throw new Error(
+        "interaction source: 'motion' is not implemented on the WebGPU backend yet; " +
+          "use backend: 'cpu' for it.",
+      )
+    }
     this.interaction = interaction
     this.scheduleRender()
   }
