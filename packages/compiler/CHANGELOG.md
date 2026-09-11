@@ -1,5 +1,12 @@
 # @ascii-fx/compiler
 
+## 0.8.0
+
+### Patch Changes
+
+- Updated dependencies [[`11b0332`](https://github.com/Amir-Abushanab/ascii-fx/commit/11b0332eab378d53e6664cd633f848cbd70bd014)]:
+  - @ascii-fx/core@0.8.0
+
 ## 0.7.0
 
 ### Patch Changes
