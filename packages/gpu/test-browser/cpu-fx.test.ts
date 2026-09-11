@@ -180,7 +180,12 @@ const halfLit = (litRight: boolean) => {
   return { width: w, height: h, data }
 }
 
-const mkMotion = async (type = 'reveal' as const) => {
+// `workers: false` deliberately: the worker path is pipelined, so a frame is
+// presented while the next one matches, and a test that renders and then reads
+// the canvas is racing that round-trip — it passed locally and failed on a
+// slower runner. The inline path matches synchronously, and the field over the
+// worker path is covered by the band-assembly tests in match-pool.test.ts.
+const mkMotion = async (type = 'reveal' as const, compositor?: 'canvas2d') => {
   const canvas = document.createElement('canvas')
   canvas.width = 320
   canvas.height = 180
@@ -188,6 +193,8 @@ const mkMotion = async (type = 'reveal' as const) => {
     canvas,
     profile: makeProfile(STANDARD_SIX),
     backend: 'cpu',
+    workers: false,
+    ...(compositor ? { compositor } : {}),
     columns: 16,
     color: 'full',
     interaction: { type, source: 'motion', intensity: 1 },
@@ -244,6 +251,7 @@ describe('motion-driven interactions', () => {
       canvas: plainCanvas,
       profile: makeProfile(STANDARD_SIX),
       backend: 'cpu',
+      workers: false,
       columns: 16,
       color: 'full',
     })
@@ -278,18 +286,7 @@ describe('motion-driven interactions', () => {
   it('works on the Canvas2D composite too, not just the shader one', async () => {
     // Canvas2D approximates the shader at cell granularity, and the field is
     // per cell, so this is the one effect where the two should agree closely.
-    const canvas = document.createElement('canvas')
-    canvas.width = 320
-    canvas.height = 180
-    const renderer = await createAsciiRenderer({
-      canvas,
-      profile: makeProfile(STANDARD_SIX),
-      backend: 'cpu',
-      compositor: 'canvas2d',
-      columns: 16,
-      color: 'full',
-      interaction: { type: 'reveal', source: 'motion', intensity: 1 },
-    })
+    const { renderer, canvas } = await mkMotion('reveal', 'canvas2d')
     renderer.setSource(halfLit(false))
     renderer.render()
     await frame2()
