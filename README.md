@@ -5,9 +5,9 @@
 [![bundle](https://img.shields.io/bundlephobia/minzip/@ascii-fx/core?label=core%20min%2Bgzip)](https://bundlephobia.com/package/@ascii-fx/core)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-Turn images and video into ASCII **that actually looks like the picture** — in real time, in the browser.
+Real-time ASCII rendering for the browser. Glyphs are chosen by shape rather than brightness, so the result keeps the edges and detail of the source.
 
-![ASCII FX rendering a 3D scene — spheres, prisms, a torus and a cone tumbling over a grid floor, every glyph picked by shape and coloured to match](assets/hero.webp)
+![A 3D scene rendered by ASCII FX: spheres, prisms, a torus and a cone over a grid floor, each glyph chosen by shape and coloured to match](assets/hero.webp)
 
 **▶ [Open the playground](https://amir-abushanab.github.io/ascii-fx/)**
 
@@ -17,13 +17,13 @@ import { AsciiImage } from '@ascii-fx/react'
 ;<AsciiImage src="/cat.jpg" alt="Cat" />
 ```
 
-That is the whole zero-config path. It picks a font, compiles a profile at runtime, renders on the GPU where there is one and on worker threads plus a WebGL2 draw where there isn't — and if none of that works, the plain `<img>` underneath is still on screen.
+No configuration is required. The component compiles a font profile at runtime, renders with WebGPU where there's an adapter, and falls back to worker threads plus a WebGL2 draw where there isn't. If neither works, the plain `<img>` underneath stays on screen.
 
-## Shape, not brightness
+## How it works
 
-Almost every ASCII renderer maps **brightness to a character ramp**: dark pixels get `.`, bright ones get `@`. That's one number per cell, so a diagonal edge and a flat grey of the same average brightness produce the same glyph. Detail dissolves.
+Most ASCII renderers map brightness to a character ramp: dark pixels become `.`, bright ones become `@`. That's one number per cell, so a diagonal edge and a flat grey with the same average brightness get the same glyph, and detail is lost.
 
-ASCII FX matches on **shape**. Every glyph is rasterized to an 8×8 mask, every source cell is reduced to 8×8 samples, and the matcher asks which glyph's mask actually reconstructs this cell — then fits the ink and paper colours to the two halves that mask carves out. An edge stays an edge, because a glyph with an edge in the same place wins.
+ASCII FX matches on shape. Each glyph is rasterized to an 8×8 mask, each source cell is reduced to 8×8 samples, and the matcher picks the glyph whose mask best reconstructs the cell. Foreground and background colours are then fitted to the two regions that mask splits the cell into. A cell containing an edge gets a glyph with an edge in the same place.
 
 |                          | brightness ramp | ASCII FX                       |
 | ------------------------ | --------------- | ------------------------------ |
@@ -32,7 +32,7 @@ ASCII FX matches on **shape**. Every glyph is rasterized to an 8×8 mask, every 
 | colour                   | sampled average | fitted to the glyph's own mask |
 | a `/` vs a flat mid-grey | identical       | distinguishable                |
 
-The rerank is **exact**, not a heuristic: with foreground and background free, the best colours for a given mask are the means of its two sample sets, so the reconstruction error has a closed form and the winner is the true minimum. [`ALGORITHM.md`](./ALGORITHM.md) is normative — every constant, bit layout, and tie-break.
+The rerank is exact. With foreground and background free, the best colours for a mask are the means of its two sample sets, so the reconstruction error has a closed form and the winning glyph is the true minimum. [`ALGORITHM.md`](./ALGORITHM.md) specifies every constant, bit layout, and tie-break.
 
 ## Install
 
@@ -41,7 +41,7 @@ pnpm add @ascii-fx/react        # React: <AsciiImage> <AsciiVideo> <AsciiCanvas>
 pnpm add @ascii-fx/gpu          # anywhere else: the renderer directly
 ```
 
-Everything is ESM-only and side-effect free, so importing one export pulls one export — `@ascii-fx/core` shakes from 37 KB down to **289 bytes** if all you want is `luma8`.
+Everything is ESM-only and side-effect free. `@ascii-fx/core` tree-shakes from 37 KB down to 289 bytes if all you import is `luma8`.
 
 ### React
 
@@ -51,7 +51,7 @@ import { AsciiVideo } from '@ascii-fx/react'
 ;<AsciiVideo src="/clip.mp4" columns={160} color="full" autoPlay muted loop />
 ```
 
-Server-renders the real `<video>` as a layout-stable, accessible fallback, then swaps in the canvas on the client with no flash and no layout shift. Honors `prefers-reduced-motion`, pauses offscreen, and recovers from GPU device loss on its own.
+The server renders a normal `<video>` element as the fallback, and the client fades the canvas in over it once matching succeeds, with no layout shift. Components respect `prefers-reduced-motion`, pause when offscreen, and recover from GPU device loss on their own. See [`@ascii-fx/react`](./packages/react) for the hooks, error handling, and the `draw` hook for pixel effects.
 
 ### Anywhere else
 
@@ -63,97 +63,84 @@ ascii.setSource(video)
 ascii.start()
 ```
 
-`backend: 'auto'` picks WebGPU when it's there and the CPU matcher when it isn't — and the CPU path is **bit-identical**, not an approximation. It never quietly downgrades you to a worse matcher to hold a frame rate; approximate matchers exist, but only if you ask for one by name.
+`backend: 'auto'` uses WebGPU when there's an adapter and the CPU matcher when there isn't. The output is identical on both, bit for bit. The approximate matchers (`shape6`, `ramp`) are opt-in; the renderer never switches to one to hold a frame rate.
 
-Without WebGPU, both halves of the work still leave the main thread. The matcher runs on a pool of workers, one per core less one; they run the very same `matchBand` the main thread would, and assembling bands is byte-identical to matching the whole frame at once, so this buys throughput and a responsive page, never a different picture. The grid is then painted by a WebGL2 fullscreen draw — the same compositor shader the WebGPU backend runs, ported to GLSL — instead of a full-resolution RGBA buffer built on the CPU. That also makes the pointer interactions the real shader rather than an approximation of it at cell granularity.
+Without WebGPU, matching runs on a pool of workers and the grid is painted by a WebGL2 fullscreen draw, so the main thread only does the texture upload. Live sources pay one frame of latency for this. The first frame, static sources, and `captureFrame()` are matched inline. `workers: false` matches on the main thread instead, and `compositor: 'canvas2d'` paints with Canvas2D.
 
-On a live source the matcher costs one frame of latency, since a frame is presented while the next one matches; the first frame, static sources, and `captureFrame()` are matched inline and cost none. `workers: false` and `compositor: 'canvas2d'` put either half back the way it was.
+`temporal: true` skips cells whose 64 samples are byte-identical to the previous frame. The output is unchanged, since a cell depends only on its own samples. At 320×84, a frame where nothing moved matches in 8.9 ms instead of 125.7 ms. The WebGPU backend and the worker pool both honour it; the inline path always matches in full. Details in [`@ascii-fx/gpu`](./packages/gpu).
 
-`temporal: true` then skips the cells that did not move. A cell's glyph and colours depend on nothing but its own 64 samples and the options, so samples that are byte-identical to last frame already have their answer — each worker keeps its own band and compares. It is a skip, not an approximation: the cells are the same bytes either way, which is what `pnpm test:browser` holds it to. At 320×84 over Geist Mono, matching a frame where nothing moved costs 8.9 ms instead of 125.7 ms, a quarter-changed frame 37.4 ms, and a wholly changed one the full 129.6 ms — the comparison stops at the first differing byte, so there is nothing to lose by leaving it on. Honoured by the WebGPU backend and the CPU worker pool; the inline path (first frame, `captureFrame()`, or a frame the pool is too busy to take) always matches in full.
+## Tilt
 
-## Tilt: the pointer a phone doesn't have
-
-Every `interaction` type is driven by the pointer, so an effect tuned on a desktop does nothing at
-all on a phone. `tilt` fills that in from the orientation sensor:
+Interactions follow the pointer. A phone doesn't have one, so `tilt` drives the pointer from the orientation sensor instead:
 
 ```tsx
 <AsciiImage src="/cat.jpg" alt="Cat" interaction={{ type: 'glyph-swell' }} tilt />
 ```
 
-Readings are normalized to canvas coordinates the way a ball would roll on the screen, rotated by
-the screen angle so "right" stays right in landscape, and centred on whatever pose the reader was
-already holding — a phone at the usual 50° starts in the middle of the canvas, not pinned to a
-corner. The pointer eases toward each new pose on a frame loop that parks itself once it arrives.
+Tilting the phone moves the pointer in the direction of the tilt, corrected for screen orientation and relative to the angle the phone was held at when the component mounted. The pointer eases toward each new reading.
 
-iOS gets no tilt on purpose: Safari gates the sensor behind a modal permission dialog and nothing
-here opens one, so the component looks exactly as it does without `tilt`. Treat it as an enhancement
-some phones don't get. A page where tilt is the point can call `handle.enableTilt()` from a tap to
-ask explicitly. Outside React, `@ascii-fx/gpu/tilt`
-exports `TiltSource` and `forwardTiltToPointer` to wire by hand — its own subpath, so the sensor is
-a chunk the components fetch on demand rather than bytes in every bundle that never tilts.
+Tilt is disabled on iOS. Safari puts the sensor behind a permission dialog and nothing here opens one, so the component behaves as if `tilt` were off. To request permission, call `handle.enableTilt()` from a tap handler. Outside React, `@ascii-fx/gpu/tilt` exports `TiltSource` and `forwardTiltToPointer`. It's a separate subpath so the sensor code only loads when something uses it.
 
 ## Colour glyphs
 
-Emoji carry their own colour, which removes the move the main matcher is built on: with a free foreground and background, the best colours for a mask are the means of its two sample sets, and that is exactly what makes the rerank exact. Baked colour leaves nothing to fit — so `chromatic-v1` is a **separate algorithm**, comparing a cell's 64 samples against the glyph's own, composited over the backdrop it will be drawn on.
+Emoji carry their own colour, so there's nothing to fit and the exact rerank doesn't apply. `chromatic-v1` is a separate matcher for them. It compares a cell's 64 samples against the glyph's own, composited over the backdrop it will be drawn on.
 
 ```ts
 const frame = matchFrame(source, { profile, matcher: 'chromatic', background: [11, 11, 15] })
-// colorMode 'glyph' — no colour planes, because the colour is in the glyph
+// colorMode 'glyph': no colour planes, the colour is in the glyph
 ```
 
-No flat path, no polarity, no prefilter. [`ALGORITHM.md §C`](./ALGORITHM.md) is normative; the measurements behind each choice — including why the palette is curated to ~100 glyphs, and why a prefilter cost more quality than it saved time — are in [`CHROMATIC-FINDINGS.md`](./CHROMATIC-FINDINGS.md). Flip **Emoji mode** in the playground to drive it.
+It has no flat path, polarity step, or prefilter. [`ALGORITHM.md §C`](./ALGORITHM.md) specifies it, and [`CHROMATIC-FINDINGS.md`](./CHROMATIC-FINDINGS.md) has the measurements behind each choice, including why the palette is curated to about 100 glyphs. Toggle Emoji mode in the playground to try it.
 
 ## Jitter
 
-Taking the argmin means a cell whose top candidates reconstruct it almost equally well always resolves to the same one. On Geist Mono the shortlist is a near-tie plateau — best 27, eighth-best 29 — so a wide region of similar content locks to one glyph and reads as banding. `jitter` lets each cell pick among the candidates that reconstruct it nearly as well, weighted toward the better ones.
+Taking the argmin means a cell whose top candidates score almost the same always resolves to the same one, so a wide region of similar content locks to a single glyph and reads as banding. On Geist Mono the shortlist is usually a near-tie: the best candidate scores 27 and the eighth-best 29. `jitter` lets each cell pick among the candidates that reconstruct it nearly as well, weighted toward the better ones.
 
 ```ts
 const frame = matchFrame(source, { profile, jitter: 40 }) // 0 (default) = off, 255 = widest
 ```
 
-The draw is a hash of the cell's position, not `Math.random`, so it stays reproducible, band-splitting stays byte-identical, and a shader could reproduce it exactly. Hold `jitterSeed` for a dither that sits still; pass a frame counter for one that moves. [`ALGORITHM.md §20`](./ALGORITHM.md) is normative. `@ascii-fx/core` only for now — no GPU backend implements it.
+The draw is seeded by a hash of the cell position, so results are reproducible and splitting a frame into bands doesn't change them. `jitterSeed` is constant by default; pass a frame counter to animate the dither. Only `@ascii-fx/core` implements it so far. [`ALGORITHM.md §20`](./ALGORITHM.md).
 
 ## Motion
 
-Every interaction is driven by the pointer: a circle of influence that follows the cursor. `source: 'motion'` swaps that circle for the source's own movement.
+Interactions normally follow the pointer. `source: 'motion'` drives them from the source's own movement instead:
 
-```ts
+```tsx
 <AsciiVideo src="/clip.mp4" interaction={{ type: 'reveal', source: 'motion' }} />
 ```
 
-Each cell's mean luma is compared against the previous frame's, thresholded to ignore drift, square-root-lifted so subtle movement still reads, and left to decay — so a moving hand lights up hand-shaped and trails a wake behind it, instead of a circle sitting wherever the cursor happens to be. [`ALGORITHM.md §21`](./ALGORITHM.md) is normative.
+Each cell's mean luma is compared with the previous frame, thresholded to ignore drift, passed through a square root so small movements still register, and decayed over time. A moving hand lights up in the shape of the hand and leaves a trail behind it. It's a per-cell field rather than a centroid, which matters on real footage: two people talking would average to a point in the empty space between them, and a camera pan would average to the centre of the frame.
 
-It is a field, not a point, which is what makes it hold up on real footage: a centroid of "two people talking" sits in the empty space between them, and a centroid of a camera pan sits motionless in the middle of the frame.
-
-The field is integer end to end — fixed-point smoothstep, and a square root corrected by adjustment rather than trusted — so the WGSL and CPU implementations agree bit-for-bit rather than approximately, and `pnpm test:gpu` holds them to it. `wave`, `push` and `resolution` reject it: wave ignores the mask, and the other two need a single origin a field does not have.
+The field is integer arithmetic end to end, so the WGSL and CPU implementations agree bit for bit, and `pnpm test:gpu` checks that. `wave`, `push` and `resolution` reject it: wave ignores the mask, and the other two need a single origin. [`ALGORITHM.md §21`](./ALGORITHM.md).
 
 ## Packages
 
-| package                                           | what it owns                                                                            |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [`@ascii-fx/core`](./packages/core)               | the exact CPU matchers (the oracle every backend is held to), codecs, charsets, exports |
-| [`@ascii-fx/gpu`](./packages/gpu)                 | WebGPU compute matching, one-draw compositor, interactions, exact worker/CPU fallback   |
-| [`@ascii-fx/compiler`](./packages/compiler)       | deterministic font rasterization, atlases, `.asciip`/`.asciif`, CLI                     |
-| [`@ascii-fx/react`](./packages/react)             | `<AsciiImage>` `<AsciiVideo>` `<AsciiCanvas>` + hooks, SSR-safe                         |
-| [`@ascii-fx/three`](./packages/three)             | `AsciiPass` for `WebGPURenderer`, instanced `AsciiGlyphs`                               |
-| [`@ascii-fx/react-three`](./packages/react-three) | the same, as React Three Fiber components                                               |
-| [`@ascii-fx/vite`](./packages/vite)               | build-time profiles and frames as typed virtual modules                                 |
+| package                                           | what it owns                                                                      |
+| ------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [`@ascii-fx/core`](./packages/core)               | the exact CPU matchers every backend is tested against, codecs, charsets, exports |
+| [`@ascii-fx/gpu`](./packages/gpu)                 | WebGPU compute matching, one-draw compositor, interactions, worker/CPU fallback   |
+| [`@ascii-fx/compiler`](./packages/compiler)       | deterministic font rasterization, atlases, `.asciip`/`.asciif`, CLI               |
+| [`@ascii-fx/react`](./packages/react)             | `<AsciiImage>` `<AsciiVideo>` `<AsciiCanvas>` and hooks, SSR-safe                 |
+| [`@ascii-fx/three`](./packages/three)             | `AsciiPass` for `WebGPURenderer`, instanced `AsciiGlyphs`                         |
+| [`@ascii-fx/react-three`](./packages/react-three) | the same, as React Three Fiber components                                         |
+| [`@ascii-fx/vite`](./packages/vite)               | build-time profiles and frames as typed virtual modules                           |
 
-## How fast
+## Benchmarks
 
-Real published libraries, identical animated 1280×720 source, same 160×42 glyph grid where each library allows it, vsync off, each row in an isolated page (best of 2 passes, headless Chromium on an M3 Pro). Only the shape-aware rows pick glyphs by shape; the rest map brightness.
+Published libraries, the same animated 1280×720 source, the same 160×42 grid where the library allows it, vsync off, each in an isolated page. Best of 2 passes, headless Chromium on an M3 Pro. Only the shape-aware rows pick glyphs by shape; the rest map brightness.
 
-| approach                 | picks glyphs by                  | p50 ms/frame |    ~fps |
-| ------------------------ | -------------------------------- | -----------: | ------: |
-| **ascii-fx · WebGPU**    | **shape + fitted color (exact)** |      **2.8** | **357** |
-| **ascii-fx · no WebGPU** | **shape + fitted color (exact)** |      **2.8** | **357** |
-| textmode.js 0.17 (WebGL) | brightness + color               |          4.5 |     222 |
-| three.js AsciiEffect     | brightness                       |          8.2 |     122 |
-| aalib.js 2.0 · mono      | brightness                       |         10.3 |      97 |
-| aalib.js 2.0 · colored   | brightness + color               |         16.8 |      60 |
-| chafa-wasm 0.3           | shape-aware blocks + fg/bg       |         50.1 |      20 |
+| approach                 | picks glyphs by              | p50 ms/frame | ~fps |
+| ------------------------ | ---------------------------- | -----------: | ---: |
+| ascii-fx, WebGPU         | shape + fitted color (exact) |          2.8 |  357 |
+| ascii-fx, no WebGPU      | shape + fitted color (exact) |          2.8 |  357 |
+| textmode.js 0.17 (WebGL) | brightness + color           |          4.5 |  222 |
+| three.js AsciiEffect     | brightness                   |          8.2 |  122 |
+| aalib.js 2.0, mono       | brightness                   |         10.3 |   97 |
+| aalib.js 2.0, colored    | brightness + color           |         16.8 |   60 |
+| chafa-wasm 0.3           | shape-aware blocks + fg/bg   |         50.1 |   20 |
 
-The scene-only floor is 2.7 ms, so **neither** path costs the main thread anything measurable. Without a GPU the work does not disappear, it moves: the matcher runs on worker threads and the grid is painted by a WebGL2 fullscreen draw, so the main thread is left holding one texture upload. Taking those away one at a time is what the difference is made of:
+The scene-only floor is 2.7 ms, so neither path adds measurable main-thread cost. Without a GPU the matcher runs on workers and the grid is painted by WebGL2. Removing those one at a time:
 
 | fallback, by stage                   | p50 ms/frame | ~fps |
 | ------------------------------------ | -----------: | ---: |
@@ -161,47 +148,47 @@ The scene-only floor is 2.7 ms, so **neither** path costs the main thread anythi
 | matcher on workers, Canvas2D         |         31.9 |   31 |
 | matcher on workers, WebGL2 composite |          2.8 |  357 |
 
-Same exact cells in all three. Full table, methodology, and regeneration: [`RESULTS.md`](./apps/benchmarks/RESULTS.md).
+The cells are identical in all three. Full tables and methodology: [`RESULTS.md`](./apps/benchmarks/RESULTS.md).
 
-## Documents
+## Docs
 
-- [`ALGORITHM.md`](./ALGORITHM.md) — **normative**: every constant, bit layout, and tie-break of `structural-v1`, the binary formats, `shape6-v1`/`ramp-v1`/`jitter-v1`/`motion-v1`.
-- [`ascii-fx-spec.md`](./ascii-fx-spec.md) — the product spec this repo implements.
-- [`RELEASING.md`](./RELEASING.md) — changesets, the release workflow, and the one-time npm/Pages setup.
-- [`SECURITY.md`](./SECURITY.md) — what is actually attack surface here, and how to report it.
+- [`ALGORITHM.md`](./ALGORITHM.md), the normative spec: every constant, bit layout, and tie-break of `structural-v1`, `shape6-v1`, `ramp-v1`, `jitter-v1`, `motion-v1`, `chromatic-v1`, and the binary formats.
+- [`ascii-fx-spec.md`](./ascii-fx-spec.md), the product spec this repo implements.
+- [`RELEASING.md`](./RELEASING.md): changesets, the release workflow, and one-time npm and Pages setup.
+- [`SECURITY.md`](./SECURITY.md): what counts as attack surface here, and how to report it.
 
-## Develop
+## Development
 
 ```sh
 pnpm install
-pnpm dev              # the playground at localhost:4321
-pnpm check            # the full gate — also the pre-commit hook
+pnpm dev              # playground at localhost:4321
+pnpm check            # the full gate, also the pre-commit hook
 ```
 
 ```sh
 pnpm build            # all packages (tsup, ESM + d.ts)
-pnpm test             # node suite: unit, golden, oracle-conformance, SSR
-pnpm test:browser     # browser suite, no GPU needed
-pnpm test:gpu         # browser suite, real adapter required: CPU↔GPU bit-exact conformance
-pnpm assets           # re-render this README's hero and the social card with the library itself
+pnpm test             # node: unit, golden, oracle conformance, SSR
+pnpm test:browser     # browser, no GPU needed
+pnpm test:gpu         # browser, real adapter required: CPU/GPU bit-exact conformance
+pnpm assets           # re-render the hero image and social card with the library itself
 ```
 
-**Exactness is the contract.** The GPU matcher must agree with the CPU reference bit-for-bit — glyphs, colours, flags — across colour modes, palettes, alpha modes, uneven reductions, temporal reuse, and dirty-region rematches. `pnpm test:gpu` is what proves it, and it needs a real adapter: a GitHub runner reports a _software_ adapter that passes every availability check and then dies partway through the workload, so CI runs the GPU-free half and the conformance suite is a pre-release gate ([`RELEASING.md`](./RELEASING.md)).
+The GPU matcher has to agree with the CPU reference bit for bit: glyphs, colours, and flags, across colour modes, palettes, alpha modes, uneven reductions, temporal reuse, and dirty-region rematches. `pnpm test:gpu` checks this, and it needs a real adapter. GitHub runners report a software adapter that passes every availability check and then dies partway through the workload, so CI runs the GPU-free half and the pre-push hook runs the rest on any push that touches `packages/`. See [`RELEASING.md`](./RELEASING.md).
 
-Hygiene: `pnpm lint` (oxlint), `pnpm format` (oxfmt), `pnpm knip`, `pnpm depcruise`, and `pnpm package:check` (publint + are-the-types-wrong + a real tarball install in a throwaway npm project). Dependencies are held to a 7-day `minimumReleaseAge` at install, transitive ones included.
+Other checks: `pnpm lint` (oxlint), `pnpm format` (oxfmt), `pnpm knip`, `pnpm depcruise`, and `pnpm package:check` (publint, are-the-types-wrong, and a tarball install into a throwaway npm project). Installs enforce a 7-day `minimumReleaseAge` on every dependency, transitive ones included.
 
-The hero above is generated by `pnpm assets`, which renders a procedural scene through the actual CPU matcher — so it cannot drift from what the library does. The same command writes `assets/og.png`, the 1280×640 social card (`pnpm assets og` redoes just that one): `apps/docs/prep.mjs` copies it into the site as its `og:image`, and GitHub's repository preview is the one place it has to be uploaded by hand — **Settings → General → Social preview**, which has no API and no repo file it reads.
+`pnpm assets` renders the hero above and `assets/og.png` through the CPU matcher, so they always reflect the current output. `apps/docs/prep.mjs` copies the card into the site as its `og:image`. GitHub's repository social preview has no API, so that one is uploaded by hand under Settings → General.
 
 ## Prior art
 
-Three shape-aware approaches this project learned from, all credited in [`ascii-fx-spec.md` §55](./ascii-fx-spec.md):
+Prior work this project draws on, all credited in [`ascii-fx-spec.md` §55](./ascii-fx-spec.md):
 
-- Alex Harri, [_ASCII characters are not pixels: a deep dive into ASCII rendering_](https://alexharri.com/blog/ascii-rendering) — the six-dimensional shape descriptor and directional contrast. Implemented here as the opt-in `shape6` matcher, never as a silent fallback.
-- [chafa](https://hpjansson.org/chafa/) by Hans Petter Jansson — structural reconstruction against glyph masks, the family the default `structural-v1` matcher belongs to.
-- [arcade](https://github.com/vercel-labs/arcade) by Vercel — a CPU renderer for terminal games, where sampling the near-ties instead of always taking the best match is what keeps a scene from looking stencilled. `jitter-v1` is that idea, reworked into integer arithmetic so it stays specifiable bit-for-bit.
-- [mitos](https://github.com/oxidecomputer/mitos) by Oxide — an ASCII art tool that can drive glyph density from a per-cell temporal delta with a decaying trail, rather than from brightness. There is no density ramp to drive here, so `motion-v1` is that field pointed at the interaction stage instead.
+- Alex Harri, [_ASCII characters are not pixels: a deep dive into ASCII rendering_](https://alexharri.com/blog/ascii-rendering): the six-dimensional shape descriptor and directional contrast, implemented here as the opt-in `shape6` matcher.
+- [chafa](https://hpjansson.org/chafa/) by Hans Petter Jansson: structural reconstruction against glyph masks, the family `structural-v1` belongs to.
+- [arcade](https://github.com/vercel-labs/arcade) by Vercel: a CPU renderer for terminal games that samples among near-ties instead of always taking the best match, which keeps a scene from looking stencilled. `jitter-v1` is that idea in integer arithmetic.
+- [mitos](https://github.com/oxidecomputer/mitos) by Oxide: an ASCII art tool that drives glyph density from a per-cell temporal delta with a decaying trail. There's no density ramp here, so `motion-v1` uses the same kind of field to drive interactions instead.
 
-All were implemented from their described behaviour and tested against this repo's own CPU reference, not ported. `shape6` is benched against the exact matcher in [`RESULTS.md`](./apps/benchmarks/RESULTS.md).
+None of the code was ported. Each was reimplemented from its described behaviour and tested against this repo's CPU reference. `shape6` is benchmarked against the exact matcher in [`RESULTS.md`](./apps/benchmarks/RESULTS.md).
 
 ## Credits
 
