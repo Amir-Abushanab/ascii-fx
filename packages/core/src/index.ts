@@ -9,6 +9,7 @@ export type {
   GlyphAtlas,
   GlyphMetrics,
   MatchOptions,
+  MotionOptions,
   ProfileMetadata,
   RGB,
   RawImage,
@@ -37,6 +38,8 @@ export { compositeFrame, type CompositeOptions } from './composite.js'
 
 export { BUILTIN_CHARSETS, resolveCharset, type ResolvedCharset } from './charsets.js'
 export { luma8, packRGBA, rgbHex, unpackA, unpackB, unpackG, unpackR } from './color.js'
+export { createMotionState, isqrt, motionField } from './motion.js'
+export type { MotionField, MotionState } from './motion.js'
 export { fdiv, idiv, nextPow2, popcount32, rdiv, bytesToHex, hexToBytes } from './util.js'
 
 export { PROFILE_FORMAT_VERSION, decodeProfile, encodeProfile } from './profileCodec.js'
