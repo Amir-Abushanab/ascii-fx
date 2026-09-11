@@ -113,6 +113,20 @@ const frame = matchFrame(source, { profile, jitter: 40 }) // 0 (default) = off, 
 
 The draw is a hash of the cell's position, not `Math.random`, so it stays reproducible, band-splitting stays byte-identical, and a shader could reproduce it exactly. Hold `jitterSeed` for a dither that sits still; pass a frame counter for one that moves. [`ALGORITHM.md §20`](./ALGORITHM.md) is normative. `@ascii-fx/core` only for now — no GPU backend implements it.
 
+## Motion
+
+Every interaction is driven by the pointer: a circle of influence that follows the cursor. `source: 'motion'` swaps that circle for the source's own movement.
+
+```ts
+<AsciiVideo src="/clip.mp4" interaction={{ type: 'reveal', source: 'motion' }} />
+```
+
+Each cell's mean luma is compared against the previous frame's, thresholded to ignore drift, square-root-lifted so subtle movement still reads, and left to decay — so a moving hand lights up hand-shaped and trails a wake behind it, instead of a circle sitting wherever the cursor happens to be. [`ALGORITHM.md §21`](./ALGORITHM.md) is normative.
+
+It is a field, not a point, which is what makes it hold up on real footage: a centroid of "two people talking" sits in the empty space between them, and a centroid of a camera pan sits motionless in the middle of the frame.
+
+The field is integer end to end — fixed-point smoothstep, and a square root corrected by adjustment rather than trusted — so the WGSL and CPU implementations agree bit-for-bit rather than approximately, and `pnpm test:gpu` holds them to it. `wave`, `push` and `resolution` reject it: wave ignores the mask, and the other two need a single origin a field does not have.
+
 ## Packages
 
 | package                                           | what it owns                                                                            |
@@ -151,7 +165,7 @@ Same exact cells in all three. Full table, methodology, and regeneration: [`RESU
 
 ## Documents
 
-- [`ALGORITHM.md`](./ALGORITHM.md) — **normative**: every constant, bit layout, and tie-break of `structural-v1`, the binary formats, `shape6-v1`/`ramp-v1`/`jitter-v1`.
+- [`ALGORITHM.md`](./ALGORITHM.md) — **normative**: every constant, bit layout, and tie-break of `structural-v1`, the binary formats, `shape6-v1`/`ramp-v1`/`jitter-v1`/`motion-v1`.
 - [`ascii-fx-spec.md`](./ascii-fx-spec.md) — the product spec this repo implements.
 - [`RELEASING.md`](./RELEASING.md) — changesets, the release workflow, and the one-time npm/Pages setup.
 - [`SECURITY.md`](./SECURITY.md) — what is actually attack surface here, and how to report it.
@@ -185,6 +199,7 @@ Three shape-aware approaches this project learned from, all credited in [`ascii-
 - Alex Harri, [_ASCII characters are not pixels: a deep dive into ASCII rendering_](https://alexharri.com/blog/ascii-rendering) — the six-dimensional shape descriptor and directional contrast. Implemented here as the opt-in `shape6` matcher, never as a silent fallback.
 - [chafa](https://hpjansson.org/chafa/) by Hans Petter Jansson — structural reconstruction against glyph masks, the family the default `structural-v1` matcher belongs to.
 - [arcade](https://github.com/vercel-labs/arcade) by Vercel — a CPU renderer for terminal games, where sampling the near-ties instead of always taking the best match is what keeps a scene from looking stencilled. `jitter-v1` is that idea, reworked into integer arithmetic so it stays specifiable bit-for-bit.
+- [mitos](https://github.com/oxidecomputer/mitos) by Oxide — an ASCII art tool that can drive glyph density from a per-cell temporal delta with a decaying trail, rather than from brightness. There is no density ramp to drive here, so `motion-v1` is that field pointed at the interaction stage instead.
 
 All were implemented from their described behaviour and tested against this repo's own CPU reference, not ported. `shape6` is benched against the exact matcher in [`RESULTS.md`](./apps/benchmarks/RESULTS.md).
 

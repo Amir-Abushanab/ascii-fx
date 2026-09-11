@@ -576,6 +576,26 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     const cellW = dw / frame.columns
     const cellH = dh / frame.rows
 
+    // The mask this effect is driven by, at a canvas pixel. Motion reads the
+    // field at that pixel's cell; everything else is the pointer's radial
+    // falloff. Written once so the warp and the per-cell loop below cannot
+    // disagree about what is driving them.
+    const field =
+      this.motionWanted && this.lastMotion?.length === frame.columns * frame.rows
+        ? this.lastMotion
+        : undefined
+    const fallAt = (x: number, y: number): number => {
+      if (field) {
+        const c = Math.floor((x - dx) / cellW)
+        const r = Math.floor((y - dy) / cellH)
+        if (c < 0 || r < 0 || c >= frame.columns || r >= frame.rows) return 0
+        return field[r * frame.columns + c] / 255
+      }
+      return (
+        1 - smoothstep(Math.max(radius - feather, 0), radius + feather, Math.hypot(x - px, y - py))
+      )
+    }
+
     if (kind === 'wave') {
       // Horizontal strip warp, one strip per cell row. The shader offsets the
       // *sampling* position (display(x) = base(x + off)), so the strip lands
@@ -622,18 +642,35 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         ctx.globalAlpha = 1
       } else {
         layer.globalCompositeOperation = 'destination-in'
-        const grad = layer.createRadialGradient(
-          px,
-          py,
-          Math.max(radius - feather, 0),
-          px,
-          py,
-          radius + feather,
-        )
-        grad.addColorStop(0, `rgba(255,255,255,${m})`)
-        grad.addColorStop(1, 'rgba(255,255,255,0)')
-        layer.fillStyle = grad
-        layer.fillRect(0, 0, cw, ch)
+        if (field) {
+          // One texel per cell, scaled up unsmoothed: the mask should land on
+          // cell boundaries the way the shader's does, not blur across them.
+          const mask = new ImageData(frame.columns, frame.rows)
+          for (let i = 0; i < field.length; i++) {
+            mask.data[i * 4] = 255
+            mask.data[i * 4 + 1] = 255
+            mask.data[i * 4 + 2] = 255
+            mask.data[i * 4 + 3] = Math.round(field[i] * m)
+          }
+          const maskCanvas = this.mkCanvas(frame.columns, frame.rows)
+          ;(maskCanvas.getContext('2d') as Ctx2D).putImageData(mask, 0, 0)
+          layer.imageSmoothingEnabled = false
+          layer.drawImage(maskCanvas, dx, dy, dw, dh)
+          layer.imageSmoothingEnabled = true
+        } else {
+          const grad = layer.createRadialGradient(
+            px,
+            py,
+            Math.max(radius - feather, 0),
+            px,
+            py,
+            radius + feather,
+          )
+          grad.addColorStop(0, `rgba(255,255,255,${m})`)
+          grad.addColorStop(1, 'rgba(255,255,255,0)')
+          layer.fillStyle = grad
+          layer.fillRect(0, 0, cw, ch)
+        }
         layer.globalCompositeOperation = 'source-over'
         ctx.drawImage(this.fxLayer, 0, 0)
       }
@@ -656,10 +693,15 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       const scaleY = dh / base.height
       const baseCellW = base.width / frame.columns
       const baseCellH = base.height / frame.rows
-      const c0 = Math.max(0, Math.floor((px - R - dx) / cellW) - 1)
-      const c1 = Math.min(frame.columns - 1, Math.ceil((px + R - dx) / cellW))
-      const r0 = Math.max(0, Math.floor((py - R - dy) / cellH) - 1)
-      const r1 = Math.min(frame.rows - 1, Math.ceil((py + R - dy) / cellH))
+      // The pointer's influence is bounded by its radius; a field's is not, so
+      // motion sweeps the whole grid and leans on the per-cell `fall < 0.02`
+      // skip below to stay cheap on a mostly-still frame.
+      const c0 = field ? 0 : Math.max(0, Math.floor((px - R - dx) / cellW) - 1)
+      const c1 = field
+        ? frame.columns - 1
+        : Math.min(frame.columns - 1, Math.ceil((px + R - dx) / cellW))
+      const r0 = field ? 0 : Math.max(0, Math.floor((py - R - dy) / cellH) - 1)
+      const r1 = field ? frame.rows - 1 : Math.min(frame.rows - 1, Math.ceil((py + R - dy) / cellH))
       const clearFill =
         clear[3] > 0
           ? `rgba(${(clear[0] * 255) | 0},${(clear[1] * 255) | 0},${(clear[2] * 255) | 0},${clear[3]})`
@@ -667,8 +709,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       // The shader's warp in canvas coords: where display pixel (x, y) samples.
       const warpAt = (x: number, y: number): [number, number] => {
         if (kind === 'displace') {
-          const f = 1 - smoothstep(innerEdge, R, Math.hypot(x - px, y - py))
-          const amp = f * intensity * cellW * 0.8
+          const amp = fallAt(x, y) * intensity * cellW * 0.8
           return [x + Math.sin(y * 0.11 + time * 2) * amp, y + Math.cos(x * 0.13 + time * 2) * amp]
         }
         if (kind === 'push') {
@@ -689,8 +730,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         for (let c = c0; c <= c1; c++) {
           const cxp = dx + (c + 0.5) * cellW
           const cyp = dy + (r + 0.5) * cellH
-          const d = Math.hypot(cxp - px, cyp - py)
-          const fall = 1 - smoothstep(innerEdge, R, d)
+          const fall = fallAt(cxp, cyp)
           const destX = dx + c * cellW
           const destY = dy + r * cellH
 

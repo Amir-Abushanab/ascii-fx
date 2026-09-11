@@ -275,6 +275,38 @@ describe('motion-driven interactions', () => {
     renderer.destroy()
   })
 
+  it('works on the Canvas2D composite too, not just the shader one', async () => {
+    // Canvas2D approximates the shader at cell granularity, and the field is
+    // per cell, so this is the one effect where the two should agree closely.
+    const canvas = document.createElement('canvas')
+    canvas.width = 320
+    canvas.height = 180
+    const renderer = await createAsciiRenderer({
+      canvas,
+      profile: makeProfile(STANDARD_SIX),
+      backend: 'cpu',
+      compositor: 'canvas2d',
+      columns: 16,
+      color: 'full',
+      interaction: { type: 'reveal', source: 'motion', intensity: 1 },
+    })
+    renderer.setSource(halfLit(false))
+    renderer.render()
+    await frame2()
+    const still = pixels(canvas)
+
+    renderer.setSource(halfLit(false))
+    renderer.render()
+    await frame2()
+    expect(diffCount(still, pixels(canvas))).toBe(0)
+
+    renderer.setSource(halfLit(true))
+    renderer.render()
+    await frame2()
+    expect(diffCount(still, pixels(canvas))).toBeGreaterThan(0)
+    renderer.destroy()
+  })
+
   it('refuses the kinds a field cannot drive', async () => {
     for (const type of ['wave', 'push', 'resolution'] as const) {
       await expect(

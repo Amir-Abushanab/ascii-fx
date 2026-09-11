@@ -2570,6 +2570,7 @@ Credit conceptual influences in docs:
 - Alex Harri — shape-vector and directional contrast work
 - Ditherlab / chafa-style structural reconstruction inspiration
 - vercel-labs/arcade — sampling near-tie glyph matches rather than always taking the argmin (jitter-v1)
+- oxidecomputer/mitos — a per-cell temporal delta with a decaying trail as a drive signal (motion-v1)
 
 ---
 
