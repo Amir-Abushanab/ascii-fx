@@ -89,8 +89,22 @@ oracle bit-for-bit, so run it on a machine with a real adapter before cutting a 
 pnpm test:gpu
 ```
 
-If you want it gating merges rather than being a manual step, point the check job at a
-self-hosted GPU runner; nothing else about the workflow has to change.
+`.githooks/pre-push` runs it for you on any push that touches `packages/`, so in practice
+you only reach for the command above when you want it on its own. The hook cannot gate a
+release directly — release.yml publishes from a runner, not from a laptop — but it does
+not need to: the changesets "Version Packages" PR only touches `package.json`,
+`CHANGELOG.md` and `.changeset/`, so matcher code reaches main only through a push that
+went through the hook.
+
+It fails rather than passes when the machine has no real adapter. `describe.runIf` means
+an adapterless run executes none of the suite and still exits 0 — 15 passed, 50 skipped,
+green and worthless — so the hook reads the `no adapter` placeholder's own state and
+treats a _passing_ one as a failure. `SKIP_GPU_TESTS=1 git push` or `--no-verify` overrides
+it.
+
+What the hook does not cover is a contributor whose machine has no adapter and who
+overrides it. If you want that closed too, point the check job at a self-hosted GPU
+runner; nothing else about the workflow has to change.
 
 ## Notes
 
