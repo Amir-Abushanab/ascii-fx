@@ -523,17 +523,19 @@ Per grid: `prevLuma[cell]` (u8), `trail[cell]` (u8), and a `primed` flag. State 
 meanLuma = rdiv(Σ luma[k], 64)                                   0..255
 delta    = primed ? |meanLuma − prevLuma[cell]| : 0              0..255
 
-ONE = 65535
+ONE = 1023
 
-t        = clamp(rdiv((delta − T) · ONE, 3T), 0, ONE)            smoothstep edges T, 4T
-s        = rdiv(t² · (3·ONE − 2t), ONE²)                         0..ONE
-amount   = isqrt(s · ONE) >> 8                                   0..255, square-root lift
+t        = delta ≤ T ? 0 : min(rdiv((delta − T) · ONE, 3T), ONE)  smoothstep edges T, 4T
+s        = rdiv(t² · (3·ONE − 2t), ONE²)                          0..ONE
+amount   = isqrt(s · ONE) >> 2                                    0..255, square-root lift
 
 decayed  = max(rdiv(trail[cell] · D, 255) − 6, 0)
 trail[cell]    = max(decayed, amount)
 prevLuma[cell] = meanLuma
 magnitude[cell] = trail[cell]
 ```
+
+`ONE` is 10 bits rather than 16 so that every intermediate fits in 32 bits unsigned: `t² · (3·ONE − 2t)` peaks at `ONE³`, which is ~1.07·10⁹ here and would be ~8.4·10¹⁴ at 65535 — exact in a float64 and an overflow in the u32 a shader computes it in. The output is 8-bit regardless, so the cost is under one level of quantization. `t` is guarded against `delta ≤ T` rather than clamped afterwards, because that subtraction wraps in u32 instead of going negative.
 
 The square-root lift keeps subtle movement visible instead of crushed toward zero. The trail is what makes a moving edge leave a wake rather than flicker; the constant `6` subtracted alongside the geometric decay is what makes it reach 0 instead of asymptoting to a permanent dim smear.
 

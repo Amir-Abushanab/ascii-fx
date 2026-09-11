@@ -61,6 +61,24 @@ export interface InteractionOptions {
   motion?: MotionOptions
 }
 
+/**
+ * `wave` ignores the mask entirely, and `push` and `resolution` need one origin
+ * to push away from or magnify about. A field has neither a single origin nor
+ * any influence on wave, so asking for motion on these is a mistake worth
+ * naming rather than a no-op to discover later. Both backends apply this.
+ */
+const MOTION_INCOMPATIBLE = new Set<InteractionType>(['wave', 'push', 'resolution'])
+
+export function assertInteraction(interaction: InteractionOptions | null | undefined): void {
+  if (interaction?.source === 'motion' && MOTION_INCOMPATIBLE.has(interaction.type)) {
+    throw new Error(
+      `interaction { type: '${interaction.type}', source: 'motion' } has nothing to act on: ` +
+        `'wave' ignores the mask, and 'push' and 'resolution' need a single origin that a ` +
+        "per-cell field does not have. Use source: 'pointer' for these.",
+    )
+  }
+}
+
 export interface AsciiPointer {
   /** Normalized canvas coordinates (0..1, top-left origin). */
   set(x: number, y: number): void

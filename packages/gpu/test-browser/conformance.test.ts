@@ -2,7 +2,14 @@
 // CPU reference on every cell — glyph ids, colors, and flags, bit-for-bit.
 import { describe, expect, it } from 'vitest'
 import type { AsciiFrame, ColorMode, RGB } from '@ascii-fx/core'
-import { decodeProfile, matchFrame, subsetProfile } from '@ascii-fx/core'
+import {
+  createMotionState,
+  decodeProfile,
+  matchFrame,
+  motionField,
+  reduceSource,
+  subsetProfile,
+} from '@ascii-fx/core'
 import { createAsciiRenderer } from '@ascii-fx/gpu'
 import type { AsciiRenderer } from '@ascii-fx/gpu'
 import {
@@ -545,6 +552,109 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
         `[gpu-bench] ${grid.columns}×${grid.rows} full re-match+readback: ${ms.toFixed(2)}ms avg`,
       )
       expect(ms).toBeGreaterThan(0)
+    } finally {
+      renderer.destroy()
+    }
+  })
+})
+
+const readMotion = async (renderer: AsciiRenderer, n: number): Promise<Uint8Array> => {
+  const internals = renderer as unknown as {
+    device: GPUDevice
+    stream: { motionBuf: GPUBuffer }
+  }
+  const staging = internals.device.createBuffer({
+    size: n * 4,
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+  })
+  const enc = internals.device.createCommandEncoder()
+  enc.copyBufferToBuffer(internals.stream.motionBuf, 0, staging, 0, n * 4)
+  internals.device.queue.submit([enc.finish()])
+  await staging.mapAsync(GPUMapMode.READ)
+  const words = new Uint32Array(staging.getMappedRange().slice(0))
+  staging.unmap()
+  staging.destroy()
+  // Trail lives in bits 8..15; the low byte is the previous frame's mean luma.
+  return new Uint8Array(words.map((w) => (w >> 8) & 0xff))
+}
+
+// The motion field (ALGORITHM.md §21) is computed twice — once in WGSL for this
+// backend and once on the CPU for the other — so it carries the same obligation
+// the matcher does. Not a tolerance: the whole reason the field is fixed-point
+// integer, with a corrected isqrt on both sides, is so these agree exactly.
+describe.runIf(gpuAvailable)('motion field GPU ↔ CPU conformance', () => {
+  const columns = 12
+  const rows = 8
+
+  it('agrees on every cell across a sequence, trail included', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const a = randomImage(columns * 8, rows * 8, 71)
+    const b = randomImage(columns * 8, rows * 8, 72)
+    // still → still → changed → still → still, so the wake has to decay in step
+    // as well as appear in step.
+    const sequence = [a, a, b, b, b]
+
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(160, 96),
+      profile,
+      backend: 'webgpu',
+      columns,
+      rows,
+      color: 'full',
+      alpha: 'ignore',
+      interaction: { type: 'reveal', source: 'motion' },
+    })
+
+    const state = createMotionState(columns, rows)
+    try {
+      for (const [i, source] of sequence.entries()) {
+        renderer.setSource(source)
+        await renderer.captureFrame()
+        const expected = motionField(
+          reduceSource(source, columns, rows, true),
+          columns,
+          rows,
+          state,
+          {},
+        ).magnitude
+        expect(await readMotion(renderer, columns * rows), `frame ${i}`).toEqual(expected)
+      }
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  it('agrees with a non-default threshold and decay', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const a = randomImage(columns * 8, rows * 8, 73)
+    const b = randomImage(columns * 8, rows * 8, 74)
+    const motion = { threshold: 0.1, decay: 0.4 }
+
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(160, 96),
+      profile,
+      backend: 'webgpu',
+      columns,
+      rows,
+      color: 'full',
+      alpha: 'ignore',
+      interaction: { type: 'glyph-scale', source: 'motion', motion },
+    })
+
+    const state = createMotionState(columns, rows)
+    try {
+      for (const [i, source] of [a, b, b, b].entries()) {
+        renderer.setSource(source)
+        await renderer.captureFrame()
+        const expected = motionField(
+          reduceSource(source, columns, rows, true),
+          columns,
+          rows,
+          state,
+          motion,
+        ).magnitude
+        expect(await readMotion(renderer, columns * rows), `frame ${i}`).toEqual(expected)
+      }
     } finally {
       renderer.destroy()
     }

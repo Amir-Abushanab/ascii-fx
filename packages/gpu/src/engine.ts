@@ -1,4 +1,4 @@
-import type { AlphaMode, AsciiProfile, ColorMode, RGB } from '@ascii-fx/core'
+import type { AlphaMode, AsciiProfile, ColorMode, MotionOptions, RGB } from '@ascii-fx/core'
 import { AsciiFrame, FLAG_TRANSPARENT, blankGlyphId, deriveGrid, luma8 } from '@ascii-fx/core'
 import {
   chromaticMatchWgsl,
@@ -6,11 +6,18 @@ import {
   FEATURES_WGSL,
   MAX_GPU_GLYPHS,
   MIPGEN_WGSL,
+  MOTION_WGSL,
   REDUCE_WGSL,
   matchWgsl,
 } from './shaders.js'
 import type { FitMode, InteractionOptions, InteractionType } from './types.js'
 import { outputCanBeTransparent } from './types.js'
+
+/** §21 option (0..1) to the 0..255 the field is actually defined on. */
+const quantizeUnit = (v: number): number => {
+  const q = Math.round(v * 255)
+  return q < 0 ? 0 : q > 255 ? 255 : q
+}
 
 const ATLAS_MIPS = 4
 /** Reduction block bound keeping u32 accumulators exact (ALGORITHM.md §0). */
@@ -55,6 +62,11 @@ export interface StreamMatchOptions {
   /** Exact temporal reuse (spec §21): unchanged cells skip matching. Costs one reduced-buffer copy per frame. */
   temporal?: boolean
   /**
+   * Compute the per-cell motion field (ALGORITHM.md §21) for the composite to
+   * drive an effect with. Absent means no field and no buffer for one.
+   */
+  motion?: MotionOptions
+  /**
    * chromatic-v1 only (ALGORITHM.md §C5): keep the previous glyph unless a
    * challenger beats it by this fraction. Default 0 (off). The previous frame
    * is whatever the cells buffer already holds, so no extra state is needed.
@@ -89,6 +101,7 @@ export class AsciiEngine {
   readonly device: GPUDevice
   readonly profile: AsciiProfile
   readonly pipeReduce: GPUComputePipeline
+  readonly pipeMotion: GPUComputePipeline
   readonly pipeFeatures: GPUComputePipeline
   readonly pipeMatch: GPUComputePipeline
   /** chromatic-v1 matcher; null unless the profile carries chromatic data. */
@@ -105,7 +118,7 @@ export class AsciiEngine {
   private constructor(init: {
     device: GPUDevice
     profile: AsciiProfile
-    pipelines: [GPUComputePipeline, GPUComputePipeline, GPUComputePipeline]
+    pipelines: [GPUComputePipeline, GPUComputePipeline, GPUComputePipeline, GPUComputePipeline]
     pipeChromatic: GPUComputePipeline | null
     atlasTexture: GPUTexture
     atlasRgbaTexture: GPUTexture
@@ -116,7 +129,7 @@ export class AsciiEngine {
   }) {
     this.device = init.device
     this.profile = init.profile
-    ;[this.pipeReduce, this.pipeFeatures, this.pipeMatch] = init.pipelines
+    ;[this.pipeReduce, this.pipeFeatures, this.pipeMatch, this.pipeMotion] = init.pipelines
     this.pipeChromatic = init.pipeChromatic
     this.atlasTexture = init.atlasTexture
     this.atlasRgbaTexture = init.atlasRgbaTexture
@@ -207,10 +220,11 @@ export class AsciiEngine {
       })
     const compositeModule = device.createShaderModule({ code: COMPOSITE_WGSL })
     const mipModule = device.createShaderModule({ code: MIPGEN_WGSL })
-    const [reduce, features, match, mipgen, mipgenRgba, chromatic] = await Promise.all([
+    const [reduce, features, match, motion, mipgen, mipgenRgba, chromatic] = await Promise.all([
       mkCompute(REDUCE_WGSL),
       mkCompute(FEATURES_WGSL),
       mkCompute(matchWgsl(MAX_GPU_GLYPHS)),
+      mkCompute(MOTION_WGSL),
       device.createRenderPipelineAsync({
         layout: 'auto',
         vertex: { module: mipModule, entryPoint: 'vs' },
@@ -291,7 +305,7 @@ export class AsciiEngine {
     return new AsciiEngine({
       device,
       profile,
-      pipelines: [reduce, features, match],
+      pipelines: [reduce, features, match, motion],
       pipeChromatic: chromatic,
       atlasTexture,
       atlasRgbaTexture,
@@ -336,12 +350,12 @@ export class AsciiStream {
   private readonly paramsBuf: GPUBuffer
   private readonly compBuf: GPUBuffer
   private readonly fxBuf: GPUBuffer
-  private readonly paramsScratch = new Uint32Array(20)
+  private readonly paramsScratch = new Uint32Array(24)
   /** Densest glyph coverage, per profile — the §6 flat ramp's ceiling. Cached by
    * fingerprint so a profile swap recomputes rather than carrying the old ceiling. */
   private covMaxFor = { fingerprint: '', value: 1 }
   private readonly compScratch = new ArrayBuffer(96)
-  private readonly fxScratch = new ArrayBuffer(48)
+  private readonly fxScratch = new ArrayBuffer(64)
 
   private gridDims?: { columns: number; rows: number }
   private opts: StreamMatchOptions = {}
@@ -365,6 +379,22 @@ export class AsciiStream {
   private stagingBuf?: GPUBuffer
   private temporalPrimed = false
   /**
+   * §21 field, one u32 per cell: trail in bits 8..15, previous mean luma in
+   * 0..7. Allocated only while an interaction asks for it, and dropped when it
+   * stops — a trail accumulated against a source or a grid that has changed
+   * describes cells that are not these ones.
+   */
+  private motionBuf?: GPUBuffer
+  private motionPrimed = false
+  private motionOptions?: MotionOptions
+  private bgMotion?: GPUBindGroup
+  /**
+   * Stands in at composite binding 7 when no field exists. A bind group layout
+   * cannot vary per draw, and a storage binding left unfilled is a validation
+   * error rather than a zero read.
+   */
+  private readonly motionPlaceholder: GPUBuffer
+  /**
    * Whether the cells buffer holds a previous frame of the *current* source.
    * Hysteresis reads it as the incumbent, and unlike exact temporal reuse it
    * does not self-correct: it is biased toward whatever is already there, so a
@@ -387,15 +417,22 @@ export class AsciiStream {
     this.pipeComposite = compositePipeline
     const d = engine.device
     this.paramsBuf = d.createBuffer({
-      size: 80,
+      // 21 u32 of Params, rounded up to the 16-byte uniform alignment.
+      size: 96,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    this.motionPlaceholder = d.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.STORAGE,
     })
     this.compBuf = d.createBuffer({
       size: 96,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
     this.fxBuf = d.createBuffer({
-      size: 48,
+      // FxParams grew a `source` selector plus its padding to the 16-byte
+      // uniform stride; the CPU-side fxScratch has to match this exactly.
+      size: 64,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
   }
@@ -477,6 +514,8 @@ export class AsciiStream {
       this.featuresBuf?.destroy()
       this.cellsBuf?.destroy()
       this.stagingBuf?.destroy()
+      this.motionBuf?.destroy()
+      this.motionBuf = undefined
       this.reducedBuf = d.createBuffer({
         size: n * 64 * 4,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
@@ -505,7 +544,29 @@ export class AsciiStream {
       this.hysteresisPrimed = false
       temporalAllocated = true
     }
-    if (gridChanged || srcChanged || temporalAllocated || !this.bgReduce) this.rebuildBindGroups()
+    let motionAllocated = false
+    this.motionOptions = this.opts.motion
+    const wantMotion = this.motionOptions !== undefined
+    if (wantMotion && !this.motionBuf) {
+      const n = this.gridDims!.columns * this.gridDims!.rows
+      this.motionBuf = this.engine.device.createBuffer({
+        size: n * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+      })
+      this.motionPrimed = false
+      motionAllocated = true
+    } else if (!wantMotion && this.motionBuf) {
+      this.motionBuf.destroy()
+      this.motionBuf = undefined
+      this.motionPrimed = false
+      motionAllocated = true
+    }
+    // A field accumulated against a different source describes a scene that is
+    // no longer on screen, so a source swap restarts the trail the way it
+    // restarts temporal reuse.
+    if (srcChanged) this.motionPrimed = false
+    if (gridChanged || srcChanged || temporalAllocated || motionAllocated || !this.bgReduce)
+      this.rebuildBindGroups()
     this.syncMatchParams()
     return { gridChanged }
   }
@@ -545,6 +606,16 @@ export class AsciiStream {
         ],
       })
     }
+    this.bgMotion = this.motionBuf
+      ? d.createBindGroup({
+          layout: this.engine.pipeMotion.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: this.paramsBuf } },
+            { binding: 1, resource: { buffer: this.reducedBuf! } },
+            { binding: 2, resource: { buffer: this.motionBuf } },
+          ],
+        })
+      : undefined
     this.bgMatch = d.createBindGroup({
       layout: this.engine.pipeMatch.getBindGroupLayout(0),
       entries: [
@@ -568,6 +639,7 @@ export class AsciiStream {
         { binding: 4, resource: { buffer: this.fxBuf } },
         { binding: 5, resource: srcView },
         { binding: 6, resource: this.engine.atlasRgbaTexture.createView() },
+        { binding: 7, resource: { buffer: this.motionBuf ?? this.motionPlaceholder } },
       ],
     })
   }
@@ -616,6 +688,12 @@ export class AsciiStream {
       this.covMaxFor = { fingerprint: profile.fingerprint, value: m === 0 ? 1 : m }
     }
     p[17] = this.covMaxFor.value
+    // §21. Floored at 1 here rather than in the shader: a threshold of 0 would
+    // put the smoothstep's two edges on the same value.
+    const motion = this.motionOptions
+    p[18] = Math.max(1, quantizeUnit(motion?.threshold ?? 0.02))
+    p[19] = quantizeUnit(motion?.decay ?? 0.85)
+    p[20] = this.motionPrimed ? 1 : 0
     this.engine.device.queue.writeBuffer(this.paramsBuf, 0, p)
   }
 
@@ -675,6 +753,18 @@ export class AsciiStream {
     pass.setPipeline(this.engine.pipeFeatures)
     pass.setBindGroup(0, this.bgFeatures!)
     pass.dispatchWorkgroups(cols, rows)
+    if (this.bgMotion) {
+      // One invocation per cell, over the whole grid rather than the dirty rect:
+      // the trail decays everywhere each frame, so a cell left undispatched
+      // would hold its wake instead of losing it. Dispatches within a pass are
+      // ordered, so this sees the reduce above.
+      pass.setPipeline(this.engine.pipeMotion)
+      pass.setBindGroup(0, this.bgMotion)
+      pass.dispatchWorkgroups(
+        Math.ceil(this.gridDims!.columns / 8),
+        Math.ceil(this.gridDims!.rows / 8),
+      )
+    }
     if (this.opts.matcher === 'chromatic') {
       pass.setPipeline(this.engine.pipeChromatic!)
       pass.setBindGroup(0, this.bgChromatic!)
@@ -684,6 +774,7 @@ export class AsciiStream {
     }
     pass.dispatchWorkgroups(cols, rows)
     pass.end()
+    if (this.bgMotion) this.motionPrimed = true
     this.hysteresisPrimed = true
     if (this.temporalActive && this.prevReducedBuf) {
       enc.copyBufferToBuffer(this.reducedBuf!, 0, this.prevReducedBuf, 0, this.prevReducedBuf.size)
@@ -792,6 +883,7 @@ export class AsciiStream {
     dv.setFloat32(36, (i?.feather ?? 0.06) * minDim, true)
     dv.setFloat32(40, i?.intensity ?? 1, true)
     dv.setFloat32(44, fx.time, true)
+    dv.setUint32(48, i?.source === 'motion' && this.motionBuf ? 1 : 0, true)
     this.engine.device.queue.writeBuffer(this.fxBuf, 0, this.fxScratch)
   }
 
@@ -857,6 +949,8 @@ export class AsciiStream {
     this.cellsBuf?.destroy()
     this.stagingBuf?.destroy()
     this.paramsBuf.destroy()
+    this.motionBuf?.destroy()
+    this.motionPlaceholder.destroy()
     this.chromaticBuf?.destroy()
     this.compBuf.destroy()
     this.fxBuf.destroy()

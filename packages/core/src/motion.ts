@@ -52,7 +52,16 @@ export function isqrt(n: number): number {
   return r
 }
 
-const ONE = 65535
+/**
+ * Fixed-point scale for the smoothstep.
+ *
+ * 10 bits, not 16, because of the shader. `t² · (3·ONE − 2t)` peaks at ONE³,
+ * which at 65535 is ~8.4e14 — fine in a JS double and an overflow in u32, where
+ * the GPU field has to compute the same value. At 1023 the peak is ~1.07e9 and
+ * both sides do it natively in 32 bits. The output is 8-bit either way, so what
+ * this costs is under a level of quantization.
+ */
+const ONE = 1023
 
 /** 0..255 option → 0..255 integer, which is what the field is actually defined on. */
 const quantize = (v: number, fallback: number): number => {
@@ -106,11 +115,12 @@ export function motionField(
 
       // smoothstep(T, 4T, delta) in 16-bit fixed point, then a square-root lift
       // so subtle movement is visible rather than crushed against zero.
-      let t = rdiv((delta - T) * ONE, 3 * T)
-      if (t < 0) t = 0
-      else if (t > ONE) t = ONE
+      // Guarded rather than clamped from below: the shader does this in u32,
+      // where `delta - T` on a still cell wraps instead of going negative.
+      let t = delta <= T ? 0 : rdiv((delta - T) * ONE, 3 * T)
+      if (t > ONE) t = ONE
       const s = rdiv(t * t * (3 * ONE - 2 * t), ONE * ONE)
-      const amount = isqrt(s * ONE) >> 8
+      const amount = isqrt(s * ONE) >> 2
 
       // The wake: the trail falls off geometrically with a constant floor, so it
       // reaches zero instead of asymptoting to a permanent dim smear.

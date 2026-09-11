@@ -23,7 +23,13 @@ import type {
   InteractionOptions,
   RenderSource,
 } from './types.js'
-import { isLiveSource, isRawImage, outputCanBeTransparent, sourceDims } from './types.js'
+import {
+  assertInteraction,
+  isLiveSource,
+  isRawImage,
+  outputCanBeTransparent,
+  sourceDims,
+} from './types.js'
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
@@ -44,24 +50,6 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
  * and that cell is redrawn from its warped source, so geometry matches the
  * GPU up to cell quantization.
  */
-/**
- * `wave` ignores the mask entirely, and `push` and `resolution` need one origin
- * to push away from or magnify about. A field has neither a single origin nor
- * any influence on wave, so asking for motion on these is a mistake worth
- * naming rather than a no-op to discover later.
- */
-const MOTION_INCOMPATIBLE = new Set(['wave', 'push', 'resolution'])
-
-function assertInteraction(interaction: InteractionOptions | null): void {
-  if (interaction?.source === 'motion' && MOTION_INCOMPATIBLE.has(interaction.type)) {
-    throw new Error(
-      `interaction { type: '${interaction.type}', source: 'motion' } has nothing to act on: ` +
-        `'wave' ignores the mask, and 'push' and 'resolution' need a single origin that a ` +
-        "per-cell field does not have. Use source: 'pointer' for these.",
-    )
-  }
-}
-
 export class CpuAsciiRenderer implements AsciiRenderer {
   readonly backend = 'cpu' as const
   readonly profile: AsciiProfile
@@ -253,13 +241,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   setInteraction(interaction: InteractionOptions | null): void {
-    if (interaction?.source === 'motion' && MOTION_INCOMPATIBLE.has(interaction.type)) {
-      throw new Error(
-        `interaction { type: '${interaction.type}', source: 'motion' } has nothing to act on: ` +
-          `'wave' ignores the mask, and 'push' and 'resolution' need a single origin that a ` +
-          "per-cell field does not have. Use source: 'pointer' for these.",
-      )
-    }
+    assertInteraction(interaction)
     // A field describes the frames it was accumulated over; changing what is
     // being asked for restarts it rather than carrying a stale wake across.
     if (interaction?.source !== this.interaction?.source) {
