@@ -33,6 +33,8 @@ export interface ExportState {
   options: Record<string, unknown>
   /** Interaction with non-default fields only; null when none. */
   interaction: Record<string, unknown> | null
+  /** The phone's tilt steers the pointer (only ever set from a touch device). */
+  tilt?: boolean
   /**
    * Source-side grain, when the dial is off zero. Not a renderer option and not in
    * `options`: it is a pass over the pixels before matching, so every snippet has to
@@ -181,6 +183,15 @@ function profileSnippet(state: ExportState): ProfileSnippet {
   return { ...snippet, code: [...snippet.pre, `const profile = await ${snippet.expr}`] }
 }
 
+/** The effect takes its mask from the source's motion field rather than the pointer. */
+const followsMotion = (state: ExportState): boolean => state.interaction?.source === 'motion'
+
+/**
+ * A motion-led effect on a still image never fires, so the snippet hands it a video instead.
+ * Grain already makes a still live (it is repainted on a loop), so it keeps its image.
+ */
+const wantsVideo = (state: ExportState): boolean => followsMotion(state) && !state.grain
+
 /** The framework-agnostic mount body used by the non-React wrappers. */
 function mountLines(state: ExportState): string[] {
   const profile = profileSnippet(state)
@@ -194,23 +205,46 @@ function mountLines(state: ExportState): string[] {
     ...profile.code,
     `renderer = await createAsciiRenderer({ ${rendererOpts.join(', ')} })`,
     '',
-    'const img = new Image()',
-    "img.src = '/your-image.jpg' // any image/video/canvas source works",
-    'await img.decode()',
   ]
-  if (state.grain) {
-    lines.push(...plainGrainLines(state.grain, (state.options.columns as number) ?? 120))
+  if (wantsVideo(state)) {
+    lines.push(
+      "const video = document.createElement('video')",
+      "video.src = '/your-video.mp4' // motion needs a source that moves: video, webcam or a live canvas",
+      'video.muted = video.loop = video.playsInline = true',
+      'await video.play()',
+      'renderer.setSource(video)',
+      'renderer.start()',
+    )
   } else {
-    lines.push('renderer.setSource(img)', 'renderer.render()')
+    lines.push(
+      'const img = new Image()',
+      "img.src = '/your-image.jpg' // any image/video/canvas source works",
+      'await img.decode()',
+    )
+    if (state.grain) {
+      lines.push(...plainGrainLines(state.grain, (state.options.columns as number) ?? 120))
+    } else {
+      lines.push('renderer.setSource(img)', 'renderer.render()')
+    }
   }
   if (state.interaction) {
+    lines.push('', `renderer.setInteraction(${inlineObject(state.interaction)})`)
+    // A motion-led effect never reads the pointer, so there is nothing to feed it.
+    if (!followsMotion(state)) {
+      lines.push(
+        "canvas.addEventListener('pointermove', (e) => {",
+        '  const r = canvas.getBoundingClientRect()',
+        '  renderer.pointer.set((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height)',
+        '})',
+      )
+    }
+  }
+  if (state.tilt) {
     lines.push(
       '',
-      `renderer.setInteraction(${inlineObject(state.interaction)})`,
-      "canvas.addEventListener('pointermove', (e) => {",
-      '  const r = canvas.getBoundingClientRect()',
-      '  renderer.pointer.set((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height)',
-      '})',
+      '// Tilt steers the pointer on phones. iOS gates the sensor: call tilt.enable() from a tap.',
+      'const tilt = new TiltSource()',
+      'forwardTiltToPointer(tilt, renderer.pointer)',
     )
   }
   return lines
@@ -218,7 +252,10 @@ function mountLines(state: ExportState): string[] {
 
 const coreImports = (state: ExportState): string => {
   const profile = profileSnippet(state)
-  return `import { createAsciiRenderer } from '@ascii-fx/gpu'\nimport { ${profile.imports.join(', ')} } from '@ascii-fx/core'`
+  const tilt = state.tilt
+    ? "\nimport { TiltSource, forwardTiltToPointer } from '@ascii-fx/gpu/tilt'"
+    : ''
+  return `import { createAsciiRenderer } from '@ascii-fx/gpu'${tilt}\nimport { ${profile.imports.join(', ')} } from '@ascii-fx/core'`
 }
 
 const indentBlock = (lines: string[], indent: number): string =>
@@ -228,11 +265,17 @@ export function generateSnippet(target: FrameworkId, state: ExportState): string
   const install = '// pnpm add @ascii-fx/gpu @ascii-fx/core'
 
   if (target === 'react') {
+    const component = wantsVideo(state) ? 'AsciiVideo' : 'AsciiImage'
+    // <AsciiVideo> autoplays muted and loops by default, and a video has no alt text.
+    const media = wantsVideo(state)
+      ? '      src="/your-video.mp4"'
+      : '      src="/your-image.jpg"\n      alt="Describe the image"'
     const props: string[] = []
     if (state.backend) props.push(`backend=${literal(state.backend)}`)
     if (state.compositor) props.push(`compositor=${literal(state.compositor)}`)
     for (const [k, v] of Object.entries(state.options)) props.push(`${k}={${literal(v)}}`)
     if (state.interaction) props.push(`interaction={${inlineObject(state.interaction)}}`)
+    if (state.tilt) props.push('tilt')
     if (state.grain) props.push('draw={drawGrain}', 'animate', `fps={${state.grain.rate}}`)
     const propLines = props.map((p) => `      ${p}`).join('\n')
     const profile = profileSnippet(state)
@@ -241,7 +284,7 @@ export function generateSnippet(target: FrameworkId, state: ExportState): string
     // matcher untouched — so the import has to bring its type along with the component.
     const reactImport = state.grain
       ? "import { AsciiImage, type AsciiDraw } from '@ascii-fx/react'"
-      : "import { AsciiImage } from '@ascii-fx/react'"
+      : `import { ${component} } from '@ascii-fx/react'`
     const grainBlock = state.grain
       ? '\n' + reactGrainLines(state.grain, columns).join('\n') + '\n'
       : ''
@@ -251,9 +294,8 @@ ${reactImport}
 ${grainBlock}
 export default function AsciiArt() {
   return (
-    <AsciiImage
-      src="/your-image.jpg"
-      alt="Describe the image"
+    <${component}
+${media}
       profile={{ url: '/default.asciip' }}
 ${propLines ? propLines + '\n' : ''}    />
   )
@@ -274,9 +316,8 @@ ${indentBlock(profile.pre, 6)}
   }, [])
   if (!profile) return null
   return (
-    <AsciiImage
-      src="/your-image.jpg"
-      alt="Describe the image"
+    <${component}
+${media}
       profile={profile}
 ${propLines ? propLines + '\n' : ''}    />
   )

@@ -18,7 +18,8 @@ const TASK = `Add ASCII FX to my site — the exact setup I configured in the pl
 2. Use the code under "WHAT I CONFIGURED" verbatim. Those options ARE the design — reproduce them
    exactly, don't re-tune them or "clean up" the values.
 3. Swap the placeholder source for my own image/video, and give the canvas a real size (it fills
-   its parent). The \`alt\` text is required on the React components.
+   its parent). The \`alt\` text is required on <AsciiImage>. If the effect follows motion, the
+   source has to move (a video, webcam or live canvas) or the effect never fires.
 4. Matching needs a compiled profile. If the snippet loads one from a URL, generate it with
    @ascii-fx/compiler or the @ascii-fx/vite plugin and serve it — see the reference below.
 
