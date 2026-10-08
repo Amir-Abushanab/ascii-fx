@@ -41,6 +41,21 @@ const patchHalf = (
   return { width: base.width, height: base.height, data }
 }
 
+const submitAndTake = async (
+  pool: MatchPool,
+  source: ReturnType<typeof randomImage>,
+  cols: number,
+  rws: number,
+  options: Parameters<MatchPool['submit']>[3],
+) => {
+  expect(pool.submit(source, cols, rws, options)).toBe(true)
+  await waitFor(() => !pool.busy)
+  return pool.take()!
+}
+
+const cellsOf = async (...args: Parameters<typeof submitAndTake>) =>
+  (await submitAndTake(...args)).cells
+
 describe('matcher worker pool', () => {
   it('starts real workers and reports ready', async () => {
     const pool = MatchPool.create(makeProfile(STANDARD_SIX), 3)
@@ -164,21 +179,6 @@ describe('captureFrame with a worker pool', () => {
   describe('temporal reuse', () => {
     const columns = 19
     const rows = 11
-
-    const submitAndTake = async (
-      pool: MatchPool,
-      source: ReturnType<typeof randomImage>,
-      cols: number,
-      rws: number,
-      options: Parameters<MatchPool['submit']>[3],
-    ) => {
-      expect(pool.submit(source, cols, rws, options)).toBe(true)
-      await waitFor(() => !pool.busy)
-      return pool.take()!
-    }
-
-    const cellsOf = async (...args: Parameters<typeof submitAndTake>) =>
-      (await submitAndTake(...args)).cells
 
     it('matches a changed frame exactly after reusing an unchanged one', async () => {
       const profile = randomProfile(40, 11)

@@ -133,6 +133,19 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
     runBench?: (name: string, opts?: { warmup?: number; frames?: number }) => Promise<BenchResult>
   }
 
+  /** Reject if the harness stops making progress (usually a backgrounded tab). */
+  function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
+    return Promise.race([
+      work,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`${label} did not finish in ${CONTENDER_TIMEOUT_MS / 1000}s`)),
+          CONTENDER_TIMEOUT_MS,
+        ),
+      ),
+    ])
+  }
+
   function setup(root: HTMLElement) {
     const button = root.querySelector<HTMLButtonElement>('[data-run]')!
     const progress = root.querySelector<HTMLElement>('[data-progress]')!
@@ -188,18 +201,6 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
       }
     }
 
-    /** Reject if the harness stops making progress (usually a backgrounded tab). */
-    function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
-      return Promise.race([
-        work,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`${label} did not finish in ${CONTENDER_TIMEOUT_MS / 1000}s`)),
-            CONTENDER_TIMEOUT_MS,
-          ),
-        ),
-      ])
-    }
 
     let running = false
 

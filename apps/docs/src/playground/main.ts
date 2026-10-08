@@ -964,15 +964,16 @@ window.addEventListener('beforeunload', () => {
 })
 
 // scene animation + fps meter
+const sceneLoopWanted = (): boolean =>
+  Boolean(active?.tick || grainOn()) &&
+  els.animate.checked &&
+  outputVisible &&
+  document.visibilityState !== 'hidden'
+
 function animationLoop(): void {
-  const wanted = (): boolean =>
-    Boolean(active?.tick || grainOn()) &&
-    els.animate.checked &&
-    outputVisible &&
-    document.visibilityState !== 'hidden'
-  if (sceneRaf || !wanted()) return
+  if (sceneRaf || !sceneLoopWanted()) return
   const tick = (): void => {
-    if (!wanted()) {
+    if (!sceneLoopWanted()) {
       sceneRaf = 0
       return
     }
