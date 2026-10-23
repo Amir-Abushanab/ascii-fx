@@ -1371,7 +1371,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       <fieldset>
         <legend><i data-lucide="grip"></i> Grain</legend>
         <label><span class="hint" tabindex="0" data-hint="Jitters each cell's brightness before matching, which pushes cells across glyph boundaries. Painted one block per cell — finer than that and the cell averages it away">amount</span> <input id="grain" type="range" min="0" max="0.8" step="0.02" value="0" /><output id="grainOut">0.00</output></label>
-        <label><span class="hint" tabindex="0" data-hint="How often the noise is redrawn. Above ~15/s the churn stops reading as movement in the picture and starts reading as noise in the text">rate</span> <input id="grainRate" type="range" min="1" max="24" step="1" value="10" disabled /><output id="grainRateOut">10/s</output></label>
+        <label><span class="hint" tabindex="0" data-hint="How often the noise is redrawn, up to 60/s. Above ~15/s the churn stops reading as movement in the picture and starts reading as noise in the text, and every redraw is a full re-match, so the top of the range is a load test as much as a look">rate</span> <input id="grainRate" type="range" min="1" max="60" step="1" value="10" disabled /><output id="grainRateOut">10/s</output></label>
         <p class="fx-note">Not a renderer option: the noise is painted onto the source before the matcher ever sees it, so it changes which glyphs get picked rather than tinting the ones already chosen. Turning it up makes a still image live — every frame is a full re-match.</p>
       </fieldset>
       <fieldset id="fontBox">
@@ -1388,18 +1388,21 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
           <select id="fontFace"></select>
         </label>
         <label><span class="hint" tabindex="0" data-hint="The built-in glyph set. blocks is the Block Elements range (▀▄▌▚▓ and the eighths), a mosaic with no letterforms; braille is all 256 eight-dot patterns (⠏⣠⣿), the finest shapes there are. arabic is the isolated letterforms; arabic, joined adds every connected form, drawn so strokes meet across cells. The scripts are glyph lists the playground supplies: all 2,136 jōyō kanji, Devanagari with conjuncts, Thai with its stacked marks, Cyrillic, Hebrew. Geist Mono has none of these, so they are profiled at runtime and drawn by your system's fallback font">set</span>
+          {/* Each set leads with a glyph of its own as its icon: a native <option> holds text only,
+              and a sample of the set says more than a pictogram would. EN SPACE (U+2002) keeps the
+              gap, which ordinary spaces would collapse. */}
           <select id="charset">
-            <option value="ascii" selected>ascii</option>
-            <option value="blocks">blocks</option>
-            <option value="braille">braille</option>
-            <option value="arabic">arabic</option>
-            <option value="arabic-joined">arabic, joined</option>
+            <option value="ascii" selected>@ ascii</option>
+            <option value="blocks">▚ blocks</option>
+            <option value="braille">⣿ braille</option>
+            <option value="arabic">ب arabic</option>
+            <option value="arabic-joined">ـبـ arabic, joined</option>
             <optgroup label="scripts">
-              <option value="script:kanji">kanji (jōyō, 2,136)</option>
-              <option value="script:devanagari">Devanagari</option>
-              <option value="script:thai">Thai</option>
-              <option value="script:cyrillic">Cyrillic</option>
-              <option value="script:hebrew">Hebrew</option>
+              <option value="script:kanji">漢 kanji (jōyō, 2,136)</option>
+              <option value="script:devanagari">क्ष Devanagari</option>
+              <option value="script:thai">ก Thai</option>
+              <option value="script:cyrillic">Ж Cyrillic</option>
+              <option value="script:hebrew">א Hebrew</option>
             </optgroup>
           </select>
         </label>

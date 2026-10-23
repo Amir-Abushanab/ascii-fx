@@ -54,7 +54,7 @@
     "@webgpu/types": "^0.1.74",
     "react": "^19.3.1",
     "three": "0.186.1",
-    "tsup": "^8.5.1",
+    "tsup": "^9.0.0",
     "typescript": "^7.0.2"
   },
   "peerDependencies": {
