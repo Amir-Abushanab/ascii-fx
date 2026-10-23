@@ -1,5 +1,13 @@
 # @ascii-fx/compiler
 
+## 0.9.1
+
+### Patch Changes
+
+- [#32](https://github.com/Amir-Abushanab/ascii-fx/pull/32) [`7b511ca`](https://github.com/Amir-Abushanab/ascii-fx/commit/7b511ca89a6650ef4ba2fe194dedbf3865ff0a7e) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Built with tsup 9. The published output is byte-identical to 0.9.0's, so nothing changes for consumers.
+- Updated dependencies [[`7b511ca`](https://github.com/Amir-Abushanab/ascii-fx/commit/7b511ca89a6650ef4ba2fe194dedbf3865ff0a7e)]:
+  - @ascii-fx/core@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes
