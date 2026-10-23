@@ -617,6 +617,25 @@ const CLASS_CSS: Record<CellDetail['cls'], string> = {
   structured: '#d98a3d',
 }
 
+interface Stage {
+  name: string
+  wrap: HTMLDivElement
+  canvas: HTMLCanvasElement
+  outline: HTMLDivElement
+}
+const mkStage = (name: string): Stage => {
+  const wrap = document.createElement('div')
+  wrap.className = 'wstage'
+  const canvas = document.createElement('canvas')
+  const outline = document.createElement('div')
+  outline.className = 'wcellmark'
+  const inner = document.createElement('div')
+  inner.className = 'wstagebox'
+  inner.append(canvas, outline)
+  wrap.append(label(name), inner)
+  return { name, wrap, canvas, outline }
+}
+
 function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
   host.replaceChildren()
   const scene = drawPipelineScene()
@@ -645,24 +664,6 @@ function buildPipelineWidget(host: HTMLElement, p: AsciiProfile): void {
 
   host.append(sliderRow, stagesRow, detail)
 
-  interface Stage {
-    name: string
-    wrap: HTMLDivElement
-    canvas: HTMLCanvasElement
-    outline: HTMLDivElement
-  }
-  const mkStage = (name: string): Stage => {
-    const wrap = document.createElement('div')
-    wrap.className = 'wstage'
-    const canvas = document.createElement('canvas')
-    const outline = document.createElement('div')
-    outline.className = 'wcellmark'
-    const inner = document.createElement('div')
-    inner.className = 'wstagebox'
-    inner.append(canvas, outline)
-    wrap.append(label(name), inner)
-    return { name, wrap, canvas, outline }
-  }
   const stages = [
     mkStage('1 · source'),
     mkStage('2 · reduce'),
