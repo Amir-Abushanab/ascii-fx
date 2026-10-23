@@ -19,14 +19,26 @@ allowBuilds:
   sharp: true
 
 overrides:
-  # Advisory floors for astro's transitive tree. astro pulls these itself and had not
-  # released a bump past them, so the floor is here rather than waiting on it:
-  #   sharp   >=0.35.4  GHSA-g89c-p67h-r497  (libheif)
-  #   js-yaml >=4.3.2   GHSA-2883-xcg3-v3hh  (maxTotalMergeKeys CPU use)
-  #   svgo    >=4.1.0   GHSA-w27v-7q3p-w38r  (removeScripts bypasses)
-  # Drop each one once astro's own range clears it.
-  sharp: ^0.35.4
+  # Advisory floors for transitive dependencies whose parents had not released a bump past
+  # them, so the floor is here rather than waiting on them. All are dev/build tooling; none
+  # is in a published package's dependency tree.
+  #   via astro:
+  #     sharp   >=0.35.5  GHSA-g89c-p67h-r497 (libheif), GHSA-wq5f-xc86-pv6w (librsvg)
+  #     js-yaml >=4.3.2   GHSA-2883-xcg3-v3hh  (maxTotalMergeKeys CPU use)
+  #     svgo    >=4.1.0   GHSA-w27v-7q3p-w38r  (removeScripts bypasses)
+  #     undici  >=8.10.2  GHSA-w293-vg96-wgc3 and ten more (via unifont)
+  #   via @changesets/cli:
+  #     launch-editor >=2.14.2  GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw
+  #     shell-quote   >=1.11.0  GHSA-pqg4-j6r4-53mv  (quote() command injection)
+  #   via @vitest/coverage-v8 (magicast):
+  #     source-map-js >=1.2.2   GHSA-68fv-2mgg-jv7q  (indexed source map DoS)
+  # Drop each one once its parent's own range clears it.
+  sharp: ^0.35.5
   js-yaml: ^4.3.2
   svgo: ^4.1.0
+  undici: ^8.10.2
+  launch-editor: ^2.14.2
+  shell-quote: ^1.11.0
+  source-map-js: ^1.2.2
   esbuild: ^0.28.2
   aalib.js>vue: '-'

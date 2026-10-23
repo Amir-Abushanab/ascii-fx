@@ -28,6 +28,22 @@ const waitFor = async (predicate: () => boolean, timeout = 10_000): Promise<void
   }
 }
 
+/** Run one band job on the pool and wait for its result. */
+const submitAndTake = async (
+  pool: MatchPool,
+  source: ReturnType<typeof randomImage>,
+  cols: number,
+  rws: number,
+  options: Parameters<MatchPool['submit']>[3],
+) => {
+  expect(pool.submit(source, cols, rws, options)).toBe(true)
+  await waitFor(() => !pool.busy)
+  return pool.take()!
+}
+
+const cellsOf = async (...args: Parameters<typeof submitAndTake>) =>
+  (await submitAndTake(...args)).cells
+
 /** Overwrite the left half of `base` with `patch`, leaving the rest byte-identical. */
 const patchHalf = (
   base: ReturnType<typeof randomImage>,
@@ -164,21 +180,6 @@ describe('captureFrame with a worker pool', () => {
   describe('temporal reuse', () => {
     const columns = 19
     const rows = 11
-
-    const submitAndTake = async (
-      pool: MatchPool,
-      source: ReturnType<typeof randomImage>,
-      cols: number,
-      rws: number,
-      options: Parameters<MatchPool['submit']>[3],
-    ) => {
-      expect(pool.submit(source, cols, rws, options)).toBe(true)
-      await waitFor(() => !pool.busy)
-      return pool.take()!
-    }
-
-    const cellsOf = async (...args: Parameters<typeof submitAndTake>) =>
-      (await submitAndTake(...args)).cells
 
     it('matches a changed frame exactly after reusing an unchanged one', async () => {
       const profile = randomProfile(40, 11)
