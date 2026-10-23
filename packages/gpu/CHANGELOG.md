@@ -1,5 +1,53 @@
 # @ascii-fx/gpu
 
+## 0.9.0
+
+### Minor Changes
+
+- [#29](https://github.com/Amir-Abushanab/ascii-fx/pull/29) [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - **Breaking:** `createAsciiRenderer` now loads only the backend it builds, and the backend classes moved to subpaths.
+
+  ```diff
+  - import { WebGpuAsciiRenderer, AsciiEngine, AsciiStream, CpuAsciiRenderer } from '@ascii-fx/gpu'
+  + import { WebGpuAsciiRenderer, AsciiEngine, AsciiStream } from '@ascii-fx/gpu/webgpu'
+  + import { CpuAsciiRenderer } from '@ascii-fx/gpu/cpu'
+  ```
+
+  Each backend is a separate chunk behind a dynamic `import()`, so a machine with WebGPU never downloads the CPU matcher, worker pool and WebGL2 compositor, and one without WebGPU never downloads the WGSL. Under Rollup or Vite, an app that imports only `createAsciiRenderer` ships a 0.3 KB entry plus about 18 KB gzipped on the WebGPU path or 19 KB on the CPU path, where both backends together were 35 KB. A fallback to the CPU backend costs one extra chunk request before its first frame. Under `'auto'`, the WebGPU chunk is skipped entirely when `navigator.gpu` is absent.
+
+  The classes had to leave the main entry for this to work: any static import of a backend makes bundlers keep it in the eager bundle. `createAsciiRenderer`, `getAsciiSupport`, `MAX_GPU_GLYPHS`, the tilt helpers and every type stay where they were. `@ascii-fx/three` now imports from `@ascii-fx/gpu/webgpu`.
+
+  `@ascii-fx/core` is now published as one file per module rather than a single bundle. Bundlers split chunks at file granularity, so against a single-file core both backend chunks shared the union of everything either used from it. Per-module output alone takes the WebGPU path from 23.9 KB to 18.3 KB.
+
+- [#29](https://github.com/Amir-Abushanab/ascii-fx/pull/29) [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Add palettes, post effects, two glyph sets and SVG export.
+
+  `palette: { colors, dither?, spread? }` snaps each cell's fitted colours to a list of up to 256 through an optional ordered Bayer dither. It is `palette-v1`, specified in `ALGORITHM.md §22` and integer throughout, so the WebGPU compute pass agrees bit for bit with the new `quantizeFrame()` in `@ascii-fx/core`, which the CPU backend runs. It sits between matching and the composite: changing it never rematches, and `captureFrame()` returns the snapped colours. Error diffusion is deliberately absent, since it cannot run in parallel and stay exact.
+
+  `post: { scanlines, vignette, curvature, aberration, grain, bloom }` adds screen-space effects to the composite on both shader compositors. Bloom comes from a per-cell glow field built from each glyph's coverage and colour, so it costs a pass over the grid rather than the canvas. The palette and glow compute pipelines are built the first time a palette or bloom is set, so a renderer that uses neither compiles nothing extra at startup. The Canvas2D fallback draws scanlines, vignette and bloom. With everything on, a 1080p WebGPU frame takes about 0.3 ms longer.
+
+  New built-in charsets: `blocks` (the Block Elements range) and `braille` (all 256 patterns). `frameToSVG(frame)` exports a frame as vector text with every glyph pinned to its column.
+
+  Runtime profiles (`createAsciiProfile`) now size the cell to the widest glyph instead of to `M`. Full-width glyphs such as kanji were being clipped to their left half. Monospace Latin sets are unaffected.
+
+  The WebGL2 compositor no longer samples the motion field in place of the RGBA atlas when an emoji profile is combined with `interaction: { source: 'motion' }`.
+
+  Shader comments and indentation are now stripped at build time. With these features added, the `@ascii-fx/gpu` bundle is 35.3 KB gzipped, up from 33.6 KB.
+
+- [#29](https://github.com/Amir-Abushanab/ascii-fx/pull/29) [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Non-Latin scripts: grapheme glyphs, OpenType shaping, Arabic sets with optional joining, font collections, any-width fonts, bidi-safe exports, and charsets far past 2048 glyphs on the GPU.
+
+  **Breaking:** a custom `characters` string now splits into grapheme clusters, not code points, so `'क्ष'`, `'é'` and `'👍🏽'` are one glyph each, and an array's elements are glyphs as given rather than being split further. Sets of single-code-point characters resolve exactly as before.
+
+  - **Shaping.** The compiler shapes any glyph that isn't one code point the font maps (a conjunct, a letter with marks), using the font's own OpenType rules via fontkit, and rasterizes the shaped run. Single mapped code points rasterize exactly as before, so existing profiles are byte-identical. Where a font carries both OpenType and Apple `morx` tables, the compiler shapes with OpenType: fontkit prefers `morx`, and its `morx` engine never returns on some input (Thai sara am in Ayuthaya). Verified with Arabic, Hebrew, Thai, Devanagari, Cyrillic and Tai Le, Tai Tham and Tai Viet system fonts. Because shaped glyphs depend on fontkit's code as well as the font, golden fixtures built from committed OFL Noto subsets (Arabic, Devanagari, Thai) and Geist's combining marks pin every shaped glyph's mask, coverage and atlas pixels, so a fontkit update that changes one fails CI and names it.
+  - **Arabic.** New built-in sets `arabic` (the 40 isolated letterforms, which never connect) and `arabic-joined` (every final, initial and medial form, plus tatweel). Joining is opt-in by choosing the set. In `arabic-joined`, joining forms are drawn with kashida to the edge they join at, so adjacent cells' strokes meet. Both sets use presentation-form code points, which text viewers display as written. A form is drawn by shaping its base letter in context (`shapingText`), in the compiler and in browser-built profiles alike, so it comes from the profile's own font even when that font leaves the presentation block unmapped, rather than from whatever fallback font maps it. `joiningSide`, `kashidaText`, `glyphOffset` and `shapingText` in core are the reference.
+  - **Any-width fonts.** The compiler no longer requires a monospace font. The cell is the widest glyph's and the rest are centred (or pushed to the edge they join at), so Arabic in any font and kanji next to Latin compile. Monospace sets compile byte-for-byte as before. Runtime profiles now follow the same rule, which fixes full-width glyphs such as kanji being clipped to their left half.
+  - **Font collections.** `face` (a PostScript name or an index) picks a face from a `.ttc`/`.otc`, through `buildProfile`, the Vite config and `--face` on the CLI. CJK and Arabic system fonts nearly all ship this way.
+  - **Exports.** `frameToText`, `frameToAnsi`, `frameToHTML` and `frameToSVG` force rows containing right-to-left glyphs into cell order (LRO/PDF in text, `unicode-bidi: bidi-override` in HTML and SVG), where a viewer's bidi algorithm would otherwise reverse them. A set of full-width glyphs writes blanks as U+3000 so columns align in a terminal. Latin exports are unchanged.
+  - **GPU glyph limit.** The WebGPU matcher's per-glyph workgroup array is gone: each lane keeps its own top 8 and lane 0 merges them, which is the same result, verified bit for bit up to 3000 glyphs, and no slower for small sets. `MAX_GPU_GLYPHS` is now the 16-bit glyph id (65535). In practice the limit is the glyph atlas fitting in one texture (about 4,000 kanji-sized glyphs at the usual 8192 px), and a profile past it fails with a clear error before anything is drawn.
+
+### Patch Changes
+
+- Updated dependencies [[`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c), [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c), [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c), [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c)]:
+  - @ascii-fx/core@0.9.0
+
 ## 0.8.0
 
 ### Minor Changes
