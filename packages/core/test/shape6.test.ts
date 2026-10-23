@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { AsciiProfile } from '@ascii-fx/core'
-import { computeShape6, matchFrame, quantizeShape6, shape6BucketCenter } from '@ascii-fx/core'
+import {
+  computeShape6,
+  matchFrameRamp,
+  matchFrameShape6,
+  quantizeShape6,
+  shape6BucketCenter,
+} from '@ascii-fx/core'
 import { STANDARD_SIX, makeCell, makeProfile, mulberry32, randomImage } from './synthetic.js'
 
 /** Synthetic glyph vectors: identical formulas over mask bits × 255. */
@@ -64,16 +70,15 @@ describe('shape6-v1 (ALGORITHM.md §18)', () => {
   it('requires compiled shape6 data with a remediation message', () => {
     const bare = makeProfile(STANDARD_SIX)
     expect(() =>
-      matchFrame(topDarkBottomLight, { profile: bare, columns: 1, rows: 1, matcher: 'shape6' }),
+      matchFrameShape6(topDarkBottomLight, { profile: bare, columns: 1, rows: 1 }),
     ).toThrow(/shape6: true|--shape6/)
   })
 
   it('matches directional structure in full mode', () => {
-    const frame = matchFrame(topDarkBottomLight, {
+    const frame = matchFrameShape6(topDarkBottomLight, {
       profile: profile6,
       columns: 1,
       rows: 1,
-      matcher: 'shape6',
       color: 'full',
     })
     const cell = frame.getCell(0, 0)
@@ -83,11 +88,10 @@ describe('shape6-v1 (ALGORITHM.md §18)', () => {
   })
 
   it('derives polarity from the palette like the exact matcher', () => {
-    const frame = matchFrame(topDarkBottomLight, {
+    const frame = matchFrameShape6(topDarkBottomLight, {
       profile: profile6,
       columns: 1,
       rows: 1,
-      matcher: 'shape6',
       color: 'mono',
       foreground: [0, 0, 0],
       background: [255, 255, 255],
@@ -96,15 +100,15 @@ describe('shape6-v1 (ALGORITHM.md §18)', () => {
   })
 
   it('keeps exact flat and transparent semantics', () => {
-    const flat = matchFrame(
+    const flat = matchFrameShape6(
       makeCell(() => [128, 128, 128]),
-      { profile: profile6, columns: 1, rows: 1, matcher: 'shape6', color: 'full' },
+      { profile: profile6, columns: 1, rows: 1, color: 'full' },
     )
     expect(flat.getCell(0, 0).glyphId).toBe(0)
     expect(flat.getCell(0, 0).foreground).toEqual([128, 128, 128, 255])
-    const clear = matchFrame(
+    const clear = matchFrameShape6(
       makeCell(() => [10, 10, 10, 0]),
-      { profile: profile6, columns: 1, rows: 1, matcher: 'shape6', color: 'full' },
+      { profile: profile6, columns: 1, rows: 1, color: 'full' },
     )
     expect(clear.getCell(0, 0).flags & 2).toBe(2)
   })
@@ -112,17 +116,15 @@ describe('shape6-v1 (ALGORITHM.md §18)', () => {
   it('LUT path stays close to brute force and is deterministic', () => {
     const withLut = withShape6(makeProfile(STANDARD_SIX), true)
     const img = randomImage(80, 48, 31)
-    const brute = matchFrame(img, {
+    const brute = matchFrameShape6(img, {
       profile: profile6,
       columns: 10,
-      matcher: 'shape6',
       color: 'full',
     })
-    const lut = matchFrame(img, { profile: withLut, columns: 10, matcher: 'shape6', color: 'full' })
-    const lut2 = matchFrame(img, {
+    const lut = matchFrameShape6(img, { profile: withLut, columns: 10, color: 'full' })
+    const lut2 = matchFrameShape6(img, {
       profile: withLut,
       columns: 10,
-      matcher: 'shape6',
       color: 'full',
     })
     expect(lut2.glyphIds).toEqual(lut.glyphIds)
@@ -135,9 +137,9 @@ describe('shape6-v1 (ALGORITHM.md §18)', () => {
 
 describe('ramp-v1 (ALGORITHM.md §19)', () => {
   it('maps mean luma to coverage regardless of structure', () => {
-    const frame = matchFrame(
+    const frame = matchFrameRamp(
       makeCell((i) => (i < 4 ? [20, 20, 20] : [235, 235, 235])),
-      { profile: profile6, columns: 1, rows: 1, matcher: 'ramp', color: 'mono' },
+      { profile: profile6, columns: 1, rows: 1, color: 'mono' },
     )
     const cell = frame.getCell(0, 0)
     expect(cell.flags & 1).toBe(0) // genuinely non-flat cell
@@ -146,8 +148,8 @@ describe('ramp-v1 (ALGORITHM.md §19)', () => {
 
   it('is deterministic and works in full color', () => {
     const img = randomImage(64, 64, 9)
-    const a = matchFrame(img, { profile: profile6, columns: 8, matcher: 'ramp', color: 'full' })
-    const b = matchFrame(img, { profile: profile6, columns: 8, matcher: 'ramp', color: 'full' })
+    const a = matchFrameRamp(img, { profile: profile6, columns: 8, color: 'full' })
+    const b = matchFrameRamp(img, { profile: profile6, columns: 8, color: 'full' })
     expect(b.glyphIds).toEqual(a.glyphIds)
     expect(b.foreground).toEqual(a.foreground)
   })

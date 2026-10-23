@@ -3,6 +3,8 @@ import type { AlphaMode, ColorMode } from '@ascii-fx/core'
 export interface AsciiProfileConfig {
   /** Path to the font file, relative to the config file. */
   font: string
+  /** Which face of a .ttc/.otc collection: PostScript name or index. */
+  face?: string | number
   charset?: string
   characters?: string | string[]
   /** Compile shape6-v1 data (ALGORITHM.md §18); `{ lut: true }` adds the dense LUT. */

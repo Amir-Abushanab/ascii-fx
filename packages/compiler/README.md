@@ -21,6 +21,8 @@ await writeFile('public/default.asciip', binary)
 
 Rasterization is an in-house fixed-point scanline rasterizer over [fontkit](https://github.com/foliojs/fontkit)'s glyph outlines — **no system rasterizer anywhere in the path**. The same font and the same options produce byte-identical `.asciip` output on macOS, Linux, and CI.
 
+Glyphs that are one code point the font maps rasterize straight from that glyph's outline. Anything else (a conjunct, a base letter with marks, an Arabic presentation form the font leaves unmapped) is shaped by fontkit first and the shaped run rasterized as one outline, so those profiles depend on fontkit's shaping as well as on the font. Golden fixtures built from committed Noto subsets pin every shaped Arabic, Devanagari, Thai and combining-mark glyph, so a fontkit update that moves one fails CI and names the glyph.
+
 That matters because a profile's fingerprint is what a `.asciif` frame is validated against. If rasterization drifted between machines, frames compiled on your laptop would be refused by the same code running in CI. Golden-file tests pin it.
 
 ## Colour glyphs
@@ -49,6 +51,7 @@ A frame records the fingerprint of the profile it was built against and refuses 
 
 ```sh
 npx ascii-fx profile build --font GeistMono-Regular.ttf --out default.asciip
+npx ascii-fx profile build --font "/System/Library/Fonts/GeezaPro.ttc" --face 0 --charset arabic-joined --out arabic.asciip
 npx ascii-fx frame build --image hero.png --profile default.asciip --columns 160 --out hero.asciif
 npx ascii-fx inspect default.asciip
 ```

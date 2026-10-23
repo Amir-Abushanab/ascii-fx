@@ -5,7 +5,7 @@
 // arrangement risks: a lost tie-break, or an early exit that changed a result.
 import { describe, expect, it } from 'vitest'
 import type { AsciiFrame, RGB, RawImage } from '@ascii-fx/core'
-import { matchFrame } from '@ascii-fx/core'
+import { matchFrame, matchFrameChromatic } from '@ascii-fx/core'
 import { createAsciiRenderer } from '@ascii-fx/gpu'
 import { makeChromaticProfile, randomImage, solid } from '../../core/test/synthetic.js'
 
@@ -81,10 +81,9 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
         renderer.setOptions({ columns, matcher: 'chromatic', background, alpha: 'ignore' })
         renderer.setSource(image)
         const gpuFrame = await renderer.captureFrame()
-        const cpuFrame = matchFrame(image, {
+        const cpuFrame = matchFrameChromatic(image, {
           profile,
           columns,
-          matcher: 'chromatic',
           background,
           alpha: 'ignore',
         })
@@ -132,10 +131,9 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
       renderer.setOptions({ columns: 8, matcher: 'chromatic', alpha: 'mask' })
       renderer.setSource(image)
       const gpuFrame = await renderer.captureFrame()
-      const cpuFrame = matchFrame(image, {
+      const cpuFrame = matchFrameChromatic(image, {
         profile,
         columns: 8,
-        matcher: 'chromatic',
         alpha: 'mask',
       })
       expectFramesEqual(gpuFrame, cpuFrame, 'transparent')
@@ -240,8 +238,8 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
       renderer.render()
       const gpuB = await renderer.captureFrame()
 
-      const cpuA = matchFrame(imgA, { profile, ...opts })
-      const cpuB = matchFrame(imgB, { profile, ...opts, previous: cpuA.glyphIds })
+      const cpuA = matchFrameChromatic(imgA, { profile, ...opts })
+      const cpuB = matchFrameChromatic(imgB, { profile, ...opts, previous: cpuA.glyphIds })
       expectFramesEqual(gpuA, cpuA, 'overflow frame A')
       expectFramesEqual(gpuB, cpuB, 'overflow frame B')
       // The construction only proves something if the challenger actually wins.
@@ -316,7 +314,7 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
       renderer.setOptions({ hysteresis: 0.9 })
       renderer.render()
       const gpu = await renderer.captureFrame()
-      const cpu = matchFrame(imgB, { profile, ...base, hysteresis: 0.9 }) // no previous: suppressed
+      const cpu = matchFrameChromatic(imgB, { profile, ...base, hysteresis: 0.9 }) // no previous: suppressed
       expectFramesEqual(gpu, cpu, 'post-change suppression')
     } finally {
       renderer.destroy()
@@ -347,10 +345,9 @@ describe.runIf(gpuAvailable)('chromatic-v1 GPU <-> CPU conformance', () => {
       const frame = await renderer.captureFrame()
       expect(frame.colorMode).toBe('glyph')
       expect(frame.foreground).toBeUndefined()
-      const cpu = matchFrame(image, {
+      const cpu = matchFrameChromatic(image, {
         profile,
         columns: 8,
-        matcher: 'chromatic',
         background: [11, 11, 15],
         alpha: 'ignore',
       })

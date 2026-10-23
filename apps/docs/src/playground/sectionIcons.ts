@@ -3,7 +3,7 @@
 // genuine icon drawn by the pipeline this page documents. Change the font or
 // narrow the charset up top and the icons are re-matched from the new profile.
 import type { AsciiProfile, RawImage } from '@ascii-fx/core'
-import { matchFrame } from '@ascii-fx/core'
+import { frameToText, matchFrame } from '@ascii-fx/core'
 import {
   Activity,
   Brush,
@@ -169,11 +169,13 @@ export async function mountSectionIcons(profile: AsciiProfile, emojiMode = false
     el.classList.toggle('hicon-emoji', emojiMode)
     el.textContent = emojiMode
       ? emoji
-      : matchFrame(rasters.get(node)!, {
-          profile,
-          columns: COLS,
-          rows: ROWS,
-          color: 'mono',
-        }).toText()
+      : frameToText(
+          matchFrame(rasters.get(node)!, {
+            profile,
+            columns: COLS,
+            rows: ROWS,
+            color: 'mono',
+          }),
+        )
   }
 }

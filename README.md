@@ -74,7 +74,7 @@ Without WebGPU, matching runs on a pool of workers and the grid is painted by a 
 Interactions follow the pointer. A phone doesn't have one, so `tilt` drives the pointer from the orientation sensor instead:
 
 ```tsx
-<AsciiImage src="/cat.jpg" alt="Cat" interaction={{ type: 'glyph-swell' }} tilt />
+<AsciiImage src="/cat.jpg" alt="Cat" interaction={{ type: 'glyph-scale' }} tilt />
 ```
 
 Tilting the phone moves the pointer in the direction of the tilt, corrected for screen orientation and relative to the angle the phone was held at when the component mounted. The pointer eases toward each new reading.
@@ -86,7 +86,7 @@ Tilt is disabled on iOS. Safari puts the sensor behind a permission dialog and n
 Emoji carry their own colour, so there's nothing to fit and the exact rerank doesn't apply. `chromatic-v1` is a separate matcher for them. It compares a cell's 64 samples against the glyph's own, composited over the backdrop it will be drawn on.
 
 ```ts
-const frame = matchFrame(source, { profile, matcher: 'chromatic', background: [11, 11, 15] })
+const frame = matchFrameChromatic(source, { profile, background: [11, 11, 15] })
 // colorMode 'glyph': no colour planes, the colour is in the glyph
 ```
 
@@ -113,6 +113,46 @@ Interactions normally follow the pointer. `source: 'motion'` drives them from th
 Each cell's mean luma is compared with the previous frame, thresholded to ignore drift, passed through a square root so small movements still register, and decayed over time. A moving hand lights up in the shape of the hand and leaves a trail behind it. It's a per-cell field rather than a centroid, which matters on real footage: two people talking would average to a point in the empty space between them, and a camera pan would average to the centre of the frame.
 
 The field is integer arithmetic end to end, so the WGSL and CPU implementations agree bit for bit, and `pnpm test:gpu` checks that. `wave`, `push` and `resolution` reject it: wave ignores the mask, and the other two need a single origin. [`ALGORITHM.md §21`](./ALGORITHM.md).
+
+## Palettes and post effects
+
+Both run after matching, so changing them never re-runs the matcher.
+
+```tsx
+<AsciiVideo
+  src="/clip.mp4"
+  color="full"
+  palette={{
+    colors: [
+      [15, 56, 15],
+      [48, 98, 48],
+      [139, 172, 15],
+      [155, 188, 15],
+    ],
+    dither: 'bayer4',
+  }}
+  post={{ scanlines: 0.5, curvature: 0.3, bloom: 1 }}
+/>
+```
+
+`palette` snaps each cell's fitted colours to a list of up to 256, optionally through an ordered Bayer dither (2×2, 4×4 or 8×8). It's integer arithmetic specified in [`ALGORITHM.md §22`](./ALGORITHM.md), so the GPU pass and `quantizeFrame()` in `@ascii-fx/core` agree bit for bit, and `captureFrame()` returns the snapped colours. Error diffusion isn't offered: it carries error from cell to cell in scan order, which a GPU can't do in parallel and stay exact. The library ships no palettes; the playground's Game Boy, PICO-8, C64 and CGA presets are lists of colours in the docs app.
+
+`post` is screen-space: `scanlines`, `vignette`, `curvature`, `aberration`, `grain` and `bloom`, each a strength where 0 is off. Bloom is computed per cell from each glyph's coverage and colour and blurred over a 7×7 cell neighbourhood, so it costs a pass over the grid rather than the canvas. With everything on, a 1080p frame takes about 0.3 ms longer on WebGPU. The Canvas2D fallback draws scanlines, vignette and bloom, and skips the three that need per-pixel sampling.
+
+## Glyph sets
+
+Built-in charsets are `ascii`, `ascii-blocks`, `blocks` (the Block Elements range, a mosaic with no letterforms), `braille` (all 256 eight-dot patterns), `arabic` and `arabic-joined`. Braille suits shape matching well: every dot lands in its own 2×4 region of the 8×8 mask.
+
+Other scripts work the same way, from any font that has the glyphs:
+
+- **Glyphs are graphemes.** A `characters` string splits into grapheme clusters, so a Devanagari conjunct (`क्ष`), a Thai consonant with its stacked marks (`ก่ำ`), or an emoji with its modifier is one glyph, shaped with the font's own OpenType rules. Pass an array to name glyphs a string would split differently. Cyrillic, Greek, Hebrew, Thai, Devanagari, the Tai scripts and CJK all work from any font that covers them; the playground has presets for several.
+- **Arabic joining is optional.** `arabic` holds the 40 isolated letterforms, which never connect. `arabic-joined` adds every final, initial and medial form and tatweel; joining forms are drawn with kashida to the edge they join at, so the matcher can pick forms whose strokes run into the next cell. Both use presentation-form code points, which compile from any Arabic font: fonts that leave that block unmapped get each form by shaping its base letter in context.
+- **Mixed widths are fine.** The cell is as wide as the widest glyph and narrower ones are centred, so proportional fonts, Arabic in any font, and kanji next to Latin all compile. Monospace sets compile byte-for-byte as before.
+- **Font collections need a face.** CJK and Arabic system fonts are usually `.ttc` collections: pass `face` (a PostScript name or an index), or `--face` on the CLI.
+- **Text exports stay on the grid.** Rows containing right-to-left glyphs are forced into cell order (LRO/PDF in text, `unicode-bidi: bidi-override` in HTML and SVG), and a set of full-width glyphs writes its blanks as U+3000 so columns line up in a terminal.
+- **Large sets run on the GPU.** The WebGPU matcher's limit is the glyph atlas fitting in one texture, typically 8192 px a side, which holds about 4,000 kanji-sized glyphs (the 2,136 jōyō kanji fit). Beyond that, use the CPU backend.
+
+Frames export as text, ANSI, HTML or SVG through standalone functions, so a bundle includes only the ones it imports. `frameToSVG(frame)` writes one positioned `<text>` per colour run, so the glyphs stay on the grid even when the viewer substitutes a font.
 
 ## Packages
 
@@ -152,7 +192,7 @@ The cells are identical in all three. Full tables and methodology: [`RESULTS.md`
 
 ## Docs
 
-- [`ALGORITHM.md`](./ALGORITHM.md), the normative spec: every constant, bit layout, and tie-break of `structural-v1`, `shape6-v1`, `ramp-v1`, `jitter-v1`, `motion-v1`, `chromatic-v1`, and the binary formats.
+- [`ALGORITHM.md`](./ALGORITHM.md), the normative spec: every constant, bit layout, and tie-break of `structural-v1`, `shape6-v1`, `ramp-v1`, `jitter-v1`, `motion-v1`, `palette-v1`, `chromatic-v1`, and the binary formats.
 - [`ascii-fx-spec.md`](./ascii-fx-spec.md), the product spec this repo implements.
 - [`RELEASING.md`](./RELEASING.md): changesets, the release workflow, and one-time npm and Pages setup.
 - [`SECURITY.md`](./SECURITY.md): what counts as attack surface here, and how to report it.

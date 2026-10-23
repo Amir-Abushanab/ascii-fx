@@ -3,6 +3,7 @@
 // output — NOT deterministic across browsers/OSes; precompiled profiles are.
 import type { AsciiProfile } from './types.js'
 import { resolveCharset } from './charsets.js'
+import { glyphOffset, kashidaText, shapingText } from './joining.js'
 import { idiv, nextPow2, rdiv } from './util.js'
 
 export interface CreateAsciiProfileOptions {
@@ -82,9 +83,21 @@ async function buildRuntimeProfile(
   mctx.font = fontAt(fontSize)
   const metrics = mctx.measureText('M')
   const ascent = metrics.fontBoundingBoxAscent || fontSize * 0.8
-  const advance = metrics.width
+  // The cell is as wide as the widest glyph, not as 'M'. A monospace Latin set measures the same
+  // either way; a set the font draws wider — CJK at a full em, or glyphs the browser pulls from a
+  // fallback font — would otherwise lose everything right of the 'M' advance to the clip.
+  // What is drawn for each glyph: itself, or for an Arabic presentation form its base letter in
+  // joining context, so the form comes from this font's shaping rather than a fallback font that
+  // happens to map the presentation block.
+  const drawnText = glyphs.map(shapingText)
+  const widths = drawnText.map((t) => mctx.measureText(t).width)
+  const advance = Math.max(metrics.width, ...widths)
   const cellW = Math.max(1, Math.round(advance))
   const baseline = Math.max(0, Math.min(CELL_H, Math.round(ascent)))
+
+  // Tatweels per joining side: enough to cross the whole cell from wherever the letter sits.
+  const tatweelW = mctx.measureText('\u0640').width
+  const kashida = tatweelW > 0 ? Math.ceil(cellW / tatweelW) + 1 : 0
 
   const n = glyphs.length
   const pitchW = nextPow2(cellW + 2 * PADDING)
@@ -116,7 +129,13 @@ async function buildRuntimeProfile(
 
   for (let i = 0; i < n; i++) {
     ctx.clearRect(0, 0, cellW, CELL_H)
-    ctx.fillText(glyphs[i], 0, baseline)
+    // Narrower glyphs are centred; a joining form gets kashida on its joining side(s) and is
+    // placed so the stroke runs off the edge it joins at (joining.ts), clipped by the canvas.
+    // Clamped at 0 otherwise, so a set whose glyphs all share the advance draws at x = 0 as before.
+    const text = kashidaText(drawnText[i], kashida)
+    const runW = text === drawnText[i] ? widths[i] : ctx.measureText(text).width
+    const dx = glyphOffset(glyphs[i], widths[i], cellW, runW)
+    ctx.fillText(text, text === drawnText[i] ? Math.max(0, dx) : dx, baseline)
     const img = ctx.getImageData(0, 0, cellW, CELL_H)
     let lo = 0
     let hi = 0

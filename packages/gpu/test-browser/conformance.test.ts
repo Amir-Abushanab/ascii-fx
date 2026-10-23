@@ -5,12 +5,13 @@ import type { AsciiFrame, ColorMode, RGB } from '@ascii-fx/core'
 import {
   createMotionState,
   decodeProfile,
+  frameToText,
   matchFrame,
   motionField,
   reduceSource,
   subsetProfile,
 } from '@ascii-fx/core'
-import { createAsciiRenderer } from '@ascii-fx/gpu'
+import { MAX_GPU_GLYPHS, createAsciiRenderer } from '@ascii-fx/gpu'
 import type { AsciiRenderer } from '@ascii-fx/gpu'
 import {
   STANDARD_SIX,
@@ -112,6 +113,22 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
     })
     try {
       await conform(renderer, profile, randomImage(96, 56, 13), 12, 'rand300')
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  // Past the old 2048-glyph workgroup array, and past the jōyō kanji count (2136). With 3000
+  // glyphs every lane keeps a top 8 over ~47 glyphs, and lane 0 merges all 64 of them.
+  it('agrees on a 3000-glyph random profile', async () => {
+    const profile = randomProfile(3000, 29)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
+    try {
+      await conform(renderer, profile, randomImage(96, 56, 17), 12, 'rand3000')
     } finally {
       renderer.destroy()
     }
@@ -475,9 +492,9 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
   })
 
   it("'auto' falls back to the exact CPU backend when the GPU path refuses (spec §11)", async () => {
-    // 2100 glyphs exceeds the GPU matcher's workgroup-memory bound; 'auto'
-    // must land on the CPU backend with a still-usable canvas.
-    const profile = randomProfile(2100, 77)
+    // One past the 16-bit glyph id the GPU matcher keys on; 'auto' must land on the
+    // CPU backend with a still-usable canvas.
+    const profile = randomProfile(MAX_GPU_GLYPHS + 1, 77)
     const canvas = new OffscreenCanvas(64, 64)
     const renderer = await createAsciiRenderer({ canvas, profile, backend: 'auto' })
     try {
@@ -487,7 +504,7 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
       renderer.render()
       const frame = await renderer.captureFrame()
       expect(frame.columns).toBe(8)
-      expect(frame.toText().length).toBeGreaterThan(0)
+      expect(frameToText(frame).length).toBeGreaterThan(0)
       const cpu = matchFrame(randomImage(64, 64, 78), { profile, columns: 8, color: 'mono' })
       expect(frame.glyphIds).toEqual(cpu.glyphIds)
     } finally {
@@ -521,7 +538,7 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
       renderer.setSource(img)
       renderer.render()
       const frame = await renderer.captureFrame()
-      expect(frame.toText()).toBe('▄')
+      expect(frameToText(frame)).toBe('▄')
     } finally {
       renderer.destroy()
     }

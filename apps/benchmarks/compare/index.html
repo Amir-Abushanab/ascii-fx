@@ -40,7 +40,7 @@
       }
     </script>
     <script type="module">
-      import { compositeFrame, loadProfile, matchFrame } from '@ascii-fx/core'
+      import { compositeFrame, loadProfile, matchFrameRamp, matchFrameShape6 } from '@ascii-fx/core'
       import { createAsciiRenderer } from '@ascii-fx/gpu'
       import * as THREE from 'three'
       import { AsciiEffect } from 'three/addons/effects/AsciiEffect.js'
@@ -307,7 +307,7 @@
         'ascii-fx cpu (workers+webgl)': async () =>
           cpuContender('ascii-fx cpu (workers+webgl)', undefined, 'auto'),
         // The two approximate matchers our spec credits as influences, run
-        // through the real core code path (matchFrame with matcher option →
+        // through the real core code path (matchFrameShape6 / matchFrameRamp →
         // compositeFrame). shape6 is the in-repo implementation of Alex
         // Harri's shape-vector approach, accelerated by its 3-bit LUT.
         'ascii-fx shape6-lut': async () => coreMatcherContender('shape6'),
@@ -432,9 +432,10 @@
           render: () => {
             const id = sctx.getImageData(0, 0, W, H)
             const t0 = performance.now()
-            const frame = matchFrame(
+            const match = matcher === 'shape6' ? matchFrameShape6 : matchFrameRamp
+            const frame = match(
               { width: W, height: H, data: id.data },
-              { profile, columns: COLS, rows: ROWS, color: 'foreground', matcher },
+              { profile, columns: COLS, rows: ROWS, color: 'foreground' },
             )
             matchMs.push(performance.now() - t0)
             composited = compositeFrame(frame, {}, composited)

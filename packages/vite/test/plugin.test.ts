@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
 import { PNG } from 'pngjs'
-import { decodeFrame, decodeProfile } from '@ascii-fx/core'
+import { decodeFrame, decodeProfile, frameToText } from '@ascii-fx/core'
 import { ascii } from '../src/index.js'
 
 const FONT_PATH = fileURLToPath(
@@ -96,7 +96,7 @@ describe('@ascii-fx/vite plugin', () => {
     const frame = decodeFrame(new Uint8Array(readFileSync(framePath)), profile)
     expect(frame.columns).toBe(16)
     expect(frame.colorMode).toBe('full')
-    expect(frame.toText().length).toBeGreaterThan(0)
+    expect(frameToText(frame).length).toBeGreaterThan(0)
   })
 
   it('unknown names fail with the available list', async () => {
