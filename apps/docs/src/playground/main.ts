@@ -24,6 +24,7 @@ import type {
   RenderSource,
 } from '@ascii-fx/gpu'
 import { createAsciiRenderer } from '@ascii-fx/gpu'
+import { TiltSource, forwardTiltToPointer } from '@ascii-fx/gpu/tilt'
 import {
   Clapperboard,
   ClipboardCopy,
@@ -124,6 +125,9 @@ const els = {
   colWarn: $<HTMLSpanElement>('colWarn'),
   fit: $<HTMLSelectElement>('fit'),
   interaction: $<HTMLSelectElement>('interaction'),
+  fxSource: $<HTMLSelectElement>('fxSource'),
+  tilt: $<HTMLInputElement>('tilt'),
+  tiltLab: $<HTMLLabelElement>('tiltLab'),
   fxRadius: $<HTMLInputElement>('fxRadius'),
   fxRadiusOut: $<HTMLOutputElement>('fxRadiusOut'),
   fxFeather: $<HTMLInputElement>('fxFeather'),
@@ -436,6 +440,26 @@ const FX_NOTES: Record<string, string> = {
   resolution: 'Magnifies the glyph field under the pointer. Reads radius, feather and intensity.',
 }
 
+/**
+ * The same line for an effect that follows the source's own motion (ALGORITHM.md §21). Only
+ * these five read a mask a per-cell field can stand in for: wave and original-mix read no mask
+ * at all, and push and magnify need the single origin a field does not have.
+ */
+const MOTION_NOTES: Record<string, string> = {
+  reveal:
+    'Fades the original source back in wherever the source moves, shaped like what moved. Reads intensity.',
+  displace: 'Wobbles the sampling position wherever the source moves. Reads intensity.',
+  color: 'Rotates hue wherever the source moves. Reads intensity.',
+  'glyph-scale':
+    'Shrinks each glyph inside its own cell wherever the source moves. Reads intensity.',
+  'glyph-rotate':
+    'Spins each glyph inside its own cell wherever the source moves. Reads intensity.',
+}
+
+/** Motion was asked for and the selected effect can follow it. */
+const motionOn = (): boolean =>
+  els.fxSource.value === 'motion' && els.interaction.value in MOTION_NOTES
+
 function applyInteraction(): void {
   const value = els.interaction.value
   renderer?.setInteraction(
@@ -446,6 +470,7 @@ function applyInteraction(): void {
           radius: Number(els.fxRadius.value),
           feather: Number(els.fxFeather.value),
           intensity: Number(els.fxIntensity.value),
+          ...(motionOn() ? { source: 'motion' as const } : {}),
         },
   )
 }
@@ -453,12 +478,52 @@ function applyInteraction(): void {
 /** Grey the dials the selected effect ignores, and say what it does. */
 function syncFxPanel(): void {
   const value = els.interaction.value
-  const off = value === 'none' || POINTERLESS_FX.has(value)
+  const motion = motionOn()
+  // A motion field replaces the pointer's circle, so radius and feather stop meaning anything.
+  const off = value === 'none' || POINTERLESS_FX.has(value) || motion
   els.fxRadius.disabled = off
   els.fxFeather.disabled = off
   els.fxIntensity.disabled = value === 'none'
-  els.fxNote.textContent = FX_NOTES[value] ?? ''
+  els.fxSource.disabled = !(value in MOTION_NOTES)
+  // Tilt steers the pointer, so it has nothing to steer once the effect follows motion.
+  els.tilt.disabled = value === 'none' || POINTERLESS_FX.has(value) || motion
+  let note = (motion ? MOTION_NOTES[value] : FX_NOTES[value]) ?? ''
+  if (motion && !sourceIsLive()) {
+    note += ' A still image never moves, so this waits on a scene, the webcam or a video.'
+  } else if (els.fxSource.value === 'motion' && (value === 'push' || value === 'resolution')) {
+    note += ' It works from one point, so it stays on the pointer rather than following motion.'
+  }
+  els.fxNote.textContent = note
 }
+
+// ————— Tilt —————
+// Phones and tablets only: desktop browsers define DeviceOrientationEvent and never fire it.
+els.tiltLab.hidden = !(TiltSource.supported() && matchMedia('(pointer: coarse)').matches)
+let tiltSource: TiltSource | undefined
+let stopTilt: (() => void) | undefined
+
+/** Point tilt at the current renderer. A rebuild replaces the renderer, so this runs after each. */
+function syncTilt(): void {
+  stopTilt?.()
+  stopTilt = undefined
+  if (renderer && tiltSource && els.tilt.checked && !els.tilt.disabled)
+    stopTilt = forwardTiltToPointer(tiltSource, renderer.pointer)
+}
+
+els.tilt.addEventListener('change', () => {
+  void (async () => {
+    if (els.tilt.checked) {
+      tiltSource ??= new TiltSource()
+      // iOS gates the sensor behind a permission prompt that only a tap may open, and this
+      // runs inside the tap that ticked the box. A refusal unticks it again.
+      if (!(await tiltSource.enable())) els.tilt.checked = false
+    } else {
+      tiltSource?.dispose()
+      tiltSource = undefined
+    }
+    syncTilt()
+  })()
+})
 
 /** Every interaction runs on both backends; adaptive resolution is a WebGPU feature. */
 function syncInteractionAvailability(): void {
@@ -650,6 +715,8 @@ async function rebuild(): Promise<void> {
   resizeObserver.disconnect()
   resizeObserver.observe(out)
   out.addEventListener('pointermove', (e) => {
+    // While tilt is on it owns the pointer; a stray touch would yank it off the tilt.
+    if (stopTilt) return
     renderer?.pointer.set(...pointerUV(e, out))
   })
   let profile: AsciiProfile
@@ -704,6 +771,7 @@ async function rebuild(): Promise<void> {
   attachSource()
   syncFxPanel()
   applyInteraction()
+  syncTilt()
   syncInteractionAvailability()
   syncMotionPolicy()
   updateStats()
@@ -720,6 +788,8 @@ async function switchSource(kind: string): Promise<void> {
     active = next
     attachSource()
     syncMotionPolicy()
+    // A still image and a moving scene say different things about a motion-led effect.
+    syncFxPanel()
     updateStats()
   } catch (err) {
     stats.textContent = `source failed: ${err instanceof Error ? err.message : String(err)}`
@@ -910,7 +980,7 @@ for (const input of optionInputs) {
   })
 }
 
-const fxInputs = [els.interaction, els.fxRadius, els.fxFeather, els.fxIntensity]
+const fxInputs = [els.interaction, els.fxSource, els.fxRadius, els.fxFeather, els.fxIntensity]
 for (const input of fxInputs) {
   input.addEventListener(input instanceof HTMLSelectElement ? 'change' : 'input', () => {
     // Arriving at original-mix with intensity parked at the top hands you a
@@ -929,6 +999,7 @@ for (const input of fxInputs) {
     els.fxIntensityOut.value = Number(els.fxIntensity.value).toFixed(2)
     syncFxPanel()
     applyInteraction()
+    syncTilt()
   })
 }
 
@@ -946,6 +1017,7 @@ for (const input of [els.grain, els.grainRate]) {
     // as live at all, so the source has to be re-attached rather than just re-rendered.
     attachSource()
     syncMotionPolicy()
+    syncFxPanel()
     updateStats()
   })
 }
@@ -974,12 +1046,13 @@ function getExportState(): ExportState {
   let interaction: Record<string, unknown> | null = null
   if (els.interaction.value !== 'none') {
     interaction = { type: els.interaction.value }
+    if (motionOn()) interaction.source = 'motion'
     const radius = Number(els.fxRadius.value)
     const feather = Number(els.fxFeather.value)
     const intensity = Number(els.fxIntensity.value)
     // A snippet carrying radius/feather for an effect that has no falloff
-    // reads as though they tune it; they do not.
-    if (!POINTERLESS_FX.has(els.interaction.value)) {
+    // reads as though they tune it; they do not. Nor does a motion field.
+    if (!POINTERLESS_FX.has(els.interaction.value) && !motionOn()) {
       if (radius !== 0.15) interaction.radius = radius
       if (feather !== 0.06) interaction.feather = feather
     }
@@ -1010,6 +1083,7 @@ function getExportState(): ExportState {
     compositor: selectedBackend().compositor === 'canvas2d' ? 'canvas2d' : undefined,
     options,
     interaction,
+    tilt: els.tilt.checked && !els.tilt.disabled ? true : undefined,
     // Source-side, so it is not a renderer option and never will be — the snippets carry
     // it as the draw pass it is.
     grain: grainOn()
