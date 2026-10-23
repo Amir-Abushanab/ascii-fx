@@ -2,10 +2,13 @@ import { expect, it } from 'vitest'
 import {
   COMPOSITE_WGSL,
   FEATURES_WGSL,
-  MAX_GPU_GLYPHS,
+  GLOW_WGSL,
   MIPGEN_WGSL,
+  MOTION_WGSL,
+  QUANTIZE_WGSL,
+  MATCH_WGSL,
   REDUCE_WGSL,
-  matchWgsl,
+  chromaticMatchWgsl,
 } from '../src/shaders.js'
 
 it('all shader modules compile cleanly', async () => {
@@ -15,9 +18,13 @@ it('all shader modules compile cleanly', async () => {
   const shaders: Record<string, string> = {
     reduce: REDUCE_WGSL,
     features: FEATURES_WGSL,
-    match: matchWgsl(MAX_GPU_GLYPHS),
+    match: MATCH_WGSL,
     composite: COMPOSITE_WGSL,
     mipgen: MIPGEN_WGSL,
+    motion: MOTION_WGSL,
+    quantize: QUANTIZE_WGSL,
+    glow: GLOW_WGSL,
+    chromatic: chromaticMatchWgsl(),
   }
   const errors: string[] = []
   for (const [name, code] of Object.entries(shaders)) {

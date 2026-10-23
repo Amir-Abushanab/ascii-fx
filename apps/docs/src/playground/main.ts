@@ -1,5 +1,11 @@
 import type { AsciiProfile, ColorMode, AlphaMode, RGB } from '@ascii-fx/core'
-import { createAsciiProfile, decodeProfile, subsetProfile } from '@ascii-fx/core'
+import {
+  createAsciiProfile,
+  decodeProfile,
+  frameToSVG,
+  frameToText,
+  subsetProfile,
+} from '@ascii-fx/core'
 import {
   activeProfile,
   defaultSelection,
@@ -24,16 +30,20 @@ import {
   Component,
   Cpu,
   Crop,
+  FileCode,
   FileText,
   Grip,
   ImageDown,
+  Monitor,
   Package,
+  Palette,
   ScanText,
   Smile,
   Sparkles,
   ToggleRight,
   TriangleAlert,
   Type,
+  Video,
   createIcons,
 } from 'lucide'
 import { SCENES, type SceneKind } from './scenes'
@@ -46,6 +56,9 @@ import { renderMath } from './math'
 import { mountSectionIcons } from './sectionIcons'
 import { pointerUV } from './pointer'
 import type { ExportState } from './exportSnippets'
+import { paletteOption, postOption, type LookControls } from './look'
+import { SCRIPT_SETS } from './scriptSets'
+import { collectionFaces, extractFace, isCollection } from './fontCollection'
 
 createIcons({
   // Every data-lucide name used in index.astro has to be listed here — lucide
@@ -56,16 +69,20 @@ createIcons({
     Component,
     Cpu,
     Crop,
+    FileCode,
     FileText,
     Grip,
     ImageDown,
+    Monitor,
     Package,
+    Palette,
     ScanText,
     Smile,
     Sparkles,
     ToggleRight,
     TriangleAlert,
     Type,
+    Video,
   },
 })
 
@@ -88,6 +105,9 @@ const els = {
   font: $<HTMLSelectElement>('font'),
   fontFile: $<HTMLInputElement>('fontFile'),
   chars: $<HTMLInputElement>('chars'),
+  charset: $<HTMLSelectElement>('charset'),
+  fontFace: $<HTMLSelectElement>('fontFace'),
+  fontFaceLab: $<HTMLLabelElement>('fontFaceLab'),
   backend: $<HTMLSelectElement>('backend'),
   temporal: $<HTMLInputElement>('temporal'),
   adaptive: $<HTMLInputElement>('adaptive'),
@@ -111,7 +131,26 @@ const els = {
   fxIntensity: $<HTMLInputElement>('fxIntensity'),
   fxIntensityOut: $<HTMLOutputElement>('fxIntensityOut'),
   fxNote: $<HTMLParagraphElement>('fxNote'),
+  spreadOut: $<HTMLOutputElement>('spreadOut'),
 }
+
+const look: LookControls = {
+  palette: $<HTMLSelectElement>('palette'),
+  dither: $<HTMLSelectElement>('dither'),
+  spread: $<HTMLInputElement>('spread'),
+  scanlines: $<HTMLInputElement>('postScan'),
+  vignette: $<HTMLInputElement>('postVignette'),
+  curvature: $<HTMLInputElement>('postCurve'),
+  aberration: $<HTMLInputElement>('postAberration'),
+  bloom: $<HTMLInputElement>('postBloom'),
+  noise: $<HTMLInputElement>('postNoise'),
+}
+
+/** Composite-stage options only: setting these alone never rematches. */
+const lookOptions = (): AsciiRendererRuntimeOptions => ({
+  palette: paletteOption(look),
+  post: postOption(look),
+})
 
 const reducedMotionQuery = matchMedia('(prefers-reduced-motion: reduce)')
 let animatePreferenceTouched = false
@@ -153,13 +192,30 @@ function loadSelectedProfile(): Promise<AsciiProfile> {
   if (emojiOn()) return activeProfile()
   const value = els.font.value
   const chars = charSubset()
+  const charset = els.charset.value
   // Compiled profiles can only narrow (subsetProfile); runtime profiles
   // rasterize exactly the requested characters, so chars can go beyond ascii
-  // there (blocks ▀▓, braille ⣿ — anything the browser font can draw).
-  const key = `${value === 'upload' ? `upload:${customFontFamily ?? 'none'}` : value}:${value === 'geist' ? '' : (chars ?? '')}`
+  // there (blocks ▀▓, braille ⣿ — anything the browser font can draw). The
+  // compiled Geist profile is ascii, so another built-in set is profiled at
+  // runtime against the page's own Geist Mono, whose gaps the system fills.
+  const runtimeGeist = value === 'geist' && charset !== 'ascii'
+  // What a runtime profile is built from: the chars field when it has anything in it, a script
+  // preset's glyph list, or a built-in charset name.
+  const script = charset.startsWith('script:') ? SCRIPT_SETS[charset.slice(7)] : undefined
+  const glyphSource = chars
+    ? { characters: chars }
+    : script
+      ? { characters: script.glyphs }
+      : { charset }
+  const key = `${value === 'upload' ? `upload:${customFontFamily ?? 'none'}` : value}:${charset}:${value === 'geist' && !runtimeGeist ? '' : (chars ?? '')}`
   let pending = profileCache.get(key)
   if (!pending) {
-    if (value === 'geist') {
+    if (runtimeGeist) {
+      pending = createAsciiProfile({
+        fontFamily: "'Geist Mono'",
+        ...glyphSource,
+      })
+    } else if (value === 'geist') {
       pending = fetch(`${import.meta.env.BASE_URL}default.asciip`).then(async (res) => {
         if (!res.ok)
           throw new Error('compiled profile missing — run `pnpm golden:update` at the repo root')
@@ -169,23 +225,46 @@ function loadSelectedProfile(): Promise<AsciiProfile> {
       if (!customFontFamily) return Promise.reject(new Error('pick a font file first'))
       pending = createAsciiProfile({
         fontFamily: customFontFamily,
-        ...(chars ? { characters: chars } : {}),
+        ...glyphSource,
       })
     } else {
-      pending = createAsciiProfile({ fontFamily: value, ...(chars ? { characters: chars } : {}) })
+      pending = createAsciiProfile({
+        fontFamily: value,
+        ...glyphSource,
+      })
     }
     profileCache.set(key, pending)
     pending.catch(() => profileCache.delete(key))
   }
-  return value === 'geist' && chars ? pending.then((p) => subsetProfile(p, chars)) : pending
+  return value === 'geist' && !runtimeGeist && chars
+    ? pending.then((p) => subsetProfile(p, chars))
+    : pending
 }
 
-async function loadFontFile(file: File): Promise<void> {
+/** The last uploaded font's bytes, kept while it is a collection so the face picker can switch. */
+let uploadedCollection: ArrayBuffer | null = null
+
+async function registerFont(bytes: ArrayBuffer): Promise<void> {
   const family = `PlaygroundFont${++customFontCounter}`
-  const face = new FontFace(family, await file.arrayBuffer())
+  const face = new FontFace(family, bytes)
   await face.load()
   document.fonts.add(face)
   customFontFamily = family
+}
+
+async function loadFontFile(file: File): Promise<void> {
+  const bytes = await file.arrayBuffer()
+  // FontFace takes one font, so a collection is opened face by face (fontCollection.ts).
+  uploadedCollection = isCollection(bytes) ? bytes : null
+  els.fontFaceLab.hidden = !uploadedCollection
+  if (!uploadedCollection) {
+    await registerFont(bytes)
+    return
+  }
+  els.fontFace.replaceChildren(
+    ...collectionFaces(bytes).map((f) => new Option(f.name, String(f.index))),
+  )
+  await registerFont(extractFace(bytes, 0))
 }
 
 // ————— sources —————
@@ -594,6 +673,7 @@ async function rebuild(): Promise<void> {
       onDeviceLost: handleDeviceLost,
       onError: handleGpuError,
       ...matchOptions(),
+      ...lookOptions(),
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -609,6 +689,7 @@ async function rebuild(): Promise<void> {
           backend: 'cpu',
           compositor: choice.compositor,
           ...matchOptions(),
+          ...lookOptions(),
         })
       } catch (cpuErr) {
         stats.textContent = `renderer failed: ${cpuErr instanceof Error ? cpuErr.message : String(cpuErr)}`
@@ -683,6 +764,8 @@ els.font.addEventListener('change', () => {
     els.fontFile.click()
   } else {
     fontPickerValue = els.font.value
+    // The face picker belongs to the uploaded collection, not to the other fonts.
+    els.fontFaceLab.hidden = true
     void rebuild()
   }
 })
@@ -704,6 +787,38 @@ els.backend.addEventListener('change', () => {
   void rebuild()
 })
 els.chars.addEventListener('change', () => void rebuild())
+els.charset.addEventListener('change', () => void rebuild())
+els.fontFace.addEventListener('change', async () => {
+  if (!uploadedCollection) return
+  try {
+    await registerFont(extractFace(uploadedCollection, Number(els.fontFace.value)))
+    await rebuild()
+  } catch (err) {
+    stats.textContent = `font failed: ${err instanceof Error ? err.message : String(err)}`
+  }
+})
+
+const lookInputs: HTMLElement[] = [look.palette, look.dither, look.spread]
+const postOuts: Array<[HTMLInputElement, string]> = [
+  [look.scanlines, 'postScanOut'],
+  [look.vignette, 'postVignetteOut'],
+  [look.curvature, 'postCurveOut'],
+  [look.aberration, 'postAberrationOut'],
+  [look.bloom, 'postBloomOut'],
+  [look.noise, 'postNoiseOut'],
+]
+for (const el of [...lookInputs, ...postOuts.map(([input]) => input)]) {
+  el.addEventListener(el instanceof HTMLSelectElement ? 'change' : 'input', () => {
+    els.spreadOut.value = look.spread.value
+    for (const [input, id] of postOuts)
+      $<HTMLOutputElement>(id).value = Number(input.value).toFixed(2)
+    look.spread.disabled = look.dither.value === 'none'
+    // Only the composite options: on their own they repaint the frame already matched.
+    renderer?.setOptions(lookOptions())
+    if (renderer && active && !(sourceIsLive() && els.animate.checked && outputVisible))
+      renderer.render()
+  })
+}
 
 // ————— Emoji mode —————
 
@@ -851,6 +966,10 @@ function getExportState(): ExportState {
   if (els.fit.value !== 'contain') options.fit = els.fit.value
   if (els.temporal.checked && !els.temporal.disabled) options.temporal = true
   if (els.adaptive.checked && !els.adaptive.disabled) options.adaptiveResolution = true
+  const palette = paletteOption(look)
+  if (palette) options.palette = palette
+  const post = postOption(look)
+  if (post) options.post = post
 
   let interaction: Record<string, unknown> | null = null
   if (els.interaction.value !== 'none') {
@@ -877,7 +996,13 @@ function getExportState(): ExportState {
 
   return {
     font,
-    characters: charSubset() ?? undefined,
+    // A script preset is the docs app's, not the library's, so a snippet carries its glyphs.
+    ...(els.charset.value.startsWith('script:')
+      ? { characters: charSubset() ?? SCRIPT_SETS[els.charset.value.slice(7)]?.glyphs.join('') }
+      : {
+          charset: els.charset.value === 'ascii' ? undefined : els.charset.value,
+          characters: charSubset() ?? undefined,
+        }),
     backend: (() => {
       const { backend } = selectedBackend()
       return backend === 'auto' ? undefined : backend
@@ -926,14 +1051,14 @@ const copyTextBtn = $<HTMLButtonElement>('copyText')
 copyTextBtn.addEventListener('click', () => {
   void renderer
     ?.captureFrame()
-    .then((frame) => navigator.clipboard.writeText(frame.toText()))
+    .then((frame) => navigator.clipboard.writeText(frameToText(frame)))
     .then(() => flash(copyTextBtn, 'copied ✓'))
     .catch(() => flash(copyTextBtn, 'copy failed', false))
 })
 const saveTextBtn = $<HTMLButtonElement>('saveText')
 saveTextBtn.addEventListener('click', () => {
   void renderer?.captureFrame().then((frame) => {
-    const url = URL.createObjectURL(new Blob([frame.toText()], { type: 'text/plain' }))
+    const url = URL.createObjectURL(new Blob([frameToText(frame)], { type: 'text/plain' }))
     const a = document.createElement('a')
     a.href = url
     a.download = 'ascii-fx.txt'
@@ -942,6 +1067,65 @@ saveTextBtn.addEventListener('click', () => {
     flash(saveTextBtn, 'saved ✓')
   })
 })
+const saveSvgBtn = $<HTMLButtonElement>('saveSvg')
+saveSvgBtn.addEventListener('click', () => {
+  void renderer?.captureFrame().then((frame) => {
+    const svg = frameToSVG(frame, {
+      background: hexToRgb(els.bg.value),
+      foreground: hexToRgb(els.fg.value),
+      ...(els.font.value === 'geist' ? { fontFamily: "'Geist Mono', monospace" } : {}),
+    })
+    const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'ascii-fx.svg'
+    a.click()
+    URL.revokeObjectURL(url)
+    flash(saveSvgBtn, 'saved ✓')
+  })
+})
+
+// Video is the canvas itself, recorded: captureStream() works on WebGPU, WebGL2 and
+// Canvas2D canvases alike, so this needs nothing from the renderer. A still source only
+// emits a frame when the canvas repaints, so record something that moves.
+const recordBtn = $<HTMLButtonElement>('recordVideo')
+let recorder: MediaRecorder | undefined
+recordBtn.addEventListener('click', () => {
+  const label = recordBtn.querySelector<HTMLElement>('.btn-label')!
+  if (recorder) {
+    recorder.stop()
+    return
+  }
+  const type = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm'].find((t) =>
+    MediaRecorder.isTypeSupported(t),
+  )
+  if (!type) {
+    flash(recordBtn, 'not supported', false)
+    return
+  }
+  const chunks: Blob[] = []
+  const rec = new MediaRecorder(out.captureStream(60), {
+    mimeType: type,
+    videoBitsPerSecond: 12_000_000,
+  })
+  rec.ondataavailable = (e) => chunks.push(e.data)
+  rec.onstop = () => {
+    recorder = undefined
+    label.textContent = 'record video'
+    recordBtn.classList.remove('flash-err')
+    const url = URL.createObjectURL(new Blob(chunks, { type }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ascii-fx.${type.startsWith('video/mp4') ? 'mp4' : 'webm'}`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  rec.start()
+  recorder = rec
+  label.textContent = 'stop ■'
+  recordBtn.classList.add('flash-err')
+})
+
 const savePngBtn = $<HTMLButtonElement>('savePng')
 savePngBtn.addEventListener('click', () => {
   if (!renderer) return

@@ -10,7 +10,13 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { RGB, RawImage } from '@ascii-fx/core'
-import { decodeFrame, decodeProfile, encodeFrame, matchFrame } from '@ascii-fx/core'
+import {
+  decodeFrame,
+  decodeProfile,
+  encodeFrame,
+  frameToText,
+  matchFrameChromatic,
+} from '@ascii-fx/core'
 import { buildChromaticProfile } from '@ascii-fx/compiler'
 import { GOLDEN_IMAGES } from './images.js'
 
@@ -78,14 +84,13 @@ describe('golden corpus (chromatic-v1 × synthetic palette)', () => {
       writeFileSync(PROFILE_PATH, built.binary)
       for (const [name, image] of Object.entries(GOLDEN_IMAGES)) {
         for (const [bdName, background] of BACKDROPS) {
-          const frame = matchFrame(image, {
+          const frame = matchFrameChromatic(image, {
             profile,
             columns: COLUMNS,
-            matcher: 'chromatic',
             background,
           })
           writeFileSync(`${GOLDEN_DIR}${name}-chromatic-${bdName}.asciif`, encodeFrame(frame))
-          writeFileSync(`${GOLDEN_DIR}${name}-chromatic-${bdName}.txt`, frame.toText() + '\n')
+          writeFileSync(`${GOLDEN_DIR}${name}-chromatic-${bdName}.txt`, frameToText(frame) + '\n')
         }
       }
       expect(true).toBe(true)
@@ -112,10 +117,9 @@ describe('golden corpus (chromatic-v1 × synthetic palette)', () => {
           existsSync(goldenPath),
           `missing golden ${name}-chromatic-${bdName} — run \`pnpm golden:update\``,
         ).toBe(true)
-        const frame = matchFrame(image, {
+        const frame = matchFrameChromatic(image, {
           profile,
           columns: COLUMNS,
-          matcher: 'chromatic',
           background,
         })
         const bytes = encodeFrame(frame)

@@ -54,7 +54,7 @@ Worst shape6-lut case: **rings / mono** at 0.3% recall.
 | shape6 brute | 13.99 | 2.3× |
 | ramp | 8.66 | 3.8× |
 
-Per spec §5/§11 the approximate matchers are explicit opt-ins (`matcher: 'shape6' | 'ramp'`) and are never
+Per spec §5/§11 the approximate matchers are explicit opt-ins (`matchFrameShape6`, `matchFrameRamp`) and are never
 selected automatically. shape6 recall is structural agreement, not a quality score — its winners can be
 visually reasonable while differing from the exact winner; the error deltas above are the quality measure.
 

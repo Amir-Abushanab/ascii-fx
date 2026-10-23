@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsup'
+import { stripShadersPlugin } from './build/stripShaders.mjs'
 
 // Declarations are emitted by `tsc -p tsconfig.build.json`, not here: tsup's
 // dts step runs rollup-plugin-dts, which reaches into TypeScript internals
@@ -7,6 +8,8 @@ const shared = {
   format: ['esm'] as const,
   target: 'es2022',
   sourcemap: true,
+  // Shader comments and indentation ship as string contents otherwise; see the plugin.
+  esbuildPlugins: [stripShadersPlugin],
 }
 
 export default defineConfig([
@@ -16,7 +19,10 @@ export default defineConfig([
     // package a page can want without wanting the renderer, and the one part a page that uses the
     // renderer can skip entirely. Its own file is what lets `import('@ascii-fx/gpu/tilt')` in
     // `<AsciiImage tilt>` be a chunk instead of dead weight in every bundle (spec §9).
-    entry: ['src/index.ts', 'src/tilt.ts'],
+    entry: ['src/index.ts', 'src/tilt.ts', 'src/webgpu.ts', 'src/cpu.ts'],
+    // createAsciiRenderer imports each backend dynamically; splitting is what turns those
+    // imports into separate files instead of inlining both backends into index.js.
+    splitting: true,
     clean: true,
   },
   {

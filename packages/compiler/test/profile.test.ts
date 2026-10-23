@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { decodeProfile } from '@ascii-fx/core'
@@ -154,5 +154,124 @@ describe('profile compilation (Geist Mono fixture)', () => {
     expect(max).toBeLessThan(95)
     const decoded = decodeProfile(binary)
     expect(decoded.shape6?.lut3).toEqual(lut)
+  })
+})
+
+/**
+ * A two-face TrueType collection made from the fixture font: a `ttcf` header pointing both faces
+ * at one table directory, with every table offset moved past the header. Real CJK and Arabic
+ * system fonts are collections; this keeps the test off the host's font folder.
+ */
+function makeCollection(ttf: Uint8Array): Uint8Array {
+  const header = 12 + 4 * 2
+  const out = new Uint8Array(header + ttf.length)
+  out.set(ttf, header)
+  const dv = new DataView(out.buffer)
+  dv.setUint32(0, 0x74746366) // 'ttcf'
+  dv.setUint32(4, 0x00010000)
+  dv.setUint32(8, 2)
+  dv.setUint32(12, header)
+  dv.setUint32(16, header)
+  const numTables = dv.getUint16(header + 4)
+  for (let t = 0; t < numTables; t++) {
+    const at = header + 12 + t * 16 + 8
+    dv.setUint32(at, dv.getUint32(at) + header)
+  }
+  return out
+}
+
+describe('font collections', () => {
+  const ttc = makeCollection(fontBytes)
+
+  it('asks for a face and lists them', () => {
+    expect(() => buildProfile({ font: ttc })).toThrow(/collection with 2 faces.*0: GeistMono/)
+  })
+
+  it('compiles a face by index or PostScript name, to the same glyphs as the single font', () => {
+    const name = buildProfile({ font: fontBytes }).profile
+    for (const face of [1, 'GeistMono-Regular']) {
+      const p = buildProfile({ font: ttc, face }).profile
+      expect(p.structural.masksLo).toEqual(name.structural.masksLo)
+      expect(p.atlas.data).toEqual(name.atlas.data)
+      // The collection's bytes identify the font only together with the face.
+      expect(p.fontHash).not.toBe(name.fontHash)
+    }
+  })
+
+  it('rejects a face that is not there, and a face on a single font', () => {
+    expect(() => buildProfile({ font: ttc, face: 'Nope' })).toThrow(/No face "Nope"/)
+    expect(() => buildProfile({ font: fontBytes, face: 'Other' })).toThrow(/not a collection/)
+  })
+})
+
+describe('shaped glyphs', () => {
+  it('compiles a multi-code-point grapheme as one glyph, its marks in place', () => {
+    const { profile } = buildProfile({ font: fontBytes, characters: ['e', 'e\u0301'] })
+    expect(profile.glyphCount).toBe(2)
+    // The acute adds ink above the e: more coverage, a different mask.
+    expect(profile.structural.coverage[1]).toBeGreaterThan(profile.structural.coverage[0])
+    expect(profile.structural.masksLo[1]).not.toBe(profile.structural.masksLo[0])
+  })
+
+  it('leaves single mapped code points exactly as raster-v1 drew them', () => {
+    const plain = buildProfile({ font: fontBytes }).profile
+    const withShaped = buildProfile({
+      font: fontBytes,
+      characters: [...plain.glyphs, 'e\u0301'],
+    }).profile
+    expect(withShaped.structural.masksLo.subarray(0, 95)).toEqual(plain.structural.masksLo)
+    expect(withShaped.structural.coverage.subarray(0, 95)).toEqual(plain.structural.coverage)
+  })
+
+  it('names a missing grapheme by its code points', () => {
+    expect(() => buildProfile({ font: fontBytes, characters: ['a', 'क्ष'] })).toThrow(
+      /U\+0915 U\+094D U\+0937/,
+    )
+  })
+
+  // System fonts, so these run where the fonts are (macOS) and skip elsewhere.
+  const BAGHDAD = '/System/Library/Fonts/Supplemental/Baghdad.ttc'
+  const DEVANAGARI = '/System/Library/Fonts/Supplemental/DevanagariMT.ttc'
+
+  it.skipIf(!existsSync(BAGHDAD))(
+    'shapes Arabic presentation forms a font leaves unmapped, and joins them with kashida',
+    () => {
+      const font = new Uint8Array(readFileSync(BAGHDAD))
+      const { profile } = buildProfile({ font, face: 0, charset: 'arabic-joined' })
+      expect(profile.glyphCount).toBe(127)
+      const { atlas } = profile
+      const inkAt = (glyph: string, column: number): number => {
+        const id = profile.glyphs.indexOf(glyph)
+        const x0 = (id % atlas.columns) * atlas.pitchWidth + atlas.padding
+        const y0 = Math.floor(id / atlas.columns) * atlas.pitchHeight + atlas.padding
+        let ink = 0
+        for (let y = 0; y < atlas.cellHeight; y++)
+          ink += atlas.data[(y0 + y) * atlas.width + x0 + column]
+        return ink
+      }
+      const last = atlas.cellWidth - 1
+      // Medial beh joins on both sides: its stroke reaches both edges of the cell.
+      expect(inkAt('\ufe92', 0)).toBeGreaterThan(0)
+      expect(inkAt('\ufe92', last)).toBeGreaterThan(0)
+      // Isolated alef joins nothing and is narrow, so it stays clear of both edges.
+      expect(inkAt('\ufe8d', 0) + inkAt('\ufe8d', last)).toBe(0)
+    },
+  )
+
+  // fontkit prefers a font's Apple morx tables to its OpenType ones, and its morx engine never
+  // returns on Thai sara am in Ayuthaya. The compiler shapes with OpenType when a font has it.
+  const AYUTHAYA = '/System/Library/Fonts/Supplemental/Ayuthaya.ttf'
+  it.skipIf(!existsSync(AYUTHAYA))('shapes Thai sara am in a font that carries morx too', () => {
+    const font = new Uint8Array(readFileSync(AYUTHAYA))
+    const { profile } = buildProfile({ font, characters: [' ', 'ก', 'กำ', 'ก่ำ', 'ปิ่'] })
+    expect(profile.glyphCount).toBe(5)
+    expect(profile.structural.coverage[2]).toBeGreaterThan(profile.structural.coverage[1])
+  })
+
+  it.skipIf(!existsSync(DEVANAGARI))('shapes a Devanagari conjunct into one glyph', () => {
+    const font = new Uint8Array(readFileSync(DEVANAGARI))
+    const { profile } = buildProfile({ font, face: 0, characters: ' कषक्ष' })
+    expect(profile.glyphs).toEqual([' ', 'क', 'ष', 'क्ष'])
+    expect(profile.structural.masksLo[3]).not.toBe(profile.structural.masksLo[1])
   })
 })

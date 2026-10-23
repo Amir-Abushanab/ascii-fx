@@ -36,6 +36,14 @@
     "./tilt": {
       "types": "./dist/tilt.d.ts",
       "default": "./dist/tilt.js"
+    },
+    "./webgpu": {
+      "types": "./dist/webgpu.d.ts",
+      "default": "./dist/webgpu.js"
+    },
+    "./cpu": {
+      "types": "./dist/cpu.d.ts",
+      "default": "./dist/cpu.js"
     }
   },
   "publishConfig": {

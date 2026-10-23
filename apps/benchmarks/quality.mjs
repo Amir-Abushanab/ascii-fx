@@ -4,7 +4,13 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { cpus } from 'node:os'
 import { performance } from 'node:perf_hooks'
-import { FLAG_TRANSPARENT, matchFrame, reduceSource } from '@ascii-fx/core'
+import {
+  FLAG_TRANSPARENT,
+  matchFrame,
+  matchFrameRamp,
+  matchFrameShape6,
+  reduceSource,
+} from '@ascii-fx/core'
 import { buildProfile } from '@ascii-fx/compiler'
 import { upsertSection } from './resultsFile.mjs'
 
@@ -138,12 +144,12 @@ for (const [name, image] of Object.entries(corpus)) {
         p95Delta: pctl(deltas, 95) / 64,
       })
     }
-    report('shape6-lut', matchFrame(image, { profile, columns: COLUMNS, color, matcher: 'shape6' }))
+    report('shape6-lut', matchFrameShape6(image, { profile, columns: COLUMNS, color }))
     report(
       'shape6-brute',
-      matchFrame(image, { profile: profileNoLut, columns: COLUMNS, color, matcher: 'shape6' }),
+      matchFrameShape6(image, { profile: profileNoLut, columns: COLUMNS, color }),
     )
-    report('ramp', matchFrame(image, { profile, columns: COLUMNS, color, matcher: 'ramp' }))
+    report('ramp', matchFrameRamp(image, { profile, columns: COLUMNS, color }))
   }
 }
 
@@ -156,20 +162,20 @@ const perfSrc = (() => {
     128,
   ])
 })()
-const time = (opts) => {
+const time = (match, opts) => {
   const runs = []
   for (let i = 0; i < 9; i++) {
     const t0 = performance.now()
-    matchFrame(perfSrc, { columns: 160, color: 'full', ...opts })
+    match(perfSrc, { columns: 160, color: 'full', ...opts })
     runs.push(performance.now() - t0)
   }
   runs.sort((a, b) => a - b)
   return runs[4]
 }
-const tExact = time({ profile })
-const tLut = time({ profile, matcher: 'shape6' })
-const tBrute = time({ profile: profileNoLut, matcher: 'shape6' })
-const tRamp = time({ profile, matcher: 'ramp' })
+const tExact = time(matchFrame, { profile })
+const tLut = time(matchFrameShape6, { profile })
+const tBrute = time(matchFrameShape6, { profile: profileNoLut })
+const tRamp = time(matchFrameRamp, { profile })
 
 // ————— report —————
 let md = `# Approximate matcher quality (spec §36)
@@ -201,7 +207,7 @@ const speed = `${SPEED_HEADING}
 | shape6 brute | ${tBrute.toFixed(2)} | ${(tExact / tBrute).toFixed(1)}× |
 | ramp | ${tRamp.toFixed(2)} | ${(tExact / tRamp).toFixed(1)}× |
 
-Per spec §5/§11 the approximate matchers are explicit opt-ins (\`matcher: 'shape6' | 'ramp'\`) and are never
+Per spec §5/§11 the approximate matchers are explicit opt-ins (\`matchFrameShape6\`, \`matchFrameRamp\`) and are never
 selected automatically. shape6 recall is structural agreement, not a quality score — its winners can be
 visually reasonable while differing from the exact winner; the error deltas above are the quality measure.
 `

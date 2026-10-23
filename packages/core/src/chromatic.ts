@@ -28,7 +28,13 @@ export function matchFrameChromatic(source: RawImage, options: MatchOptions): As
   if (!chromatic) {
     throw new Error(
       `Profile ${profile.id} carries no chromatic glyph data. ` +
-        'Compile it with `chromatic: true` to use `matcher: "chromatic"`.',
+        'Compile it with `chromatic: true` to use matchFrameChromatic.',
+    )
+  }
+  if ((options.jitter ?? 0) > 0) {
+    throw new Error(
+      'jitter is a structural-v1 effect (ALGORITHM.md §20); chromatic-v1 has no rerank ' +
+        'candidates to vary among.',
     )
   }
   const alphaMode = options.alpha ?? 'mask'

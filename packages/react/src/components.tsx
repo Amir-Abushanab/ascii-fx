@@ -12,6 +12,7 @@ import type {
   AsciiFrame,
   AsciiSupport,
   ColorMode,
+  PaletteOptions,
   ProfileSource,
   RGB,
 } from '@ascii-fx/core'
@@ -20,6 +21,7 @@ import type {
   BackendChoice,
   FitMode,
   InteractionOptions,
+  PostOptions,
   TiltOptions,
   TiltStatus,
 } from '@ascii-fx/gpu'
@@ -70,6 +72,10 @@ export interface AsciiCommonProps {
   tilt?: boolean | TiltOptions
   temporal?: boolean
   adaptiveResolution?: boolean
+  /** Snap colours to a palette, optionally dithered. Never rematches; see AsciiRendererOptions. */
+  palette?: PaletteOptions | null
+  /** Screen-space effects (scanlines, bloom, …) over the composite; see PostOptions. */
+  post?: PostOptions | null
   /** Pause continuous rendering while the component is outside the viewport. Default true. */
   pauseWhenOffscreen?: boolean
   /** Honor the user's reduced-motion preference for autoplay and interactions. Default true. */

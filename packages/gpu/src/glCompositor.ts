@@ -1,5 +1,6 @@
 import type { AsciiFrame, AsciiProfile, ColorMode, RGB } from '@ascii-fx/core'
 import { COMPOSITE_FRAG_GLSL, COMPOSITE_VERT_GLSL } from './glShaders.js'
+import type { PostOptions } from './types.js'
 
 const COLOR_MODE_CODE: Record<ColorMode, number> = { mono: 0, foreground: 1, full: 2, glyph: 3 }
 
@@ -38,6 +39,9 @@ export interface GlViewParams {
   /** mono has no per-cell colour planes; these fill in for them. */
   foreground: RGB
   background: RGB
+  post: Required<PostOptions>
+  /** Bloom field (glow.ts), `columns · rows` RGBA floats. Bloom is skipped without it. */
+  glow?: Float32Array
 }
 
 export interface GlFxParams {
@@ -81,6 +85,9 @@ const UNIFORMS = [
   'uFxIntensity',
   'uFxTime',
   'uFxSource',
+  'uPost',
+  'uPost2',
+  'uGlow',
 ] as const
 
 type UniformName = (typeof UNIFORMS)[number]
@@ -118,6 +125,7 @@ export class GlCompositor {
   private cellsTex!: WebGLTexture
   private srcTex!: WebGLTexture
   private motionTex!: WebGLTexture
+  private glowTex!: WebGLTexture
   private cellData?: Uint32Array
   private cellDims = { columns: 0, rows: 0 }
   private lost = false
@@ -281,6 +289,13 @@ export class GlCompositor {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(1))
     this.setSampling(gl.NEAREST)
 
+    // Bloom field. LINEAR, unlike motion: the glow is meant to spread across cell boundaries.
+    // Half-float is filterable in WebGL2 without an extension, and uploads from Float32 directly.
+    this.glowTex = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, this.glowTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4))
+    this.setSampling(gl.LINEAR)
+
     gl.disable(gl.BLEND)
     gl.disable(gl.DEPTH_TEST)
   }
@@ -363,6 +378,8 @@ export class GlCompositor {
     gl.bindTexture(gl.TEXTURE_2D, this.atlasRgbaTex)
     gl.uniform1i(u('uAtlasRgba'), 2)
     if (fx.motion) {
+      // Its own unit: binding it while unit 2 is active would replace the RGBA atlas there.
+      gl.activeTexture(gl.TEXTURE4)
       gl.bindTexture(gl.TEXTURE_2D, this.motionTex)
       // R8 rows are not 4-byte aligned at most grid widths; without this the
       // upload walks off by a few bytes per row and the field shears.
@@ -386,6 +403,23 @@ export class GlCompositor {
     gl.activeTexture(gl.TEXTURE4)
     gl.bindTexture(gl.TEXTURE_2D, this.motionTex)
     gl.uniform1i(u('uMotion'), 4)
+    gl.activeTexture(gl.TEXTURE5)
+    gl.bindTexture(gl.TEXTURE_2D, this.glowTex)
+    if (view.glow) {
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA16F,
+        frame.columns,
+        frame.rows,
+        0,
+        gl.RGBA,
+        gl.FLOAT,
+        view.glow,
+      )
+    }
+    gl.uniform1i(u('uGlow'), 5)
+    gl.activeTexture(gl.TEXTURE0)
 
     gl.uniform2ui(u('uGrid'), frame.columns, frame.rows)
     gl.uniform4ui(
@@ -419,6 +453,9 @@ export class GlCompositor {
     gl.uniform1f(u('uFxIntensity'), fx.intensity)
     gl.uniform1f(u('uFxTime'), fx.time)
     gl.uniform1ui(u('uFxSource'), fx.motion ? fx.sourceKind : 0)
+    const { post } = view
+    gl.uniform4f(u('uPost'), post.scanlines, post.vignette, post.curvature, post.grain)
+    gl.uniform2f(u('uPost2'), post.aberration, view.glow ? post.bloom : 0)
 
     // Every pixel is written by the triangle — including the letterbox, which
     // the shader returns clearColor for — so there is nothing to clear first.
@@ -438,6 +475,8 @@ export class GlCompositor {
     gl.deleteTexture(this.atlasRgbaTex)
     gl.deleteTexture(this.cellsTex)
     gl.deleteTexture(this.srcTex)
+    gl.deleteTexture(this.motionTex)
+    gl.deleteTexture(this.glowTex)
     gl.deleteVertexArray(this.vao)
     gl.deleteProgram(this.program)
   }

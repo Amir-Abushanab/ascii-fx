@@ -2,9 +2,6 @@
 // workgroup atomics are associative integer ops, so reduction order can never
 // change a result. Any deviation from the CPU reference is a bug here.
 
-/** Max glyphs supported by the GPU matcher (workgroup memory bound). */
-export const MAX_GPU_GLYPHS = 2048
-
 const COMMON = /* wgsl */ `
 struct Params {
   srcW: u32,
@@ -195,7 +192,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k
 }
 `
 
-export const matchWgsl = (maxGlyphs: number): string => /* wgsl */ `
+export const MATCH_WGSL = /* wgsl */ `
 ${COMMON}
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> reduced: array<u32>;
@@ -210,7 +207,9 @@ var<workgroup> wSameFlag: u32;
 var<workgroup> wFlags: u32;
 var<workgroup> wMaskS: vec2<u32>;
 var<workgroup> wMean: u32;
-var<workgroup> wScores: array<u32, ${maxGlyphs}>;
+// Each lane's own top-8 keys, merged by lane 0. Fixed size: workgroup memory no longer grows
+// with the glyph count, so the charset is bounded only by the 16-bit glyph id.
+var<workgroup> wLaneTop: array<u32, 512>;
 var<workgroup> wCand: array<u32, 8>;
 var<workgroup> wCandCount: u32;
 var<workgroup> wKey: atomic<u32>;
@@ -321,22 +320,43 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k
     s = vec2<u32>(~m.x, ~m.y);
   }
 
-  // Prefilter (§9): Hamming scores for all glyphs.
+  // Prefilter (§9): Hamming scores for all glyphs, as (score, id) keys. Keys are unique, so the
+  // 8 smallest overall are each among the 8 smallest of the lane that scored them: every lane
+  // keeps its own top 8, and lane 0 takes the top 8 of those 512. Same set, same order, as one
+  // pass over every glyph, without a per-glyph array.
+  var laneTop: array<u32, 8>;
+  var laneCount = 0u;
   for (var g = k; g < P.glyphCount; g += 64u) {
     let gm = masks[g];
     var d = countOneBits(s.x ^ gm.x) + countOneBits(s.y ^ gm.y);
     if (P.colorMode == 2u) {
       d = min(d, 64u - d);
     }
-    wScores[g] = d;
+    let key = (d << 16u) | g;
+    if (laneCount < 8u || key < laneTop[7u]) {
+      var pos = min(laneCount, 7u);
+      while (pos > 0u && laneTop[pos - 1u] > key) {
+        laneTop[pos] = laneTop[pos - 1u];
+        pos -= 1u;
+      }
+      laneTop[pos] = key;
+      laneCount = min(laneCount + 1u, 8u);
+    }
+  }
+  for (var j = 0u; j < 8u; j++) {
+    // Unfilled slots sort after every real key (whose id is below 0xffff).
+    wLaneTop[k * 8u + j] = select(0xffffffffu, laneTop[j], j < laneCount);
   }
   workgroupBarrier();
 
-  // Top-8 = the 8 smallest (score, id) keys, selected in id order (§9).
+  // Top-8 = the 8 smallest (score, id) keys (§9).
   if (k == 0u) {
     var count = 0u;
-    for (var g = 0u; g < P.glyphCount; g++) {
-      let key = (wScores[g] << 16u) | g;
+    for (var i = 0u; i < 512u; i++) {
+      let key = wLaneTop[i];
+      if (key == 0xffffffffu) {
+        continue;
+      }
       if (count < 8u) {
         var pos = count;
         while (pos > 0u && wCand[pos - 1u] > key) {
@@ -556,6 +576,148 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `
 
+// palette-v1 (ALGORITHM.md §22) over the cells buffer, into a second buffer the
+// composite reads instead. Integer throughout, the same steps as core's
+// quantizeColor, so captureFrame() can read this back as the exported frame.
+export const QUANTIZE_WGSL = /* wgsl */ `
+struct QParams {
+  cols: u32,
+  rows: u32,
+  size: u32,           // Bayer side: 1 (no dither), 2, 4, 8
+  count: u32,          // palette entries
+  colorMode: u32,      // 0 mono, 1 foreground, 2 full, 3 glyph
+  _p0: u32,
+  _p1: u32,
+  _p2: u32,
+  offsets: array<vec4<i32>, 16>,   // size² threshold offsets, row-major
+  colors: array<vec4<u32>, 64>,    // packed 0xBBGGRR
+}
+
+@group(0) @binding(0) var<uniform> Q: QParams;
+@group(0) @binding(1) var<storage, read> cells: array<vec4<u32>>;
+@group(0) @binding(2) var<storage, read_write> qcells: array<vec4<u32>>;
+
+fn snap(c: u32, off: i32) -> u32 {
+  let r = clamp(i32(c & 0xffu) + off, 0, 255);
+  let g = clamp(i32((c >> 8u) & 0xffu) + off, 0, 255);
+  let b = clamp(i32((c >> 16u) & 0xffu) + off, 0, 255);
+  var best = 0u;
+  var bestErr = 0xffffffffu;
+  for (var i = 0u; i < Q.count; i = i + 1u) {
+    let p = Q.colors[i / 4u][i % 4u];
+    let dr = r - i32(p & 0xffu);
+    let dg = g - i32((p >> 8u) & 0xffu);
+    let db = b - i32((p >> 16u) & 0xffu);
+    let err = u32(dr * dr + dg * dg + db * db);
+    if (err < bestErr) {
+      bestErr = err;
+      best = p;
+    }
+  }
+  return best & 0xffffffu;
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ci = gid.x;
+  if (ci >= Q.cols * Q.rows) {
+    return;
+  }
+  let cell = cells[ci];
+  // Transparent cells carry no colour, and mono/glyph have no per-cell colour to snap.
+  if (((cell.x >> 16u) & 2u) != 0u || Q.colorMode == 0u || Q.colorMode == 3u) {
+    qcells[ci] = cell;
+    return;
+  }
+  let cx = ci % Q.cols;
+  let cy = ci / Q.cols;
+  let k = (cy % Q.size) * Q.size + (cx % Q.size);
+  let off = Q.offsets[k / 4u][k % 4u];
+  var out = cell;
+  out.y = snap(cell.y, off);
+  if (Q.colorMode == 2u) {
+    out.z = snap(cell.z, off);
+  }
+  qcells[ci] = out;
+}
+`
+
+// Bloom field (glow.ts is the CPU backend's copy): what each cell emits, from
+// its glyph's coverage and its colours, blurred over 7×7 cells into a texture
+// the composite samples bilinearly. One invocation per cell, so the cost is in
+// cells, not in canvas pixels.
+export const GLOW_WGSL = /* wgsl */ `
+struct GParams {
+  cols: u32,
+  rows: u32,
+  colorMode: u32,      // 0 mono, 1 foreground, 2 full, 3 glyph (emits nothing)
+  groundGlows: u32,    // 1 when the cell's background plane is drawn and can glow
+  _p0: u32,
+  _p1: u32,
+  _p2: u32,
+  _p3: u32,
+}
+
+@group(0) @binding(0) var<uniform> G: GParams;
+@group(0) @binding(1) var<storage, read> cells: array<vec4<u32>>;
+@group(0) @binding(2) var<storage, read> coverage: array<u32>;
+@group(0) @binding(3) var glowOut: texture_storage_2d<rgba16float, write>;
+
+const SIGMA: f32 = 1.5;
+const RADIUS: i32 = 3;
+
+fn unpack3(c: u32) -> vec3<f32> {
+  return vec3<f32>(f32(c & 0xffu), f32((c >> 8u) & 0xffu), f32((c >> 16u) & 0xffu)) / 255.0;
+}
+
+fn bright(c: vec3<f32>) -> f32 {
+  return smoothstep(0.35, 0.9, dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)));
+}
+
+fn emit(ci: u32) -> vec3<f32> {
+  let cell = cells[ci];
+  if (((cell.x >> 16u) & 2u) != 0u || G.colorMode == 3u) {
+    return vec3<f32>(0.0);
+  }
+  let cov = f32(coverage[cell.x & 0xffffu]) / 65535.0;
+  let fg = unpack3(cell.y);
+  var e = fg * (bright(fg) * cov);
+  if (G.groundGlows == 1u) {
+    let bg = unpack3(cell.z);
+    e = e + bg * (bright(bg) * (1.0 - cov));
+  }
+  return e;
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= G.cols || gid.y >= G.rows) {
+    return;
+  }
+  var norm = 0.0;
+  for (var k = -RADIUS; k <= RADIUS; k = k + 1) {
+    norm = norm + exp(-f32(k * k) / (2.0 * SIGMA * SIGMA));
+  }
+  var acc = vec3<f32>(0.0);
+  for (var dy = -RADIUS; dy <= RADIUS; dy = dy + 1) {
+    let y = i32(gid.y) + dy;
+    if (y < 0 || y >= i32(G.rows)) {
+      continue;
+    }
+    let wy = exp(-f32(dy * dy) / (2.0 * SIGMA * SIGMA)) / norm;
+    for (var dx = -RADIUS; dx <= RADIUS; dx = dx + 1) {
+      let x = i32(gid.x) + dx;
+      if (x < 0 || x >= i32(G.cols)) {
+        continue;
+      }
+      let wx = exp(-f32(dx * dx) / (2.0 * SIGMA * SIGMA)) / norm;
+      acc = acc + emit(u32(y) * G.cols + u32(x)) * (wx * wy);
+    }
+  }
+  textureStore(glowOut, vec2<i32>(i32(gid.x), i32(gid.y)), vec4<f32>(acc, 1.0));
+}
+`
+
 export const COMPOSITE_WGSL = /* wgsl */ `
 struct CompParams {
   cols: u32,
@@ -579,6 +741,15 @@ struct CompParams {
   lod: f32,
   _pad1: f32,
   clearColor: vec4<f32>,
+  // Post stage (PostOptions): screen-space, after the glyph composite. 0 = off.
+  canvasW: f32,
+  canvasH: f32,
+  scanlines: f32,
+  vignette: f32,
+  curvature: f32,
+  grain: f32,
+  aberration: f32,
+  bloom: f32,
 }
 
 // Interaction stage (spec §9): strictly downstream of matching. Pointer and
@@ -602,6 +773,7 @@ struct FxParams {
 }
 
 @group(0) @binding(0) var<uniform> C: CompParams;
+// The matcher's cells, or their palette-snapped copy when a palette is set.
 @group(0) @binding(1) var<storage, read> cells: array<vec4<u32>>;
 @group(0) @binding(2) var atlas: texture_2d<f32>;
 // Always bound; a 1x1 placeholder for non-chromatic profiles, since a bind
@@ -613,6 +785,8 @@ struct FxParams {
 // Always bound; a one-element placeholder when no field was computed, since a
 // bind group layout cannot vary per draw.
 @group(0) @binding(7) var<storage, read> motion: array<u32>;
+// Bloom field, one texel per cell (GLOW_WGSL); a 1x1 placeholder without bloom.
+@group(0) @binding(8) var glowTex: texture_2d<f32>;
 
 struct VSOut {
   @builtin(position) pos: vec4<f32>,
@@ -654,9 +828,10 @@ fn falloff(px: vec2<f32>) -> f32 {
   return 1.0 - smoothstep(max(FX.radiusPx - FX.featherPx, 0.0), FX.radiusPx + FX.featherPx, d);
 }
 
-@fragment
-fn fs(in: VSOut) -> @location(0) vec4<f32> {
-  var pxe = in.pos.xy;
+// The glyph composite at one canvas position, interactions included. The post
+// stage below calls it more than once per pixel for chromatic aberration.
+fn shade(pos: vec2<f32>) -> vec4<f32> {
+  var pxe = pos;
 
   // Coordinate-space effects: warp the sampling position before grid mapping.
   if (FX.kind == 2u) { // displace
@@ -695,11 +870,11 @@ fn fs(in: VSOut) -> @location(0) vec4<f32> {
 
   // Glyph-local effects.
   if (FX.kind == 6u) { // glyph-scale (grow near pointer)
-    let f = falloff(in.pos.xy);
+    let f = falloff(pos);
     let s = max(1.0 - 0.75 * FX.intensity * f, 0.25);
     local = vec2<f32>(0.5) + (local - vec2<f32>(0.5)) * s;
   } else if (FX.kind == 7u) { // glyph-rotate
-    let f = falloff(in.pos.xy);
+    let f = falloff(pos);
     let ang = FX.intensity * f * 3.14159265;
     let c = cos(ang);
     let sn = sin(ang);
@@ -754,14 +929,77 @@ fn fs(in: VSOut) -> @location(0) vec4<f32> {
     let srcC = textureSampleLevel(srcTex, samp, uvSrc, 0.0);
     var m = clamp(FX.intensity, 0.0, 1.0);
     if (FX.kind == 1u) {
-      m = falloff(in.pos.xy) * m;
+      m = falloff(pos) * m;
     }
     outColor = vec4<f32>(mix(outColor.rgb, srcC.rgb, m), max(outColor.a, m));
   } else if (FX.kind == 5u) { // color shift
-    let f = clamp(falloff(in.pos.xy) * FX.intensity, 0.0, 1.0);
+    let f = clamp(falloff(pos) * FX.intensity, 0.0, 1.0);
     outColor = vec4<f32>(mix(outColor.rgb, outColor.brg, f * 0.8), outColor.a);
   }
   return outColor;
+}
+
+// Per-pixel noise in 0..1, re-seeded by the frame clock so grain moves with the loop.
+fn grainAt(p: vec2<f32>) -> f32 {
+  var h = u32(i32(p.x)) * 1664525u + u32(i32(p.y)) * 1013904223u + u32(FX.time * 60.0) * 2654435761u;
+  h = (h ^ (h >> 16u)) * 0x7feb352du;
+  h = (h ^ (h >> 15u)) * 0x846ca68bu;
+  h = h ^ (h >> 16u);
+  return f32(h) / 4294967295.0;
+}
+
+@fragment
+fn fs(in: VSOut) -> @location(0) vec4<f32> {
+  let canvas = vec2<f32>(C.canvasW, C.canvasH);
+  var pos = in.pos.xy;
+
+  // Post stage. Everything below is screen-space and output stays premultiplied.
+  if (C.curvature > 0.0) {
+    var q = pos / canvas * 2.0 - 1.0;
+    q = q * (1.0 + C.curvature * 0.12 * dot(q, q));
+    if (abs(q.x) > 1.0 || abs(q.y) > 1.0) {
+      return vec4<f32>(0.0, 0.0, 0.0, C.clearColor.a);
+    }
+    pos = (q + 1.0) * 0.5 * canvas;
+  }
+
+  var col: vec4<f32>;
+  if (C.aberration > 0.0) {
+    let center = canvas * 0.5;
+    let off = (pos - center) / max(center.x, center.y) * (C.aberration * C.cellScreenW);
+    let cr = shade(pos + off);
+    let cg = shade(pos);
+    let cb = shade(pos - off);
+    // Each channel is at most its own alpha, so the max keeps the output premultiplied.
+    col = vec4<f32>(cr.r, cg.g, cb.b, max(max(cr.a, cg.a), cb.a));
+  } else {
+    col = shade(pos);
+  }
+
+  if (C.bloom > 0.0) {
+    let grid = vec2<f32>(f32(C.cols), f32(C.rows));
+    let cellPos = (pos - vec2<f32>(C.originX, C.originY)) / vec2<f32>(C.cellScreenW, C.cellScreenH);
+    // Fade with distance past the grid's edge rather than smearing the edge texels across
+    // the letterbox, which clamp-to-edge alone would do.
+    let outside = length(cellPos - clamp(cellPos, vec2<f32>(0.0), grid));
+    let g = textureSampleLevel(glowTex, samp, cellPos / grid, 0.0).rgb *
+      (C.bloom * 1.5 * exp(-outside * outside / 4.5));
+    col = vec4<f32>(col.rgb + g, max(col.a, min(max(max(g.r, g.g), g.b), 1.0)));
+  }
+  if (C.scanlines > 0.0) {
+    let period = max(C.cellScreenH * 0.25, 2.0);
+    let s = 0.5 - 0.5 * cos(pos.y / period * 6.28318531);
+    col = vec4<f32>(col.rgb * (1.0 - C.scanlines * 0.6 * s), col.a);
+  }
+  if (C.vignette > 0.0) {
+    let q = in.pos.xy / canvas * 2.0 - 1.0;
+    col = vec4<f32>(col.rgb * (1.0 - C.vignette * smoothstep(0.6, 1.6, length(q))), col.a);
+  }
+  if (C.grain > 0.0) {
+    let n = grainAt(in.pos.xy) - 0.5;
+    col = vec4<f32>(clamp(col.rgb + vec3<f32>(n * C.grain * 0.25), vec3<f32>(0.0), vec3<f32>(col.a)), col.a);
+  }
+  return col;
 }
 `
 

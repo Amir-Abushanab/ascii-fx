@@ -11,7 +11,7 @@ const USAGE = `ascii-fx — ASCII FX build-time compiler
 
 Usage:
   ascii-fx profile build --font <file> --out <file.asciip> [--charset ascii] [--characters "<chars>"] [--id default]
-                         [--shape6] [--shape6-lut]
+                         [--face <postscript-name|index>] [--shape6] [--shape6-lut]
   ascii-fx frame build --image <file.png> --profile <file.asciip> --out <file.asciif>
                        [--columns N] [--rows N] [--color mono|foreground|full] [--alpha mask|ignore]
   ascii-fx inspect <file.asciip | file.asciif>
@@ -35,8 +35,10 @@ async function main(): Promise<void> {
     const outPath = requireStr(args, 'out')
     const font = new Uint8Array(await readFile(fontPath))
     const characters = str(args, 'characters')
+    const face = str(args, 'face')
     const { profile, binary } = buildProfile({
       font,
+      face: face !== undefined && /^\d+$/.test(face) ? Number(face) : face,
       id: str(args, 'id') ?? 'default',
       charset: str(args, 'charset'),
       characters,
