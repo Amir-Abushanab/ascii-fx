@@ -19,6 +19,13 @@ export type {
 export { FLAG_FLAT, FLAG_TRANSPARENT } from './types.js'
 
 export { AsciiFrame, type AsciiFrameInit } from './frame.js'
+export {
+  frameToAnsi,
+  frameToHTML,
+  frameToSVG,
+  frameToText,
+  type SvgExportOptions,
+} from './exports.js'
 export { ALGORITHM_VERSION, blankGlyphId, matchBand, matchFrame } from './match.js'
 export type { BandReuse, StructuralCells } from './match.js'
 export { CHROMATIC_VERSION, matchFrameChromatic } from './chromatic.js'
@@ -37,8 +44,19 @@ export { subsetProfile } from './subsetProfile.js'
 export { compositeFrame, type CompositeOptions } from './composite.js'
 
 export { BUILTIN_CHARSETS, resolveCharset, type ResolvedCharset } from './charsets.js'
+export { glyphOffset, joiningSide, kashidaText, shapingText } from './joining.js'
 export { luma8, packRGBA, rgbHex, unpackA, unpackB, unpackG, unpackR } from './color.js'
 export { createMotionState, isqrt, motionField } from './motion.js'
+export {
+  MAX_PALETTE_COLORS,
+  PALETTE_VERSION,
+  quantizeColor,
+  quantizeFrame,
+  resolvePalette,
+  type DitherKind,
+  type PaletteOptions,
+  type ResolvedPalette,
+} from './palette.js'
 export type { MotionField, MotionState } from './motion.js'
 export { fdiv, idiv, nextPow2, popcount32, rdiv, bytesToHex, hexToBytes } from './util.js'
 

@@ -11,7 +11,7 @@ description: >
 metadata:
   type: core
   library: '@ascii-fx/core'
-  library_version: '0.8.0'
+  library_version: '0.9.0'
 sources:
   - 'ascii-fx:README.md'
   - 'ascii-fx:ALGORITHM.md'
@@ -34,7 +34,7 @@ on a 2023 laptop the same frame time.
 - An ASCII-art hero, background, avatar, or live video/webcam filter.
 - ASCII that reads as _drawing_ rather than a halftone dither — this is the shape-aware kind.
 - An **emoji mosaic** or emoji video (see "Emoji mode" — a separate matcher, not a charset swap).
-- Turning an image into text for a terminal, a `<pre>`, or a copy-paste (`toText`/`toAnsi`/`toHTML`).
+- Turning an image into text for a terminal, a `<pre>`, or a copy-paste (`frameToText`/`frameToAnsi`/`frameToHTML`/`frameToSVG`).
 
 ## Install
 
@@ -96,9 +96,9 @@ ascii.start() // rVFC for video, rAF otherwise
 **No canvas at all**
 
 ```ts
-import { matchFrame } from '@ascii-fx/core'
+import { frameToText, matchFrame } from '@ascii-fx/core'
 const frame = matchFrame(rawImage, { profile, columns: 120, color: 'mono' })
-frame.toText() // also toAnsi() and toHTML()
+frameToText(frame) // also frameToAnsi, frameToHTML, frameToSVG — standalone, not methods
 ```
 
 ## Profiles — the glyph set
@@ -118,12 +118,15 @@ import { createAsciiProfile } from '@ascii-fx/core'
 const profile = await createAsciiProfile({ fontFamily: 'monospace', charset: 'ascii-blocks' })
 ```
 
-Built-in charsets: `ascii` (95 printable) and `ascii-blocks` (adds ▀▄█▌▐░▒▓ and quadrants). Pass
-`characters` for a custom set. **Narrow an existing profile with `subsetProfile(profile, chars)`** —
+Built-in charsets: `ascii` (95 printable), `ascii-blocks` (adds ▀▄█▌▐░▒▓ and quadrants), `blocks`
+(the Block Elements range alone, a mosaic look), `braille` (all 256 patterns), `arabic` (isolated
+letterforms) and `arabic-joined` (every positional form, drawn so joins meet across cells). Pass
+`characters` for a custom set: a string splits into grapheme clusters, an array is taken whole. **Narrow an existing profile with `subsetProfile(profile, chars)`** —
 compiled profiles can only narrow; runtime profiles can rasterise anything the browser font draws.
 
-The font must be monospace. Braille (`⠏⣠⣿`) is a classic trick: each glyph is a 2×4 dot grid, which
-hands the matcher 256 distinct shapes.
+Any font works: the cell is the widest glyph's and the rest are centred. Multi-code-point glyphs
+(conjuncts, marks) are shaped by the font. A `.ttc` collection needs `face` (PostScript name or
+index). The GPU takes as many glyphs as fit one atlas texture (~4,000 kanji); past that, CPU.
 
 ## Options that matter
 
@@ -140,10 +143,12 @@ hands the matcher 256 distinct shapes.
 | `temporal`           | Skip re-matching cells whose pixels did not change. Exact, great for video. WebGPU and the CPU worker pool; the CPU inline path always matches in full.                                             |
 | `adaptiveResolution` | Lower `columns` under frame pressure and recover. **WebGPU only** — so two backends can land on different grids.                                                                                    |
 | `jitter`             | `0` (default, off) to `255`. Vary a cell's glyph among the candidates that reconstruct it nearly as well, so near-ties stop banding. `@ascii-fx/core` only, no GPU backend.                         |
+| `palette`            | `{ colors, dither?, spread? }`: snap fitted colours to a palette (≤256) through an optional Bayer dither. `foreground`/`full` only. Never rematches; `captureFrame()` includes it.                  |
+| `post`               | `{ scanlines, vignette, curvature, aberration, grain, bloom }` strengths, 0 = off. Screen-space, never in a captured frame. Canvas2D draws only scanlines, vignette and bloom.                      |
 | `interaction`        | Pointer/time effects composited on top (`reveal`, `displace`, `wave`, `push`…). Never re-runs matching. `source: 'motion'` drives them from where the source is moving instead of from the pointer. |
 | `tilt`               | React only: drive the pointer from the device's orientation sensor, so `interaction` works on a phone. `true`, or `{ range, smoothing, invertX, invertY }`.                                         |
 
-`matcher: 'shape6' | 'ramp'` are cheaper, visibly approximate matchers. They are explicit opt-ins,
+`matchFrameShape6` and `matchFrameRamp` are cheaper, visibly approximate matchers. They are explicit opt-ins,
 never automatic fallbacks — `auto` backend selection never silently degrades quality.
 
 ### Tilt: the pointer a phone doesn't have
@@ -239,7 +244,7 @@ exact. An emoji's colour is baked, so there is nothing to fit:
 import { buildChromaticProfile } from '@ascii-fx/compiler' // Node, from decoded PNGs
 const { binary } = buildChromaticProfile({ glyphs: [{ char: '🌊', image } /* … */] })
 
-const frame = matchFrame(source, { profile, matcher: 'chromatic', background: [11, 11, 15] })
+const frame = matchFrameChromatic(source, { profile, background: [11, 11, 15] })
 frame.colorMode // 'glyph' — no colour planes, the colour is in the glyph
 ```
 
@@ -311,7 +316,7 @@ as scene geometry instead of as a post-pass.
   and produce visibly different output. The matchers themselves are bit-identical — held to that by
   a conformance suite — so if two backends disagree, compare the grid first.
 - **Frames reference profiles by fingerprint.** A frame can never decode against the wrong font.
-- Emoji are double-width in terminals; `toText()`/`toAnsi()` on a chromatic frame will not align in
+- Emoji are double-width in terminals; `frameToText`/`frameToAnsi` on a chromatic frame will not align in
   a terminal grid. Canvas/GPU output is the reliable path there.
 - The compiler is build-time only and must never reach browser runtime packages.
 

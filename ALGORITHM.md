@@ -8,6 +8,7 @@ Versioned identifiers defined by this document:
 structural-v1   matcher semantics
 chromatic-v1    matcher semantics for glyphs whose colour is baked (§C)
 reduce-v1       source reduction
+palette-v1      palette snap and ordered dither of fitted colours (§22)
 grid-v1         grid derivation
 raster-v1       compiler rasterization
 asciip/1        profile binary format
@@ -224,7 +225,7 @@ Alpha is 255 except transparent cells (all fields 0, flags bit1 set).
 
 ## 12. Character sets
 
-Normalization is by Unicode code point (`Array.from`). Duplicate code points are an error. Space is never removed.
+A custom `characters` string is split into extended grapheme clusters (UAX #29, as `Intl.Segmenter` implements it), so a conjunct, a base letter with its marks, or an emoji with its modifier is one glyph. An array's elements are glyphs as given, unsplit: that is how to name a glyph the segmenter would split or glue differently, such as a letter with ZERO WIDTH JOINER before it, which a string would attach to the preceding glyph. Duplicate glyphs are an error. Space is never removed. Built-in sets are listed below in full, one code point per glyph.
 
 ```text
 'ascii'         U+0020 .. U+007E in code-point order (95 glyphs)
@@ -234,7 +235,20 @@ Normalization is by Unicode code point (`Array.from`). Duplicate code points are
                 U+2596 ▖  U+2597 ▗  U+2598 ▘  U+2599 ▙  U+259A ▚
                 U+259B ▛  U+259C ▜  U+259D ▝  U+259E ▞  U+259F ▟
                 (113 glyphs)
+'blocks'        U+0020, then U+2580 .. U+259F in code-point order (33 glyphs)
+'braille'       U+2800 .. U+28FF in code-point order (256 glyphs, no U+0020;
+                U+2800 is the empty pattern and is §6's blank glyph by coverage)
+'arabic'        U+0020, then the 40 isolated forms of Arabic Presentation Forms-B, in
+                code-point order: FE80 FE81 FE83 FE85 FE87 FE89 FE8D FE8F FE93 FE95 FE99
+                FE9D FEA1 FEA5 FEA9 FEAB FEAD FEAF FEB1 FEB5 FEB9 FEBD FEC1 FEC5 FEC9 FECD
+                FED1 FED5 FED9 FEDD FEE1 FEE5 FEE9 FEED FEEF FEF1 FEF5 FEF7 FEF9 FEFB
+                (41 glyphs)
+'arabic-joined' U+0020, U+0640 (tatweel), then U+FE80 .. U+FEFC: every isolated, final,
+                initial and medial form (127 glyphs). Joining forms are drawn with
+                kashida so their strokes meet across cells (§13).
 ```
+
+Presentation forms rather than base letters: a text viewer shows a presentation form as written, where it would re-shape a base letter against its neighbours and change it from what was drawn. A font that leaves the block unmapped still compiles them, by shaping (§13).
 
 The compiler errors on any charset entry the font has no glyph for — never silent tofu.
 
@@ -249,16 +263,26 @@ Deterministic in-house scanline rasterizer over font outline data. System raster
 ```text
 unitsCell = ascent − descent              (hhea; descent is negative; lineGap ignored in v1)
 cellH     = REF_GLYPH_HEIGHT = 64
-cellW     = rdiv(advance · 64, unitsCell)     advance of U+0020; font must be monospace (equal advances) or the build errors
+advance   = max over the charset of the glyph's advance width
+cellW     = rdiv(advance · 64, unitsCell)
+shift[g]  = 0                                  g joins on its left  (see below)
+            advance − advance[g]               g joins on its right
+            floor((advance − advance[g]) / 2)  otherwise: centred
 baseline  = rdiv(ascent · 64, unitsCell)      px from cell top (informational)
 ```
+
+For a monospace charset every `shift` is 0, which is the whole of raster-v1 as it stood before proportional fonts were accepted: those profiles are byte-identical. A proportional charset (Arabic in any font, or half- and full-width glyphs together) gets the widest glyph's cell, with the rest centred in it — except joining forms, which sit flush with the edge they connect at so that adjacent cells meet. A glyph joins on its right if it is a final form in Arabic Presentation Forms-B, or a right-to-left glyph string beginning with ZERO WIDTH JOINER; on its left if it is an initial form, or ends with ZWJ. Medial forms (both sides) and tatweel are centred. `joiningSide` in `@ascii-fx/core` is the reference.
+
+### Glyph outlines
+
+A glyph that is one code point the font maps is that glyph's outline, at its advance. Anything else is shaped with the font's OpenType rules (fontkit `layout`) and the run merged into one outline, each glyph translated to its shaped position and the advance summed: a grapheme of several code points, or an Arabic presentation form the font leaves unmapped, which is shaped from its base letter with ZWJ on its joining side(s). A `.notdef` in the run is a missing glyph unless it stands for a default-ignorable code point (a joiner, a variation selector), which draws nothing either way. Shaped outlines are deterministic for a given font and compiler version.
 
 ### Coordinate mapping (26.6 fixed point, y-down)
 
 ```text
 toFx(v)     = rdiv(v · 64 · 64, unitsCell)        font units → 26.6 px
 baselineFx  = rdiv(ascent · 64 · 64, unitsCell)
-px = toFx(X)          py = baselineFx − toFx(Y)
+px = toFx(X + shift[g])          py = baselineFx − toFx(Y)
 ```
 
 ### Outline flattening
@@ -408,7 +432,7 @@ An implementation conforms iff, for identical `(profile bytes, source samples, o
 
 ## 18. shape6-v1 (approximate matcher, explicit opt-in)
 
-Harri-inspired 6D directional descriptor (spec §5). **Never a silent fallback** — selected only via `matcher: 'shape6'`, and quality versus exact is reported per spec §36 in `apps/benchmarks/RESULTS.md`.
+Harri-inspired 6D directional descriptor (spec §5). **Never a silent fallback** — selected only by calling `matchFrameShape6`, and quality versus exact is reported per spec §36 in `apps/benchmarks/RESULTS.md`.
 
 ### Source descriptor (integer)
 
@@ -447,7 +471,7 @@ Runtime uses `lut3` when present, else brute-force 6D. `lut3TopK` remains reserv
 
 ### 19. ramp-v1 (lowest-cost effect matcher)
 
-`matcher: 'ramp'`: every non-transparent cell uses the flat-path coverage mapping (§6) on its mean luma — no structure at all. Colors are fitted from the winning glyph's mask partition exactly as §10 (same rule as shape6). Branded as an effect, not as quality (spec §5).
+`matchFrameRamp`: every non-transparent cell uses the flat-path coverage mapping (§6) on its mean luma — no structure at all. Colors are fitted from the winning glyph's mask partition exactly as §10 (same rule as shape6). Branded as an effect, not as quality (spec §5).
 
 ## 20. jitter-v1 (effect, explicit opt-in)
 
@@ -551,11 +575,56 @@ while (r² > n)     r--
 
 Both implementations run the correction, which is what lets them agree.
 
+## 22. palette-v1 (colour snap, explicit opt-in)
+
+Maps each cell's fitted colours onto a fixed palette, optionally through an ordered dither. It reads the matcher's output (§11) and never feeds back into it: glyph ids and flags pass through unchanged, so structural-v1 and §17 conformance are unaffected, and a renderer can change the palette without rematching. Integer throughout (§0).
+
+### Inputs
+
+```text
+colors   1..256 entries, each (r, g, b) in 0..255           P[0..m−1]
+dither   'none' | 'bayer2' | 'bayer4' | 'bayer8'            n = 1, 2, 4, 8
+spread   default 64                                         S = clamp(round(spread), 0, 255)
+```
+
+### Threshold offsets
+
+The Bayer index matrix `B_n` (row-major, values `0..n²−1`) is defined recursively from `B_1 = [0]`:
+
+```text
+B_2k = | 4·B_k      4·B_k + 2 |
+       | 4·B_k + 3  4·B_k + 1 |
+```
+
+so `B_2 = [[0, 2], [3, 1]]`. Per matrix position:
+
+```text
+offset[i] = floor((2·B_n[i] + 1) · S / (2n²)) − floor(S / 2)        n > 1
+offset[0] = 0                                                       n = 1 ('none')
+```
+
+The offsets span roughly `−S/2 .. +S/2` and average to about zero, so the dither moves colours across a palette boundary without shifting the image's overall tone.
+
+### Per cell
+
+For the cell at column `cx`, row `cy`, and each colour plane the frame carries (`foreground` for `color: 'foreground'`; `foreground` and `background` for `'full'`):
+
+```text
+o  = offset[(cy mod n) · n + (cx mod n)]
+r' = clamp(r + o, 0, 255),  g' = clamp(g + o, 0, 255),  b' = clamp(b + o, 0, 255)
+k  = argmin over i of (r' − P[i].r)² + (g' − P[i].g)² + (b' − P[i].b)²      ties → lowest i
+c  = P[k], alpha byte carried through from the input
+```
+
+Both planes of a cell use the same `o`. Cells flagged transparent (§11) keep their colour words unchanged, and `mono` and `glyph` frames have no per-cell colour and pass through whole. `cx` and `cy` are frame-global, so a band matched on its own snaps exactly as it would inside a whole-frame match.
+
+Ordered dither is the only kind defined. Error diffusion (Floyd–Steinberg and kin) carries each cell's error into cells not yet visited, in scan order, which a GPU pass cannot do in parallel and still agree with the CPU bit for bit.
+
 ---
 
 ## C. chromatic-v1
 
-`matcher: 'chromatic'`. A **separate algorithm**, not an approximation of structural-v1. It exists for glyph sets whose colour is part of the glyph — colour emoji — where structural-v1's central move is unavailable.
+`matchFrameChromatic`, or `matcher: 'chromatic'` on a renderer. A **separate algorithm**, not an approximation of structural-v1. It exists for glyph sets whose colour is part of the glyph — colour emoji — where structural-v1's central move is unavailable.
 
 structural-v1 matches a 1-bit mask and _fits_ colour to it, which is exactly why its rerank is exact: with foreground and background free, the best colours for a given mask are the means of the two sample sets. A colour glyph's colour is baked, so there is nothing to fit, and the objective collapses to direct squared error against the glyph's own samples.
 

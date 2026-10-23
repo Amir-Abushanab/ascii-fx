@@ -419,11 +419,10 @@ interface AsciiFrame {
 Methods:
 
 ```ts
-frame.toText()
-frame.toAnsi()
-frame.toHTML()
 frame.getCell(x, y)
 ```
+
+Exports are standalone functions (§33), not methods, so each one tree-shakes on its own.
 
 No giant nested object grid internally.
 
@@ -1805,10 +1804,13 @@ Do not use enormous hidden ASCII DOM for screen readers.
 Core:
 
 ```ts
-frame.toText()
-frame.toAnsi()
-frame.toHTML()
+frameToText(frame)
+frameToAnsi(frame)
+frameToHTML(frame)
+frameToSVG(frame)
 ```
+
+Functions rather than `AsciiFrame` methods: a bundler drops an unused export but never an unused method, so methods would put every format in every bundle that matches anything.
 
 Renderer:
 
@@ -2225,6 +2227,10 @@ Built-ins:
 ```ts
 'ascii'
 'ascii-blocks'
+'blocks'
+'braille'
+'arabic'
+'arabic-joined'
 ```
 
 `'ascii'` is exactly U+0020–U+007E — 95 glyphs including space. Built-in charset definitions are frozen: the charset hash feeds profile fingerprints.

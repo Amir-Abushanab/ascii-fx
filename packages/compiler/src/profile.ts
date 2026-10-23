@@ -3,12 +3,17 @@ import { readFileSync } from 'node:fs'
 import type { AsciiProfile, Shape6GlyphData } from '@ascii-fx/core'
 import {
   encodeProfile,
+  glyphOffset,
   idiv,
+  joiningSide,
+  kashidaText,
+  shapingText,
   nextPow2,
   rdiv,
   resolveCharset,
   shape6BucketCenter,
 } from '@ascii-fx/core'
+import type { Font, FontPathCommand } from 'fontkit'
 import { loadFont } from './font.js'
 import {
   CUBIC_SEGMENTS,
@@ -37,8 +42,10 @@ export const REF_GLYPH_HEIGHT = 64
 export const ATLAS_PADDING = 4
 
 export interface BuildProfileOptions {
-  /** Raw font bytes (ttf/otf/woff/woff2). */
+  /** Raw font bytes (ttf/otf/woff/woff2, or a ttc/otc collection with `face`). */
   font: Uint8Array
+  /** Which face of a font collection: its PostScript name, or its index. Required for a collection. */
+  face?: string | number
   id?: string
   /** Built-in charset name; default 'ascii'. */
   charset?: string
@@ -47,7 +54,7 @@ export interface BuildProfileOptions {
   /**
    * Compile shape6-v1 data (ALGORITHM.md §18): 6D glyph vectors, and with
    * `{ lut: true }` the 512KiB dense winner LUT. Opt-in — it grows the profile
-   * and only the explicit `matcher: 'shape6'` uses it (spec §5–6).
+   * and only an explicit `matchFrameShape6` uses it (spec §5–6).
    */
   shape6?: boolean | { lut?: boolean }
 }
@@ -95,34 +102,124 @@ function glyphShape6(lumas: Float64Array, out: Float32Array, at: number): void {
   out[at + 5] = dev / 64
 }
 
+/** One glyph's outline in font units, and how far it advances. */
+interface GlyphOutline {
+  commands: FontPathCommand[]
+  advance: number
+}
+
+// ZERO WIDTH JOINER, variation selectors and the like: they steer shaping and draw nothing, so a
+// font without a glyph for one has not failed to cover it.
+const IGNORABLE = /^\p{Default_Ignorable_Code_Point}+$/u
+
+/**
+ * A glyph string's outline (ALGORITHM.md §13). One code point the font maps is its glyph, exactly
+ * as raster-v1 has always drawn it. Anything else is shaped with the font's own OpenType rules:
+ * a grapheme of several code points (a conjunct, a base and its marks), or an Arabic presentation
+ * form the font leaves unmapped, which shapes from its base letter in joining context. Null when
+ * the font cannot draw it.
+ */
+function glyphOutline(font: Font, text: string): GlyphOutline | null {
+  const cps = Array.from(text)
+  if (cps.length === 1) {
+    const cp = text.codePointAt(0)!
+    if (font.hasGlyphForCodePoint(cp)) {
+      const g = font.glyphForCodePoint(cp)
+      return { commands: g.path.commands, advance: g.advanceWidth }
+    }
+    const context = shapingText(text)
+    return context === text ? null : shapeOutline(font, context)
+  }
+  return shapeOutline(font, text)
+}
+
+const openTypeFirst = new WeakMap<Font, Font>()
+
+/**
+ * The font as fontkit should shape it. fontkit takes Apple's `morx` tables over OpenType's
+ * GSUB/GPOS whenever a font has both, and its morx engine can loop without end — Thai sara am
+ * (U+0E33) in Ayuthaya never returns. A font that carries OpenType tables is shaped with them
+ * (the standard path, and the one browsers take); `morx` is used only by a font with nothing
+ * else. The view shadows `morx` and leaves the font itself untouched.
+ */
+function shapingFont(font: Font): Font {
+  const tables = font as Font & { morx?: unknown; GSUB?: unknown; GPOS?: unknown }
+  if (!tables.morx || !(tables.GSUB || tables.GPOS)) return font
+  let view = openTypeFirst.get(font)
+  if (!view) {
+    view = Object.create(font, { morx: { value: undefined } }) as Font
+    openTypeFirst.set(font, view)
+  }
+  return view
+}
+
+/** Shape `text` and merge the run into one outline, each glyph moved to its shaped position. */
+function shapeOutline(font: Font, text: string): GlyphOutline | null {
+  const run = shapingFont(font).layout(text)
+  const commands: FontPathCommand[] = []
+  let x = 0
+  let drawn = 0
+  for (let i = 0; i < run.glyphs.length; i++) {
+    const g = run.glyphs[i]
+    const p = run.positions[i]
+    if (g.id === 0) {
+      // .notdef: a gap in the font, unless it stands for something that draws nothing anyway.
+      if (!IGNORABLE.test(String.fromCodePoint(...g.codePoints))) return null
+      continue
+    }
+    const dx = x + p.xOffset
+    const dy = p.yOffset
+    for (const c of g.path.commands) {
+      commands.push({
+        command: c.command,
+        args: c.args.map((v, j) => (j % 2 === 0 ? v + dx : v + dy)),
+      })
+    }
+    x += p.xAdvance
+    drawn++
+  }
+  return drawn === 0 ? null : { commands, advance: x }
+}
+
 /** Build a deterministic .asciip profile (ALGORITHM.md §13–14). */
 export function buildProfile(options: BuildProfileOptions): BuiltProfile {
   const { name: charsetName, glyphs } = resolveCharset(options.charset, options.characters)
-  const lf = loadFont(options.font)
+  const lf = loadFont(options.font, options.face)
 
-  const missing = glyphs.filter((g) => !lf.font.hasGlyphForCodePoint(g.codePointAt(0)!))
+  const outlines = glyphs.map((g) => glyphOutline(lf.font, g))
+  const missing = glyphs.filter((_, i) => outlines[i] === null)
   if (missing.length > 0) {
     throw new Error(
       `Font "${lf.familyName ?? 'unknown'}" has no glyph for: ${missing
         .map(
           (c) =>
-            `${JSON.stringify(c)} (U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')})`,
+            `${JSON.stringify(c)} (${Array.from(c, (ch) => `U+${ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`).join(' ')})`,
         )
         .join(', ')}. Remove them from the charset or pick a font that covers them.`,
     )
   }
+  const shapes = outlines as GlyphOutline[]
 
-  const fontGlyphs = glyphs.map((g) => lf.font.glyphForCodePoint(g.codePointAt(0)!))
-  const advance = fontGlyphs[0].advanceWidth
-  const proportional = glyphs.filter((_, i) => fontGlyphs[i].advanceWidth !== advance)
-  if (proportional.length > 0) {
-    throw new Error(
-      `Font "${lf.familyName ?? 'unknown'}" is not monospace over this charset — differing advances for: ${proportional
-        .slice(0, 8)
-        .map((c) => JSON.stringify(c))
-        .join(', ')}${proportional.length > 8 ? ', …' : ''}. v1 requires a monospace font.`,
-    )
-  }
+  // The cell is as wide as the widest glyph, and narrower ones are centred in it, or flush with
+  // the edge they join at (§13, joining.ts in core). A
+  // monospace set has every shift at 0 and compiles exactly as it always has; this is what lets
+  // a proportional script (Arabic, in any font) or a mix of half- and full-width glyphs compile.
+  let advance = 0
+  for (const g of shapes) if (g.advance > advance) advance = g.advance
+
+  // Joining forms are drawn with kashida on their joining side(s), enough to cross the cell, so
+  // their strokes meet the next cell's at the edge (ALGORITHM.md §13). Only where the font has a
+  // tatweel to draw it with; without one a joining form is just pushed to its edge.
+  const tatweel = lf.font.hasGlyphForCodePoint(0x640)
+    ? lf.font.glyphForCodePoint(0x640).advanceWidth
+    : 0
+  const kashida = tatweel > 0 ? idiv(advance + tatweel - 1, tatweel) + 1 : 0
+  const drawn = glyphs.map((g, i) => {
+    if (kashida === 0 || joiningSide(g) === null) return shapes[i]
+    const mapped = Array.from(g).length > 1 || lf.font.hasGlyphForCodePoint(g.codePointAt(0)!)
+    return shapeOutline(lf.font, kashidaText(mapped ? g : shapingText(g), kashida)) ?? shapes[i]
+  })
+  const shifts = shapes.map((g, i) => glyphOffset(glyphs[i], g.advance, advance, drawn[i].advance))
 
   const unitsCell = lf.ascent - lf.descent
   if (!(unitsCell > 0))
@@ -131,10 +228,10 @@ export function buildProfile(options: BuildProfileOptions): BuiltProfile {
   const cellW = Math.max(1, rdiv(advance * REF_GLYPH_HEIGHT, unitsCell))
   const baseline = rdiv(lf.ascent * REF_GLYPH_HEIGHT, unitsCell)
   const baselineFx = rdiv(lf.ascent * REF_GLYPH_HEIGHT * 64, unitsCell)
-  const map = {
-    x: (v: number) => rdiv(v * REF_GLYPH_HEIGHT * 64, unitsCell),
+  const mapFor = (shift: number) => ({
+    x: (v: number) => rdiv((v + shift) * REF_GLYPH_HEIGHT * 64, unitsCell),
     y: (v: number) => baselineFx - rdiv(v * REF_GLYPH_HEIGHT * 64, unitsCell),
-  }
+  })
 
   const n = glyphs.length
   const masksLo = new Uint32Array(n)
@@ -156,7 +253,7 @@ export function buildProfile(options: BuildProfileOptions): BuiltProfile {
   const cellLumas = wantShape6 ? new Float64Array(n * 64) : undefined
 
   for (let i = 0; i < n; i++) {
-    const edges = flattenCommands(fontGlyphs[i].path.commands, map)
+    const edges = flattenCommands(drawn[i].commands, mapFor(shifts[i]))
     const raster = rasterizeGlyph(edges, cellW, cellH)
     const mask = deriveMask(raster.maskHits, totals)
     masksLo[i] = mask.lo
@@ -206,7 +303,11 @@ export function buildProfile(options: BuildProfileOptions): BuiltProfile {
     shape6 = { vectors6, lut3 }
   }
 
-  const fontHash = sha256(options.font)
+  // A collection's bytes hold every face, so they identify the font only together with the face.
+  // Single fonts hash exactly as before, which keeps existing fingerprints stable.
+  const fontHash = lf.collectionFace
+    ? sha256(`${sha256(options.font)}|face:${lf.collectionFace}`)
+    : sha256(options.font)
   const charsetHash = sha256(glyphs.join('\u0000'))
   const fingerprint = sha256(
     `asciip/1|structural-v1|raster-v1|font:${fontHash}|charset:${charsetHash}` +

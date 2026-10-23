@@ -1,5 +1,5 @@
 import type { AsciiProfile, ColorMode, MatchOptions, RawImage } from '@ascii-fx/core'
-import type { MotionState } from '@ascii-fx/core'
+import type { MotionState, ResolvedPalette } from '@ascii-fx/core'
 import {
   AsciiFrame,
   compositeFrame,
@@ -7,9 +7,13 @@ import {
   deriveGrid,
   matchBand,
   matchFrame,
+  matchFrameChromatic,
   motionField,
+  quantizeFrame,
   reduceSource,
+  resolvePalette,
 } from '@ascii-fx/core'
+import { glowField } from './glow.js'
 import type { BandOptions } from './matchProtocol.js'
 import { MatchPool } from './matchPool.js'
 import type { GlFxParams, GlViewParams } from './glCompositor.js'
@@ -28,8 +32,15 @@ import {
   isLiveSource,
   isRawImage,
   outputCanBeTransparent,
+  resolvePost,
   sourceDims,
 } from './types.js'
+
+/**
+ * Options that only reach the composite. Changing nothing but these repaints the frame already
+ * matched instead of matching again, the way the WebGPU renderer leaves them out of matchChanged.
+ */
+const COMPOSITE_ONLY = new Set(['palette', 'post', 'fit', 'clearColor'])
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
@@ -103,6 +114,14 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private readonly t0 = performance.now()
   private pyr: Array<HTMLCanvasElement | OffscreenCanvas> = []
   private pyrValid = 0
+  /** palette-v1 applied to lastFrame, cached by frame and palette (see display()). */
+  private palette: ResolvedPalette | null = null
+  private paletteKey = ''
+  private displayed?: { from: AsciiFrame; key: string; frame: AsciiFrame }
+  /** Bloom field for the displayed frame, cached the same way. */
+  private glow?: { from: AsciiFrame; key: string; field: Float32Array }
+  private glowCanvas?: HTMLCanvasElement | OffscreenCanvas
+  private scanStrip?: { key: string; canvas: HTMLCanvasElement | OffscreenCanvas }
   /**
    * Matcher workers (spec §11 tier 2). Absent where Worker is, and dropped on
    * the first failure — matching then runs on the main thread, slower and
@@ -124,6 +143,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.opts = rest
     assertInteraction(interaction ?? null)
     this.interaction = interaction ?? null
+    this.syncPalette()
     if (options.compositor !== 'canvas2d') {
       this.glc = GlCompositor.tryCreate(this.canvas, this.profile)
     }
@@ -210,6 +230,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   setOptions(options: AsciiRendererRuntimeOptions): void {
     const previous = this.opts
     this.opts = { ...previous, ...options }
+    this.syncPalette()
+    if (Object.keys(options).every((k) => COMPOSITE_ONLY.has(k))) return
     // One-frame hysteresis suppression happens after an option *change*, not
     // after any call — a value-identical setOptions must keep incumbents, or
     // this backend diverges from the WebGPU key-based reset. Field list
@@ -233,6 +255,41 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       this.pending = undefined
     }
     this.matchDirty = true
+  }
+
+  private syncPalette(): void {
+    const key = this.opts.palette ? JSON.stringify(this.opts.palette) : ''
+    if (key === this.paletteKey) return
+    // Resolved up front so a malformed palette throws from setOptions, not from a later frame.
+    this.palette = this.opts.palette ? resolvePalette(this.opts.palette) : null
+    this.paletteKey = key
+  }
+
+  /**
+   * The frame as it is drawn and exported: palette-snapped when a palette is set. The matcher's
+   * own frame stays in lastFrame, so hysteresis and reuse never see snapped colours.
+   */
+  private display(frame: AsciiFrame): AsciiFrame {
+    if (!this.palette) return frame
+    const d = this.displayed
+    if (d && d.from === frame && d.key === this.paletteKey) return d.frame
+    const snapped = quantizeFrame(frame, this.palette)
+    this.displayed = { from: frame, key: this.paletteKey, frame: snapped }
+    return snapped
+  }
+
+  /** The bloom field for a displayed frame, or undefined when bloom is off. */
+  private glowFor(frame: AsciiFrame): Float32Array | undefined {
+    if (resolvePost(this.opts.post).bloom === 0 || frame.colorMode === 'glyph') return undefined
+    const transparent = outputCanBeTransparent(this.opts)
+    const fg = this.opts.foreground ?? [255, 255, 255]
+    const bg = transparent ? null : (this.opts.background ?? [0, 0, 0])
+    const key = JSON.stringify([fg, bg])
+    const g = this.glow
+    if (g && g.from === frame && g.key === key) return g.field
+    const field = glowField(frame, { foreground: fg, background: bg }, g?.field)
+    this.glow = { from: frame, key, field }
+    return field
   }
 
   /** Whether this frame needs a motion field computed for it. */
@@ -330,7 +387,6 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         : undefined
     return {
       ...base,
-      matcher: 'chromatic' as const,
       ...(previous ? { previous, hysteresis: this.opts.hysteresis } : {}),
     }
   }
@@ -379,7 +435,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
    * second derivation of it — this compositor is the WebGPU one, so its grid
    * placement and atlas LOD have to land on the same numbers.
    */
-  private presentGl(frame: AsciiFrame): void {
+  private presentGl(matched: AsciiFrame): void {
+    const frame = this.display(matched)
     const { atlas } = this.profile
     const cw = this.canvas.width
     const ch = this.canvas.height
@@ -421,6 +478,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
             : [0, 0, 0, 1]),
       foreground: this.opts.foreground ?? [255, 255, 255],
       background: bd,
+      post: resolvePost(this.opts.post),
+      glow: this.glowFor(frame),
     }
 
     const interaction = this.interaction
@@ -524,11 +583,12 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   /** Draw the composited frame to the target with fit + interaction effects. */
-  private present(frame: AsciiFrame): void {
+  private present(matched: AsciiFrame): void {
     if (this.glc && !this.glc.unavailable) {
-      this.presentGl(frame)
+      this.presentGl(matched)
       return
     }
+    const frame = this.display(matched)
     this.ensureBase(frame)
     const base0 = this.compositeCanvas!
     const ctx = this.ctx!
@@ -840,6 +900,81 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         }
       }
     }
+    this.drawPost2d(ctx, frame, dx, dy, dw, dh)
+  }
+
+  /**
+   * The post stage on Canvas2D: bloom, scanlines and vignette, drawn over the composite with the
+   * same formulas as the shader. Curvature, aberration and grain need per-pixel sampling and are
+   * left to the shader compositors.
+   */
+  private drawPost2d(
+    ctx: Ctx2D,
+    frame: AsciiFrame,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number,
+  ): void {
+    const post = resolvePost(this.opts.post)
+    const cw = this.canvas.width
+    const ch = this.canvas.height
+    const glow = this.glowFor(frame)
+    if (glow) {
+      const { columns, rows } = frame
+      if (!this.glowCanvas || this.glowCanvas.width !== columns || this.glowCanvas.height !== rows)
+        this.glowCanvas = this.mkCanvas(columns, rows)
+      const img = new ImageData(columns, rows)
+      const k = post.bloom * 1.5 * 255
+      for (let i = 0; i < columns * rows; i++) {
+        img.data[i * 4] = Math.min(255, glow[i * 4] * k)
+        img.data[i * 4 + 1] = Math.min(255, glow[i * 4 + 1] * k)
+        img.data[i * 4 + 2] = Math.min(255, glow[i * 4 + 2] * k)
+        img.data[i * 4 + 3] = 255
+      }
+      ;(this.glowCanvas.getContext('2d') as Ctx2D).putImageData(img, 0, 0)
+      ctx.save()
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.imageSmoothingEnabled = true
+      ctx.drawImage(this.glowCanvas, dx, dy, dw, dh)
+      ctx.restore()
+    }
+    // Both darken without touching alpha: source-atop paints only where something is drawn.
+    if (post.scanlines > 0) {
+      const period = Math.max(dh / frame.rows / 4, 2)
+      const key = `${ch}|${period}|${post.scanlines}`
+      if (this.scanStrip?.key !== key) {
+        const strip = this.mkCanvas(1, ch)
+        const sctx = strip.getContext('2d') as Ctx2D
+        const img = sctx.createImageData(1, ch)
+        for (let y = 0; y < ch; y++) {
+          const sv = 0.5 - 0.5 * Math.cos(((y + 0.5) / period) * Math.PI * 2)
+          img.data[y * 4 + 3] = Math.round(255 * post.scanlines * 0.6 * sv)
+        }
+        sctx.putImageData(img, 0, 0)
+        this.scanStrip = { key, canvas: strip }
+      }
+      ctx.save()
+      ctx.globalCompositeOperation = 'source-atop'
+      ctx.imageSmoothingEnabled = false
+      ctx.drawImage(this.scanStrip.canvas, 0, 0, cw, ch)
+      ctx.restore()
+    }
+    if (post.vignette > 0) {
+      // Elliptical like the shader's, which measures distance in canvas-normalized units.
+      ctx.save()
+      ctx.globalCompositeOperation = 'source-atop'
+      ctx.translate(cw / 2, ch / 2)
+      ctx.scale(cw / 2, ch / 2)
+      const grad = ctx.createRadialGradient(0, 0, 0.6, 0, 0, 1.6)
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8
+        grad.addColorStop(t, `rgba(0,0,0,${post.vignette * t * t * (3 - 2 * t)})`)
+      }
+      ctx.fillStyle = grad
+      ctx.fillRect(-1, -1, 2, 2)
+      ctx.restore()
+    }
   }
 
   render(): void {
@@ -865,7 +1000,11 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private matchInline(): AsciiFrame {
     const source = this.extract()
     const options = this.matchOptions()
-    if (!this.motionWanted || this.opts.matcher === 'chromatic') {
+    if (this.opts.matcher === 'chromatic') {
+      this.lastMotion = undefined
+      return matchFrameChromatic(source, options)
+    }
+    if (!this.motionWanted) {
       this.lastMotion = undefined
       return matchFrame(source, options)
     }
@@ -1033,6 +1172,10 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   async captureFrame(): Promise<AsciiFrame> {
+    return this.display(await this.captureMatched())
+  }
+
+  private async captureMatched(): Promise<AsciiFrame> {
     if (!this.source) throw new Error('captureFrame() requires a source — call setSource() first.')
     // A pending band job means lastFrame is one frame behind the source, and a
     // capture that returns the previous frame is wrong rather than merely late.
@@ -1074,5 +1217,9 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.compositeBuf = undefined
     this.fxLayer = undefined
     this.srcFxCanvas = undefined
+    this.displayed = undefined
+    this.glow = undefined
+    this.glowCanvas = undefined
+    this.scanStrip = undefined
   }
 }

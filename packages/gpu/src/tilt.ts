@@ -1,6 +1,6 @@
 /**
  * Device tilt as a pointer source: the phone's own orientation, normalized into the same 0..1
- * canvas coordinates `AsciiPointer.set` already takes, so every pointer interaction (`glyph-swell`,
+ * canvas coordinates `AsciiPointer.set` already takes, so every pointer interaction (`glyph-scale`,
  * `original-mix`, `resolution`, …) works on a phone, which has no cursor to give it.
  *
  * Raw `deviceorientation` is unusable for this for three reasons, and {@link TiltSource} is those

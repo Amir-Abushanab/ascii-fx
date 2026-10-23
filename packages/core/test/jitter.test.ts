@@ -5,6 +5,8 @@ import {
   FLAG_TRANSPARENT,
   matchBand,
   matchFrame,
+  matchFrameRamp,
+  matchFrameShape6,
   rdiv,
   reduceSource,
 } from '@ascii-fx/core'
@@ -100,8 +102,8 @@ describe('jitter-v1 (§20)', () => {
   })
 
   it('rejects a matcher with no rerank to vary', () => {
-    for (const matcher of ['shape6', 'ramp'] as const) {
-      expect(() => matchFrame(image, { ...grid, matcher, jitter: 20 })).toThrow(/structural-v1/)
+    for (const match of [matchFrameShape6, matchFrameRamp]) {
+      expect(() => match(image, { ...grid, jitter: 20 })).toThrow(/jitter is a structural-v1/)
     }
   })
 
@@ -112,28 +114,29 @@ describe('jitter-v1 (§20)', () => {
   })
 })
 
-describe('jitter-v1 band decomposition', () => {
-  const split = (rowOffsets: boolean): Uint16Array => {
-    const reduced = reduceSource(image, 40, 24, true)
-    const out = new Uint16Array(40 * 24)
-    const SW = 40 * 8 * 4
-    for (const [r0, r1] of [
-      [0, 7],
-      [7, 15],
-      [15, 24],
-    ]) {
-      const cells = matchBand(reduced.slice(r0 * 8 * SW, r1 * 8 * SW), 40, r1 - r0, {
-        profile,
-        color: 'full',
-        alpha: 'ignore',
-        jitter: 90,
-        rowOffset: rowOffsets ? r0 : 0,
-      })
-      out.set(cells.glyphIds, r0 * 40)
-    }
-    return out
+/** Match the image in bands, with or without each band's frame-global row offset. */
+const split = (rowOffsets: boolean): Uint16Array => {
+  const reduced = reduceSource(image, 40, 24, true)
+  const out = new Uint16Array(40 * 24)
+  const SW = 40 * 8 * 4
+  for (const [r0, r1] of [
+    [0, 7],
+    [7, 15],
+    [15, 24],
+  ]) {
+    const cells = matchBand(reduced.slice(r0 * 8 * SW, r1 * 8 * SW), 40, r1 - r0, {
+      profile,
+      color: 'full',
+      alpha: 'ignore',
+      jitter: 90,
+      rowOffset: rowOffsets ? r0 : 0,
+    })
+    out.set(cells.glyphIds, r0 * 40)
   }
+  return out
+}
 
+describe('jitter-v1 band decomposition', () => {
   it('reproduces the whole-frame match when bands carry their row offset', () => {
     expect(split(true)).toEqual(ids(image, { jitter: 90 }))
   })

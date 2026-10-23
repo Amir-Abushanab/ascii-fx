@@ -1,6 +1,6 @@
 {
   "name": "@ascii-fx/compiler",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Build-time compiler for ASCII FX: deterministic font rasterization, glyph atlases, .asciip/.asciif generation.",
   "keywords": [
     "ascii",
@@ -50,7 +50,7 @@
     "pngjs": "^7.0.0"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.5",
     "@types/pngjs": "^6.0.5",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"

@@ -104,8 +104,6 @@ export interface MatchOptions {
   profile: AsciiProfile
   columns?: number
   rows?: number
-  /** Default 'structural' — exact. 'shape6'/'ramp' are visible approximations, never fallbacks. */
-  matcher?: MatcherKind
   /** Default 'mono'. */
   color?: ColorMode
   /** Default 'mask'. */
@@ -153,7 +151,7 @@ export interface MatchOptions {
 }
 
 /**
- * Per-cell motion field (ALGORITHM.md §22). Both are 0..1 and are quantized to
+ * Per-cell motion field (ALGORITHM.md §21). Both are 0..1 and are quantized to
  * 0..255 before anything reads them — the quantization is part of the
  * definition, not a rounding detail, so that a GPU field can agree bit-for-bit.
  */

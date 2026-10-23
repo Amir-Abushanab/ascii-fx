@@ -1,6 +1,6 @@
 import type { AsciiFrame, AsciiProfile } from '@ascii-fx/core'
 import { AsciiEngine, AsciiStream } from './engine.js'
-import { MAX_GPU_GLYPHS } from './shaders.js'
+import { MAX_GPU_GLYPHS } from './limits.js'
 import type {
   AsciiPointer,
   AsciiRenderer,
@@ -530,6 +530,8 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
         height: this.canvas.height,
         fit: this.opts.fit,
         clearColor: this.opts.clearColor,
+        palette: this.opts.palette,
+        post: this.opts.post,
       })
       this.compositeDirty = false
     }
@@ -635,7 +637,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     if (!this.source) throw new Error('captureFrame() requires a source — call setSource() first.')
     if (this.deviceLost)
       throw new Error('captureFrame() failed: the GPU device was lost and could not be replaced.')
-    if (this.sourceDirty || this.matchDirty || this.pendingRect) this.render()
+    // compositeDirty too: the palette is part of the captured frame, and a palette set since the
+    // last render has not reached the stream yet.
+    if (this.sourceDirty || this.matchDirty || this.pendingRect || this.compositeDirty)
+      this.render()
     return this.stream.captureFrame()
   }
 

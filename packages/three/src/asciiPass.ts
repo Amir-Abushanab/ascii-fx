@@ -1,9 +1,15 @@
 import { RenderTarget, Vector2 } from 'three'
 import type { Camera, Object3D } from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
-import type { AsciiFrame, AsciiProfile } from '@ascii-fx/core'
-import { AsciiEngine, AsciiStream } from '@ascii-fx/gpu'
-import type { AsciiPointer, FitMode, InteractionOptions, StreamMatchOptions } from '@ascii-fx/gpu'
+import type { AsciiFrame, AsciiProfile, PaletteOptions } from '@ascii-fx/core'
+import { AsciiEngine, AsciiStream } from '@ascii-fx/gpu/webgpu'
+import type {
+  AsciiPointer,
+  FitMode,
+  InteractionOptions,
+  PostOptions,
+  StreamMatchOptions,
+} from '@ascii-fx/gpu'
 import { getCanvasContext, getDevice, getGpuTexture } from './internals.js'
 
 export interface AsciiPassOptions extends StreamMatchOptions {
@@ -15,6 +21,16 @@ export interface AsciiPassOptions extends StreamMatchOptions {
   fit?: FitMode
   clearColor?: readonly [number, number, number, number]
   interaction?: InteractionOptions | null
+  /** palette-v1 colour snap between matching and the composite; see AsciiRendererOptions. */
+  palette?: PaletteOptions | null
+  post?: PostOptions | null
+}
+
+type ViewOptions = {
+  fit: FitMode
+  clearColor: readonly [number, number, number, number]
+  palette: PaletteOptions | null
+  post: PostOptions | null
 }
 
 /**
@@ -40,6 +56,8 @@ export class AsciiPass {
   private matchOpts: StreamMatchOptions
   private fit: FitMode | undefined
   private clearColor: readonly [number, number, number, number] | undefined
+  private palette: PaletteOptions | null
+  private post: PostOptions | null
   private interaction: InteractionOptions | null
   private pointerX = 0.5
   private pointerY = 0.5
@@ -54,12 +72,25 @@ export class AsciiPass {
   private disposed = false
 
   constructor(options: AsciiPassOptions) {
-    const { profile, renderer, width, height, fit, clearColor, interaction, ...match } = options
+    const {
+      profile,
+      renderer,
+      width,
+      height,
+      fit,
+      clearColor,
+      interaction,
+      palette,
+      post,
+      ...match
+    } = options
     this.profile = profile
     this.rendererRef = renderer
     this.matchOpts = match
     this.fit = fit
     this.clearColor = clearColor
+    this.palette = palette ?? null
+    this.post = post ?? null
     this.interaction = interaction ?? null
     const size = renderer.getDrawingBufferSize(this.drawSize)
     this.renderTarget = new RenderTarget(
@@ -105,14 +136,12 @@ export class AsciiPass {
   }
 
   /** Update matcher/composite options (spec §2: `ascii.set({...})`). */
-  set(
-    options: Partial<
-      StreamMatchOptions & { fit: FitMode; clearColor: readonly [number, number, number, number] }
-    >,
-  ): void {
-    const { fit, clearColor, ...match } = options
+  set(options: Partial<StreamMatchOptions & ViewOptions>): void {
+    const { fit, clearColor, palette, post, ...match } = options
     if (fit !== undefined) this.fit = fit
     if (clearColor !== undefined) this.clearColor = clearColor
+    if (palette !== undefined) this.palette = palette
+    if (post !== undefined) this.post = post
     this.matchOpts = { ...this.matchOpts, ...match }
   }
 
@@ -156,7 +185,14 @@ export class AsciiPass {
     this.device.queue.submit([cenc.finish()])
 
     const size = renderer.getDrawingBufferSize(this.drawSize)
-    stream.syncView({ width: size.x, height: size.y, fit: this.fit, clearColor: this.clearColor })
+    stream.syncView({
+      width: size.x,
+      height: size.y,
+      fit: this.fit,
+      clearColor: this.clearColor,
+      palette: this.palette,
+      post: this.post,
+    })
     stream.syncFx(
       {
         interaction: this.interaction,
