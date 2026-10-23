@@ -963,16 +963,18 @@ window.addEventListener('beforeunload', () => {
   active?.cleanup?.()
 })
 
+/** Whether anything on screen needs a frame loop: a moving source or grain, visible, allowed to animate. */
+const animationWanted = (): boolean =>
+  Boolean(active?.tick || grainOn()) &&
+  els.animate.checked &&
+  outputVisible &&
+  document.visibilityState !== 'hidden'
+
 // scene animation + fps meter
 function animationLoop(): void {
-  const wanted = (): boolean =>
-    Boolean(active?.tick || grainOn()) &&
-    els.animate.checked &&
-    outputVisible &&
-    document.visibilityState !== 'hidden'
-  if (sceneRaf || !wanted()) return
+  if (sceneRaf || !animationWanted()) return
   const tick = (): void => {
-    if (!wanted()) {
+    if (!animationWanted()) {
       sceneRaf = 0
       return
     }

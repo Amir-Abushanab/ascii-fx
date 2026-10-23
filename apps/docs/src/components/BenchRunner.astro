@@ -121,6 +121,18 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
   // slow library. Cap it so one stall cannot hang the whole run.
   const CONTENDER_TIMEOUT_MS = 60_000
 
+  function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
+    return Promise.race([
+      work,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`${label} did not finish in ${CONTENDER_TIMEOUT_MS / 1000}s`)),
+          CONTENDER_TIMEOUT_MS,
+        ),
+      ),
+    ])
+  }
+
   interface BenchResult {
     name: string
     p50: number
@@ -189,17 +201,6 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
     }
 
     /** Reject if the harness stops making progress (usually a backgrounded tab). */
-    function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
-      return Promise.race([
-        work,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`${label} did not finish in ${CONTENDER_TIMEOUT_MS / 1000}s`)),
-            CONTENDER_TIMEOUT_MS,
-          ),
-        ),
-      ])
-    }
 
     let running = false
 
