@@ -19,6 +19,9 @@ const tokens = (s: string): string[] =>
     .split(/\s+/)
     .filter(Boolean)
 
+/** A source file with every shader literal replaced by a placeholder. */
+const blank = (s: string): string => s.replace(LITERAL, '<shader>')
+
 describe('shader stripping', () => {
   for (const [file, count] of [
     ['shaders.ts', 10],
@@ -39,7 +42,6 @@ describe('shader stripping', () => {
 
     it(`${file}: leaves everything outside the shaders alone`, () => {
       const src = read(file)
-      const blank = (s: string): string => s.replace(LITERAL, '<shader>')
       expect(blank(stripShaderSource(src))).toBe(blank(src))
     })
   }
