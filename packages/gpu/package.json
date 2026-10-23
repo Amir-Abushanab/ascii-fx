@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.74",
-    "tsup": "^8.5.1",
+    "tsup": "^9.0.0",
     "typescript": "^7.0.2"
   },
   "engines": {
