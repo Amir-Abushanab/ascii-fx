@@ -495,12 +495,42 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         height: 1px;
         opacity: 0;
       }
+      #playground {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+      }
+      /* Docked to the top while the panel scrolls under it (see the markup). Opaque, so the
+         controls disappear beneath it rather than showing through, with a short fade at the
+         bottom edge so they do not end on a hard line. */
+      .stage-dock {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 0 6px;
+        background: #0b0b0f;
+        box-shadow: 0 10px 14px -6px #0b0b0f;
+      }
       /* The canvas is replaced wholesale on a matcher change, so the overlay is
-         a sibling inside a stable stage rather than a child of the canvas. */
+         a sibling inside a stable stage rather than a child of the canvas.
+         Its height is capped against the viewport so that, docked, it leaves
+         room for the controls it sits above; the width follows from 16:9. */
       .hero-stage {
         position: relative;
-        width: min(1024px, 100%);
+        width: min(1024px, 100%, calc(55vh * 16 / 9));
         display: flex;
+      }
+      @media (max-width: 640px) {
+        .hero-stage {
+          width: min(100%, calc(38vh * 16 / 9));
+        }
       }
       #out {
         width: 100%;
@@ -1287,6 +1317,11 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
     {/* The one heading a search engine weighs most, so it says what this is rather than
         what part of it you are looking at — the playground is the thing under it. */}
     <h1>ASCII FX — structural ASCII rendering for the web</h1>
+    {/* The stage docks to the top while the controls scroll under it, so a dial and the picture it
+        changes stay on screen together. Sticky is bounded by #playground, which ends where the
+        explainer starts, so the stage scrolls away with the controls rather than over the article. */}
+    <div id="playground">
+    <div class="stage-dock">
     <div id="heroStage" class="hero-stage">
       {/* A canvas has no accessible name of its own, and this one is the page's subject. */}
       <canvas id="out" role="img" aria-label="Live ASCII rendering of the selected source"
@@ -1297,6 +1332,7 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       </div>
     </div>
     <div id="stats">loading profile…</div>
+    </div>
     <div id="panel">
       <fieldset id="matcherBox">
         <legend><i data-lucide="toggle-right"></i> Matcher</legend>
@@ -1347,8 +1383,27 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
           <option value="Menlo">Menlo</option>
           <option value="upload">Your font file…</option>
         </select>
-        <input id="fontFile" class="file-input" type="file" accept=".ttf,.otf,.woff,.woff2,font/*" tabindex="-1" aria-label="Choose a font file" />
-        <label><span class="hint" tabindex="0" data-hint="Match with only these characters (e.g. 01 for binary rain). Empty = the full charset. The compiled profile can only narrow its ascii charset; runtime fonts rasterize anything the browser can draw, blocks ▀▓ and braille ⣿ included">chars</span>
+        <input id="fontFile" class="file-input" type="file" accept=".ttf,.otf,.ttc,.otc,.woff,.woff2,font/*" tabindex="-1" aria-label="Choose a font file" />
+        <label id="fontFaceLab" hidden><span class="hint" tabindex="0" data-hint="This file is a font collection, several faces in one (CJK and Arabic system fonts usually are). Pick which face to use">face</span>
+          <select id="fontFace"></select>
+        </label>
+        <label><span class="hint" tabindex="0" data-hint="The built-in glyph set. blocks is the Block Elements range (▀▄▌▚▓ and the eighths), a mosaic with no letterforms; braille is all 256 eight-dot patterns (⠏⣠⣿), the finest shapes there are. arabic is the isolated letterforms; arabic, joined adds every connected form, drawn so strokes meet across cells. The scripts are glyph lists the playground supplies: all 2,136 jōyō kanji, Devanagari with conjuncts, Thai with its stacked marks, Cyrillic, Hebrew. Geist Mono has none of these, so they are profiled at runtime and drawn by your system's fallback font">set</span>
+          <select id="charset">
+            <option value="ascii" selected>ascii</option>
+            <option value="blocks">blocks</option>
+            <option value="braille">braille</option>
+            <option value="arabic">arabic</option>
+            <option value="arabic-joined">arabic, joined</option>
+            <optgroup label="scripts">
+              <option value="script:kanji">kanji (jōyō, 2,136)</option>
+              <option value="script:devanagari">Devanagari</option>
+              <option value="script:thai">Thai</option>
+              <option value="script:cyrillic">Cyrillic</option>
+              <option value="script:hebrew">Hebrew</option>
+            </optgroup>
+          </select>
+        </label>
+        <label><span class="hint" tabindex="0" data-hint="Match with only these characters (e.g. 01 for binary rain). Empty = the full set. Split into graphemes, so 日本語 or क्ष work as written. The compiled profile can only narrow its ascii charset; runtime fonts rasterize anything the browser can draw">chars</span>
           <input id="chars" type="text" placeholder="all" size="10" spellcheck="false" autocomplete="off" /></label>
       </fieldset>
       <fieldset>
@@ -1395,6 +1450,36 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         </label>
       </fieldset>
       <fieldset>
+        <legend><i data-lucide="palette"></i> Palette</legend>
+        <select id="palette" aria-label="Palette" title="Snap every fitted colour to a fixed palette. A colour step after matching, so it never re-runs the matcher. foreground and full only: mono has one ink colour already">
+          <option value="none" selected>none</option>
+          <option value="gameboy">Game Boy</option>
+          <option value="pico8">PICO-8</option>
+          <option value="c64">C64</option>
+          <option value="cga">CGA</option>
+          <option value="amber">amber CRT</option>
+          <option value="onebit">1-bit</option>
+        </select>
+        <label><span class="hint" tabindex="0" data-hint="Ordered dither: nudge each cell's colour by a threshold that depends on where the cell sits, so a gradient between two palette colours turns into a pattern of both instead of a hard band">dither</span>
+          <select id="dither">
+            <option value="none">none</option>
+            <option value="bayer2">bayer 2×2</option>
+            <option value="bayer4" selected>bayer 4×4</option>
+            <option value="bayer8">bayer 8×8</option>
+          </select>
+        </label>
+        <label><span class="hint" tabindex="0" data-hint="How far the dither may push a colour, in 0..255 channel units. About the gap between neighbouring palette colours looks right; much more turns gradients into noise">spread</span> <input id="spread" type="range" min="0" max="255" step="1" value="64" /><output id="spreadOut">64</output></label>
+      </fieldset>
+      <fieldset>
+        <legend><i data-lucide="monitor"></i> Post</legend>
+        <label><span class="hint" tabindex="0" data-hint="CRT scanlines, four per glyph row so they sit on the grid">scanlines</span> <input id="postScan" type="range" min="0" max="1" step="0.05" value="0" /><output id="postScanOut">0.00</output></label>
+        <label><span class="hint" tabindex="0" data-hint="Darken toward the edges">vignette</span> <input id="postVignette" type="range" min="0" max="1" step="0.05" value="0" /><output id="postVignetteOut">0.00</output></label>
+        <label><span class="hint" tabindex="0" data-hint="CRT barrel distortion. Not drawn by the canvas2d backend">curvature</span> <input id="postCurve" type="range" min="0" max="1" step="0.05" value="0" /><output id="postCurveOut">0.00</output></label>
+        <label><span class="hint" tabindex="0" data-hint="Chromatic aberration: red and blue pulled apart toward the edges. Not drawn by the canvas2d backend">aberration</span> <input id="postAberration" type="range" min="0" max="1" step="0.05" value="0" /><output id="postAberrationOut">0.00</output></label>
+        <label><span class="hint" tabindex="0" data-hint="Glow around bright glyphs, computed per cell from each glyph's ink coverage, so it costs a pass over the grid rather than the canvas">bloom</span> <input id="postBloom" type="range" min="0" max="2" step="0.05" value="0" /><output id="postBloomOut">0.00</output></label>
+        <label><span class="hint" tabindex="0" data-hint="Per-pixel film grain over the finished picture. Unlike the Grain panel above it never reaches the matcher, so the glyphs stay put. Not drawn by the canvas2d backend">noise</span> <input id="postNoise" type="range" min="0" max="1" step="0.05" value="0" /><output id="postNoiseOut">0.00</output></label>
+      </fieldset>
+      <fieldset>
         <legend><i data-lucide="sparkles"></i> Interaction</legend>
         <select id="interaction" aria-label="Interaction" title="Pointer/time effects composited on top of the glyph field. Matching never re-runs for these">
           <option value="none">none</option>
@@ -1419,8 +1504,11 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
         <button id="copyText"><i data-lucide="clipboard-copy"></i><span class="btn-label">copy text</span></button>
         <button id="savePng"><i data-lucide="image-down"></i><span class="btn-label">save .png</span></button>
         <button id="saveText"><i data-lucide="file-text"></i><span class="btn-label">save .txt</span></button>
+        <button id="saveSvg"><i data-lucide="file-code"></i><span class="btn-label">save .svg</span></button>
+        <button id="recordVideo"><i data-lucide="video"></i><span class="btn-label">record video</span></button>
         <div id="agentRow" class="agent-row"></div>
       </fieldset>
+    </div>
     </div>
     <section id="explainer">
       <h2>What is this?</h2>
@@ -1473,9 +1561,10 @@ const profile = subsetProfile(await loadProfile(profileRef), '01 ')`
       <div id="wAtlas" class="widget"></div>
       <p>
         What can go in a charset? Any code point the font has outlines for. The
-        built-in <code>ascii-blocks</code> set adds half-blocks and quadrants (▀ ▄ ▌ ▚ ▓). Braille patterns
-        (⠏ ⣠ ⣿) are a classic trick: each glyph is a 2×4 dot grid, which hands the matcher 256 distinct
-        shapes. The compiler refuses characters the font lacks, so a compiled profile never contains tofu.
+        built-in <code>ascii-blocks</code> set adds half-blocks and quadrants (▀ ▄ ▌ ▚ ▓), and
+        <code>blocks</code> is that whole Unicode range on its own. <code>braille</code> (⠏ ⣠ ⣿) is a classic
+        trick: each glyph is a 2×4 dot grid, which hands the matcher 256 distinct shapes. Pick either from
+        the Font panel's <em>set</em> menu. The compiler refuses characters the font lacks, so a compiled profile never contains tofu.
         Runtime profiles cannot check that; a missing glyph quietly profiles the fallback box. Color emoji fail
         all three of this page's assumptions at once. Most emoji fonts are bitmap-only with no outlines to
         rasterize, emoji advance two cells wide so the monospace check fails, and fitting one ink color per cell
@@ -1845,7 +1934,7 @@ mono: both colors fixed by the palette</code></pre>
       <Code code={vanillaSample} lang="ts" theme="github-dark" />
       <ul>
         <li><code>auto</code> takes WebGPU when it can and the CPU matcher when it cannot.</li>
-        <li>Want text instead of pixels? <code>toText()</code>, <code>toAnsi()</code>, <code>toHTML()</code>.</li>
+        <li>Want text instead of pixels? <code>frameToText</code>, <code>frameToAnsi</code>, <code>frameToHTML</code>, <code>frameToSVG</code>.</li>
       </ul>
 
       <h3>Three.js</h3>

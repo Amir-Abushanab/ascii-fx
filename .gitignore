@@ -11,3 +11,6 @@ apps/docs/public/bench/
 apps/docs/public/emoji/
 coverage/
 .assets-frames/
+
+# Written by the Hyper Hivemind agent tool after installs; local notes, not project docs.
+/CLAUDE.md

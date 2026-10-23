@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { ColorMode } from '@ascii-fx/core'
-import { decodeFrame, encodeFrame, matchFrame } from '@ascii-fx/core'
+import { decodeFrame, encodeFrame, frameToText, matchFrame } from '@ascii-fx/core'
 import { buildProfile } from '@ascii-fx/compiler'
 import { GOLDEN_IMAGES } from './images.js'
 
@@ -32,7 +32,7 @@ describe('golden corpus (structural-v1 × Geist Mono)', () => {
         for (const color of MODES) {
           const frame = matchFrame(image, { profile, columns: COLUMNS, color })
           writeFileSync(`${GOLDEN_DIR}${name}-${color}.asciif`, encodeFrame(frame))
-          writeFileSync(`${GOLDEN_DIR}${name}-${color}.txt`, frame.toText() + '\n')
+          writeFileSync(`${GOLDEN_DIR}${name}-${color}.txt`, frameToText(frame) + '\n')
         }
       }
       expect(true).toBe(true)

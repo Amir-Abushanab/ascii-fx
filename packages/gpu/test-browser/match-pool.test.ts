@@ -28,19 +28,7 @@ const waitFor = async (predicate: () => boolean, timeout = 10_000): Promise<void
   }
 }
 
-/** Overwrite the left half of `base` with `patch`, leaving the rest byte-identical. */
-const patchHalf = (
-  base: ReturnType<typeof randomImage>,
-  patch: ReturnType<typeof randomImage>,
-): ReturnType<typeof randomImage> => {
-  const data = new Uint8Array(base.data)
-  for (let y = 0; y < base.height; y++) {
-    const row = y * base.width * 4
-    data.set(patch.data.slice(row, row + (base.width >> 1) * 4), row)
-  }
-  return { width: base.width, height: base.height, data }
-}
-
+/** Run one band job on the pool and wait for its result. */
 const submitAndTake = async (
   pool: MatchPool,
   source: ReturnType<typeof randomImage>,
@@ -55,6 +43,19 @@ const submitAndTake = async (
 
 const cellsOf = async (...args: Parameters<typeof submitAndTake>) =>
   (await submitAndTake(...args)).cells
+
+/** Overwrite the left half of `base` with `patch`, leaving the rest byte-identical. */
+const patchHalf = (
+  base: ReturnType<typeof randomImage>,
+  patch: ReturnType<typeof randomImage>,
+): ReturnType<typeof randomImage> => {
+  const data = new Uint8Array(base.data)
+  for (let y = 0; y < base.height; y++) {
+    const row = y * base.width * 4
+    data.set(patch.data.slice(row, row + (base.width >> 1) * 4), row)
+  }
+  return { width: base.width, height: base.height, data }
+}
 
 describe('matcher worker pool', () => {
   it('starts real workers and reports ready', async () => {

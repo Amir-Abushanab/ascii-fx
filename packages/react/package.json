@@ -1,6 +1,6 @@
 {
   "name": "@ascii-fx/react",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "React components and hooks for ASCII FX: <AsciiImage>, <AsciiVideo>, <AsciiCanvas> with SSR-safe fallbacks.",
   "keywords": [
     "ascii",
@@ -48,8 +48,8 @@
   "devDependencies": {
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2"
   },

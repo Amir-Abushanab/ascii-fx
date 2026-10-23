@@ -4,6 +4,7 @@ import type {
   AsciiProfile,
   ColorMode,
   MotionOptions,
+  PaletteOptions,
   RGB,
   RawImage,
 } from '@ascii-fx/core'
@@ -79,6 +80,45 @@ export function assertInteraction(interaction: InteractionOptions | null | undef
   }
 }
 
+/**
+ * Screen-space effects layered over the composite (spec §48's `composite` stage). Each is a
+ * strength, 0 or absent for off, and none of them ever reruns matching. They act on the
+ * canvas, not on the frame: `captureFrame()` and the frame exports never include them.
+ *
+ * The WebGPU and WebGL2 compositors run all six. The Canvas2D compositor, the last-resort
+ * path, runs scanlines, vignette and bloom and skips the rest, since they need a shader.
+ */
+export interface PostOptions {
+  /** CRT line darkening, 0..1. Four lines per cell row, so they sit on the glyph grid. */
+  scanlines?: number
+  /** Edge darkening, 0..1. */
+  vignette?: number
+  /** CRT barrel distortion, 0..1. The corners fall outside the tube and show the clear colour. */
+  curvature?: number
+  /** Per-pixel film grain, 0..1. Re-seeded every render, so it animates with the render loop. */
+  grain?: number
+  /** Chromatic aberration, 0..1: red and blue pulled apart toward the edges, about a cell at 1. */
+  aberration?: number
+  /**
+   * Glow around bright glyphs, 0..2. Computed per cell from each glyph's coverage and colour and
+   * blurred over a few cells, so it costs a pass over the grid rather than over the canvas.
+   * Not drawn for `color: 'glyph'`, whose colour lives in the glyph art.
+   */
+  bloom?: number
+}
+
+const POST_KEYS = ['scanlines', 'vignette', 'curvature', 'grain', 'aberration', 'bloom'] as const
+
+/** Every effect resolved to a finite, non-negative strength; 0 means off. */
+export function resolvePost(post: PostOptions | null | undefined): Required<PostOptions> {
+  const out = {} as Required<PostOptions>
+  for (const k of POST_KEYS) {
+    const v = post?.[k] ?? 0
+    out[k] = Number.isFinite(v) && v > 0 ? v : 0
+  }
+  return out
+}
+
 export interface AsciiPointer {
   /** Normalized canvas coordinates (0..1, top-left origin). */
   set(x: number, y: number): void
@@ -122,6 +162,15 @@ export interface AsciiRendererOptions {
    */
   clearColor?: readonly [number, number, number, number]
   interaction?: InteractionOptions | null
+  /**
+   * Snap the fitted colours to a fixed palette, optionally through an ordered dither (palette-v1,
+   * ALGORITHM.md §22). A per-cell colour transform after matching, so changing it never rematches,
+   * and `captureFrame()` returns the snapped colours: exports match the screen. Applies to
+   * `color: 'foreground'` and `'full'`; mono and glyph frames have no per-cell colour to snap.
+   */
+  palette?: PaletteOptions | null
+  /** Screen-space effects over the composite. See {@link PostOptions}. */
+  post?: PostOptions | null
   /**
    * Matcher workers for the CPU backend (spec §11 tier 2). Default: one per
    * core, less one for the main thread's extract and composite, capped at 8.

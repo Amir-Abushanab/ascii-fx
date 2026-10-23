@@ -29,6 +29,8 @@ ascii.start()
 
 What it will never do is quietly swap in a cheaper, worse matcher to hold a frame rate. Approximate matchers exist in `@ascii-fx/core`, and you get one only by naming it. A slow frame is a slow frame; it isn't silently a different picture.
 
+Each backend is its own chunk, and `createAsciiRenderer` loads only the one it builds: about 18 KB gzipped for WebGPU or 19 KB for the CPU path, on top of a 0.3 KB entry, where both together used to be 35 KB. The fallback pays one extra chunk request before its first frame. The classes are on subpaths for code that drives a backend directly: `WebGpuAsciiRenderer`, `AsciiEngine` and `AsciiStream` from `@ascii-fx/gpu/webgpu`, `CpuAsciiRenderer` from `@ascii-fx/gpu/cpu`. Importing either one statically puts that backend back in the main bundle.
+
 ## What runs without a GPU
 
 Spec §12's fallback, both halves of it. **Matching** goes to a pool of workers — one per core less one, capped at 8 — each running core's `reduceBand`/`matchBand` over a slice of cell rows. That is the same code a whole-frame `matchFrame` runs, so the assembled cells are byte-identical and the pool is a scheduling change, not an algorithm. **Painting** goes to a WebGL2 fullscreen draw of the glyph field against the atlas — the compositor shader from the WebGPU backend, ported to GLSL ES 3.00 — instead of building a full-resolution RGBA buffer on the CPU and blitting it. Pointer interactions come along with it, as the real shader rather than the Canvas2D path's cell-granular approximation.
@@ -57,6 +59,27 @@ ascii.pointer.set(0.5, 0.5)
 ```
 
 `reveal`, `displace`, `wave`, `push`, `color`, `glyph-scale`, `glyph-rotate`, `original-mix`, and `resolution`.
+
+## Palettes and post effects
+
+Also composite-stage, so neither re-runs matching:
+
+```ts
+ascii.setOptions({
+  palette: {
+    colors: [
+      [0, 0, 0],
+      [85, 255, 255],
+      [255, 85, 255],
+      [255, 255, 255],
+    ],
+    dither: 'bayer4',
+  },
+  post: { scanlines: 0.5, vignette: 0.4, curvature: 0.3, aberration: 0.3, bloom: 1, grain: 0.2 },
+})
+```
+
+`palette` is `palette-v1` (ALGORITHM.md §22): a compute pass over the cells on WebGPU, core's `quantizeFrame` on the CPU backend, identical either way, and included in `captureFrame()`. `post` is screen-space and never in a captured frame. Bloom needs a per-cell glow field (one compute pass, or a 7×7 blur in JS on the CPU backend) and does nothing for `color: 'glyph'`. Canvas2D draws scanlines, vignette and bloom only.
 
 ## Capability probe
 

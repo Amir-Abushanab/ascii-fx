@@ -108,6 +108,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     const key = sha(
       JSON.stringify([
         sha(font),
+        pc.face ?? null,
         pc.charset ?? 'ascii',
         pc.characters ?? null,
         pc.shape6 ?? false,
@@ -127,6 +128,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     if (profile === undefined) {
       const built = buildProfile({
         font,
+        face: pc.face,
         id: name,
         charset: pc.charset,
         characters: pc.characters,

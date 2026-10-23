@@ -121,19 +121,6 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
   // slow library. Cap it so one stall cannot hang the whole run.
   const CONTENDER_TIMEOUT_MS = 60_000
 
-  interface BenchResult {
-    name: string
-    p50: number
-    p95: number
-    fps: number
-  }
-
-  interface HarnessWindow extends Window {
-    benchNames?: string[]
-    runBench?: (name: string, opts?: { warmup?: number; frames?: number }) => Promise<BenchResult>
-  }
-
-  /** Reject if the harness stops making progress (usually a backgrounded tab). */
   function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
     return Promise.race([
       work,
@@ -144,6 +131,18 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
         ),
       ),
     ])
+  }
+
+  interface BenchResult {
+    name: string
+    p50: number
+    p95: number
+    fps: number
+  }
+
+  interface HarnessWindow extends Window {
+    benchNames?: string[]
+    runBench?: (name: string, opts?: { warmup?: number; frames?: number }) => Promise<BenchResult>
   }
 
   function setup(root: HTMLElement) {
@@ -201,6 +200,7 @@ const published = crossLibrary.map((r) => ({ name: r.name, p50: r.p50 }))
       }
     }
 
+    /** Reject if the harness stops making progress (usually a backgrounded tab). */
 
     let running = false
 

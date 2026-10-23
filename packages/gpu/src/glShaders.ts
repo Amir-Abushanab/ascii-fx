@@ -52,6 +52,11 @@ uniform float uFxIntensity;
 uniform float uFxTime;
 uniform uint uFxSource;       // 0 pointer, 1 motion
 
+// Post stage (PostOptions), screen-space after the glyph composite. 0 = off.
+uniform vec4 uPost;           // scanlines, vignette, curvature, grain
+uniform vec2 uPost2;          // aberration, bloom
+uniform sampler2D uGlow;      // bloom field, one texel per cell
+
 out vec4 fragColor;
 
 vec3 unpack3(uint c) {
@@ -73,9 +78,9 @@ float falloff(vec2 px) {
   return 1.0 - smoothstep(max(uFxRadius - uFxFeather, 0.0), uFxRadius + uFxFeather, d);
 }
 
-void main() {
-  // WGSL's @builtin(position) is top-left origin; gl_FragCoord is bottom-left.
-  vec2 fragTop = vec2(gl_FragCoord.x, uCanvas.y - gl_FragCoord.y);
+// The glyph composite at one canvas position (top-left origin), interactions
+// included. main() calls it more than once per pixel for chromatic aberration.
+vec4 shade(vec2 fragTop) {
   vec2 pxe = fragTop;
 
   // Coordinate-space effects: warp the sampling position before grid mapping.
@@ -101,15 +106,13 @@ void main() {
   vec2 px = pxe - uOrigin;
   vec2 cf = floor(px / uCellScreen);
   if (cf.x < 0.0 || cf.y < 0.0 || cf.x >= float(uGrid.x) || cf.y >= float(uGrid.y)) {
-    fragColor = uClearColor;
-    return;
+    return uClearColor;
   }
   uvec4 cell = texelFetch(uCells, ivec2(int(cf.x), int(cf.y)), 0);
   uint glyph = cell.x & 0xffffu;
   uint flags = cell.x >> 16;
   if ((flags & 2u) != 0u) {
-    fragColor = vec4(0.0);
-    return;
+    return vec4(0.0);
   }
   vec2 local = px / uCellScreen - cf; // 0..1 in cell
 
@@ -176,6 +179,64 @@ void main() {
     float f = clamp(falloff(fragTop) * uFxIntensity, 0.0, 1.0);
     outColor = vec4(mix(outColor.rgb, outColor.brg, f * 0.8), outColor.a);
   }
-  fragColor = outColor;
+  return outColor;
+}
+
+float grainAt(vec2 p) {
+  uint h = uint(int(p.x)) * 1664525u + uint(int(p.y)) * 1013904223u + uint(uFxTime * 60.0) * 2654435761u;
+  h = (h ^ (h >> 16)) * 0x7feb352du;
+  h = (h ^ (h >> 15)) * 0x846ca68bu;
+  h = h ^ (h >> 16);
+  return float(h) / 4294967295.0;
+}
+
+void main() {
+  // WGSL's @builtin(position) is top-left origin; gl_FragCoord is bottom-left.
+  vec2 screen = vec2(gl_FragCoord.x, uCanvas.y - gl_FragCoord.y);
+  vec2 pos = screen;
+
+  if (uPost.z > 0.0) { // curvature
+    vec2 q = pos / uCanvas * 2.0 - 1.0;
+    q = q * (1.0 + uPost.z * 0.12 * dot(q, q));
+    if (abs(q.x) > 1.0 || abs(q.y) > 1.0) {
+      fragColor = vec4(0.0, 0.0, 0.0, uClearColor.a);
+      return;
+    }
+    pos = (q + 1.0) * 0.5 * uCanvas;
+  }
+
+  vec4 col;
+  if (uPost2.x > 0.0) { // aberration
+    vec2 center = uCanvas * 0.5;
+    vec2 off = (pos - center) / max(center.x, center.y) * (uPost2.x * uCellScreen.x);
+    vec4 cr = shade(pos + off);
+    vec4 cg = shade(pos);
+    vec4 cb = shade(pos - off);
+    col = vec4(cr.r, cg.g, cb.b, max(max(cr.a, cg.a), cb.a));
+  } else {
+    col = shade(pos);
+  }
+
+  if (uPost2.y > 0.0) { // bloom
+    vec2 grid = vec2(float(uGrid.x), float(uGrid.y));
+    vec2 cellPos = (pos - uOrigin) / uCellScreen;
+    float outside = length(cellPos - clamp(cellPos, vec2(0.0), grid));
+    vec3 g = textureLod(uGlow, cellPos / grid, 0.0).rgb * (uPost2.y * 1.5 * exp(-outside * outside / 4.5));
+    col = vec4(col.rgb + g, max(col.a, min(max(max(g.r, g.g), g.b), 1.0)));
+  }
+  if (uPost.x > 0.0) { // scanlines
+    float period = max(uCellScreen.y * 0.25, 2.0);
+    float s = 0.5 - 0.5 * cos(pos.y / period * 6.28318531);
+    col = vec4(col.rgb * (1.0 - uPost.x * 0.6 * s), col.a);
+  }
+  if (uPost.y > 0.0) { // vignette
+    vec2 q = screen / uCanvas * 2.0 - 1.0;
+    col = vec4(col.rgb * (1.0 - uPost.y * smoothstep(0.6, 1.6, length(q))), col.a);
+  }
+  if (uPost.w > 0.0) { // grain
+    float n = grainAt(screen) - 0.5;
+    col = vec4(clamp(col.rgb + vec3(n * uPost.w * 0.25), vec3(0.0), vec3(col.a)), col.a);
+  }
+  fragColor = col;
 }
 `

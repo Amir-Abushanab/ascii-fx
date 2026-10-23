@@ -1,5 +1,43 @@
 # @ascii-fx/three
 
+## 0.9.0
+
+### Minor Changes
+
+- [#29](https://github.com/Amir-Abushanab/ascii-fx/pull/29) [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - **Breaking:** `createAsciiRenderer` now loads only the backend it builds, and the backend classes moved to subpaths.
+
+  ```diff
+  - import { WebGpuAsciiRenderer, AsciiEngine, AsciiStream, CpuAsciiRenderer } from '@ascii-fx/gpu'
+  + import { WebGpuAsciiRenderer, AsciiEngine, AsciiStream } from '@ascii-fx/gpu/webgpu'
+  + import { CpuAsciiRenderer } from '@ascii-fx/gpu/cpu'
+  ```
+
+  Each backend is a separate chunk behind a dynamic `import()`, so a machine with WebGPU never downloads the CPU matcher, worker pool and WebGL2 compositor, and one without WebGPU never downloads the WGSL. Under Rollup or Vite, an app that imports only `createAsciiRenderer` ships a 0.3 KB entry plus about 18 KB gzipped on the WebGPU path or 19 KB on the CPU path, where both backends together were 35 KB. A fallback to the CPU backend costs one extra chunk request before its first frame. Under `'auto'`, the WebGPU chunk is skipped entirely when `navigator.gpu` is absent.
+
+  The classes had to leave the main entry for this to work: any static import of a backend makes bundlers keep it in the eager bundle. `createAsciiRenderer`, `getAsciiSupport`, `MAX_GPU_GLYPHS`, the tilt helpers and every type stay where they were. `@ascii-fx/three` now imports from `@ascii-fx/gpu/webgpu`.
+
+  `@ascii-fx/core` is now published as one file per module rather than a single bundle. Bundlers split chunks at file granularity, so against a single-file core both backend chunks shared the union of everything either used from it. Per-module output alone takes the WebGPU path from 23.9 KB to 18.3 KB.
+
+- [#29](https://github.com/Amir-Abushanab/ascii-fx/pull/29) [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Add palettes, post effects, two glyph sets and SVG export.
+
+  `palette: { colors, dither?, spread? }` snaps each cell's fitted colours to a list of up to 256 through an optional ordered Bayer dither. It is `palette-v1`, specified in `ALGORITHM.md §22` and integer throughout, so the WebGPU compute pass agrees bit for bit with the new `quantizeFrame()` in `@ascii-fx/core`, which the CPU backend runs. It sits between matching and the composite: changing it never rematches, and `captureFrame()` returns the snapped colours. Error diffusion is deliberately absent, since it cannot run in parallel and stay exact.
+
+  `post: { scanlines, vignette, curvature, aberration, grain, bloom }` adds screen-space effects to the composite on both shader compositors. Bloom comes from a per-cell glow field built from each glyph's coverage and colour, so it costs a pass over the grid rather than the canvas. The palette and glow compute pipelines are built the first time a palette or bloom is set, so a renderer that uses neither compiles nothing extra at startup. The Canvas2D fallback draws scanlines, vignette and bloom. With everything on, a 1080p WebGPU frame takes about 0.3 ms longer.
+
+  New built-in charsets: `blocks` (the Block Elements range) and `braille` (all 256 patterns). `frameToSVG(frame)` exports a frame as vector text with every glyph pinned to its column.
+
+  Runtime profiles (`createAsciiProfile`) now size the cell to the widest glyph instead of to `M`. Full-width glyphs such as kanji were being clipped to their left half. Monospace Latin sets are unaffected.
+
+  The WebGL2 compositor no longer samples the motion field in place of the RGBA atlas when an emoji profile is combined with `interaction: { source: 'motion' }`.
+
+  Shader comments and indentation are now stripped at build time. With these features added, the `@ascii-fx/gpu` bundle is 35.3 KB gzipped, up from 33.6 KB.
+
+### Patch Changes
+
+- Updated dependencies [[`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c), [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c), [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c), [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c), [`1441091`](https://github.com/Amir-Abushanab/ascii-fx/commit/1441091888b36e5ea99b3c6fc85fe7295493e05c)]:
+  - @ascii-fx/core@0.9.0
+  - @ascii-fx/gpu@0.9.0
+
 ## 0.8.0
 
 ### Patch Changes

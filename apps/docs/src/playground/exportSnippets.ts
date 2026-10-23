@@ -23,6 +23,8 @@ export const FRAMEWORKS: Framework[] = [
 
 export interface ExportState {
   font: { kind: 'geist' } | { kind: 'system'; family: string } | { kind: 'upload'; family: string }
+  /** A built-in charset other than ascii ('blocks', 'braille'). */
+  charset?: string
   /** Restrict matching to these characters (subset of the charset). */
   characters?: string
   /** Only when the user forced a backend (auto is the default). */
@@ -143,9 +145,21 @@ interface ProfileSnippet {
 function profileSnippet(state: ExportState): ProfileSnippet {
   const chars = state.characters
   const runtimeOpts = (family: string): string =>
-    `{ fontFamily: ${literal(family)}${chars ? `, characters: ${literal(chars)}` : ''} }`
+    `{ fontFamily: ${literal(family)}${state.charset ? `, charset: ${literal(state.charset)}` : ''}${chars ? `, characters: ${literal(chars)}` : ''} }`
   let snippet: Omit<ProfileSnippet, 'code'>
-  switch (state.font.kind) {
+  // The compiled Geist profile is ascii only; any other built-in set is profiled at runtime.
+  const kind = state.font.kind === 'geist' && state.charset ? 'geist-runtime' : state.font.kind
+  const family = 'family' in state.font ? state.font.family : 'Geist Mono'
+  switch (kind) {
+    case 'geist-runtime':
+      snippet = {
+        imports: ['createAsciiProfile'],
+        pre: [
+          `// a ${state.charset} profile, rasterized at runtime (compile one with a font that has the glyphs to make it deterministic)`,
+        ],
+        expr: `createAsciiProfile(${runtimeOpts(family)})`,
+      }
+      break
     case 'geist':
       snippet = {
         imports: chars ? ['loadProfile', 'subsetProfile'] : ['loadProfile'],
@@ -163,7 +177,7 @@ function profileSnippet(state: ExportState): ProfileSnippet {
         pre: [
           '// runtime profile from an installed font (browser-rasterized; precompile for determinism)',
         ],
-        expr: `createAsciiProfile(${runtimeOpts(state.font.family)})`,
+        expr: `createAsciiProfile(${runtimeOpts(family)})`,
       }
       break
     case 'upload':
@@ -171,10 +185,10 @@ function profileSnippet(state: ExportState): ProfileSnippet {
         imports: ['createAsciiProfile'],
         pre: [
           '// register your font file first, then profile it at runtime:',
-          `const face = new FontFace(${literal(state.font.family)}, await (await fetch('/your-font.woff2')).arrayBuffer())`,
+          `const face = new FontFace(${literal(family)}, await (await fetch('/your-font.woff2')).arrayBuffer())`,
           'document.fonts.add(await face.load())',
         ],
-        expr: `createAsciiProfile(${runtimeOpts(state.font.family)})`,
+        expr: `createAsciiProfile(${runtimeOpts(family)})`,
       }
       break
   }

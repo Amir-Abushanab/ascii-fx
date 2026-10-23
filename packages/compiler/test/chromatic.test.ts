@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RawImage } from '@ascii-fx/core'
-import { decodeProfile, encodeProfile, matchFrame } from '@ascii-fx/core'
+import { decodeProfile, encodeProfile, matchFrameChromatic } from '@ascii-fx/core'
 import { buildChromaticProfile } from '@ascii-fx/compiler'
 
 const solidImage = (w: number, h: number, r: number, g: number, b: number, a = 255): RawImage => {
@@ -134,12 +134,11 @@ describe('chromatic profile binary round-trip', () => {
   it('matches identically before and after a round-trip', () => {
     const { profile, binary } = build()
     const source = solidImage(16, 16, 190, 30, 30)
-    const before = matchFrame(source, { profile, columns: 2, rows: 2, matcher: 'chromatic' })
-    const after = matchFrame(source, {
+    const before = matchFrameChromatic(source, { profile, columns: 2, rows: 2 })
+    const after = matchFrameChromatic(source, {
       profile: decodeProfile(binary),
       columns: 2,
       rows: 2,
-      matcher: 'chromatic',
     })
     expect([...after.glyphIds]).toEqual([...before.glyphIds])
   })

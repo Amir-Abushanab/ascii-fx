@@ -5,6 +5,8 @@ import {
   FLAG_TRANSPARENT,
   matchBand,
   matchFrame,
+  matchFrameRamp,
+  matchFrameShape6,
   rdiv,
   reduceSource,
 } from '@ascii-fx/core'
@@ -100,8 +102,8 @@ describe('jitter-v1 (§20)', () => {
   })
 
   it('rejects a matcher with no rerank to vary', () => {
-    for (const matcher of ['shape6', 'ramp'] as const) {
-      expect(() => matchFrame(image, { ...grid, matcher, jitter: 20 })).toThrow(/structural-v1/)
+    for (const match of [matchFrameShape6, matchFrameRamp]) {
+      expect(() => match(image, { ...grid, jitter: 20 })).toThrow(/jitter is a structural-v1/)
     }
   })
 
@@ -112,6 +114,7 @@ describe('jitter-v1 (§20)', () => {
   })
 })
 
+/** Match the image in bands, with or without each band's frame-global row offset. */
 const split = (rowOffsets: boolean): Uint16Array => {
   const reduced = reduceSource(image, 40, 24, true)
   const out = new Uint16Array(40 * 24)

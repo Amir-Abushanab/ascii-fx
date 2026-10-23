@@ -13,6 +13,8 @@ const alias = {
   // The subpath MUST come first: a string alias matches by prefix, so '@ascii-fx/gpu' would
   // otherwise swallow '@ascii-fx/gpu/tilt' and resolve it to `index.ts/tilt`.
   '@ascii-fx/gpu/tilt': fileURLToPath(new URL('./packages/gpu/src/tilt.ts', import.meta.url)),
+  '@ascii-fx/gpu/webgpu': fileURLToPath(new URL('./packages/gpu/src/webgpu.ts', import.meta.url)),
+  '@ascii-fx/gpu/cpu': fileURLToPath(new URL('./packages/gpu/src/cpu.ts', import.meta.url)),
   '@ascii-fx/gpu': fileURLToPath(new URL('./packages/gpu/src/index.ts', import.meta.url)),
   '@ascii-fx/three': fileURLToPath(new URL('./packages/three/src/index.ts', import.meta.url)),
   '@ascii-fx/react': fileURLToPath(new URL('./packages/react/src/index.ts', import.meta.url)),
@@ -28,6 +30,8 @@ const CPU_BROWSER_TESTS = [
   'packages/gpu/test-browser/cpu-fx.test.ts',
   'packages/gpu/test-browser/match-pool.test.ts',
   'packages/gpu/test-browser/gl-composite.test.ts',
+  'packages/gpu/test-browser/cpu-palette-post.test.ts',
+  'packages/core/test-browser/runtime-wide-glyphs.test.ts',
   'packages/three/test-browser/asciiGlyphs.test.ts',
   'packages/react/test-browser/on-error.test.tsx',
   'packages/react/test-browser/draw.test.tsx',

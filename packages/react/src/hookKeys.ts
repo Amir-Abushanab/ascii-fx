@@ -39,4 +39,6 @@ export const rendererOptionsKey = (options: AsciiRendererRuntimeOptions): string
     options.clearColor,
     options.temporal,
     options.adaptiveResolution,
+    options.palette,
+    options.post,
   ])

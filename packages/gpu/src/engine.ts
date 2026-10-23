@@ -1,17 +1,34 @@
-import type { AlphaMode, AsciiProfile, ColorMode, MotionOptions, RGB } from '@ascii-fx/core'
-import { AsciiFrame, FLAG_TRANSPARENT, blankGlyphId, deriveGrid, luma8 } from '@ascii-fx/core'
+import type {
+  AlphaMode,
+  AsciiProfile,
+  ColorMode,
+  MotionOptions,
+  PaletteOptions,
+  RGB,
+  ResolvedPalette,
+} from '@ascii-fx/core'
+import {
+  AsciiFrame,
+  FLAG_TRANSPARENT,
+  blankGlyphId,
+  deriveGrid,
+  luma8,
+  resolvePalette,
+} from '@ascii-fx/core'
 import {
   chromaticMatchWgsl,
   COMPOSITE_WGSL,
   FEATURES_WGSL,
-  MAX_GPU_GLYPHS,
+  GLOW_WGSL,
   MIPGEN_WGSL,
   MOTION_WGSL,
+  QUANTIZE_WGSL,
+  MATCH_WGSL,
   REDUCE_WGSL,
-  matchWgsl,
 } from './shaders.js'
-import type { FitMode, InteractionOptions, InteractionType } from './types.js'
-import { outputCanBeTransparent } from './types.js'
+import { MAX_GPU_GLYPHS } from './limits.js'
+import type { FitMode, InteractionOptions, InteractionType, PostOptions } from './types.js'
+import { outputCanBeTransparent, resolvePost } from './types.js'
 
 /** §21 option (0..1) to the 0..255 the field is actually defined on. */
 const quantizeUnit = (v: number): number => {
@@ -79,7 +96,13 @@ export interface StreamViewOptions {
   height: number
   fit?: FitMode
   clearColor?: readonly [number, number, number, number]
+  /** palette-v1 (ALGORITHM.md §22), applied between the matcher's cells and the composite. */
+  palette?: PaletteOptions | null
+  post?: PostOptions | null
 }
+
+/** QParams in QUANTIZE_WGSL: 8 u32, then 16 vec4<i32> of offsets and 64 vec4<u32> of colours. */
+const QPARAMS_BYTES = 32 + 16 * 16 + 64 * 16
 
 export interface StreamFxState {
   interaction: InteractionOptions | null
@@ -104,6 +127,26 @@ export class AsciiEngine {
   readonly pipeMotion: GPUComputePipeline
   readonly pipeFeatures: GPUComputePipeline
   readonly pipeMatch: GPUComputePipeline
+  /**
+   * palette-v1 over the cells buffer, and the bloom field. Composite-stage, never matching, and
+   * built on first use: most renderers set neither, and should not compile them at startup.
+   * Synchronous creation, so the first frame that wants one is already correct; both shaders are
+   * a few dozen lines, so the one-time compile does not show.
+   */
+  private quantizePipeline?: GPUComputePipeline
+  private glowPipeline?: GPUComputePipeline
+  get pipeQuantize(): GPUComputePipeline {
+    return (this.quantizePipeline ??= this.computeNow(QUANTIZE_WGSL))
+  }
+  get pipeGlow(): GPUComputePipeline {
+    return (this.glowPipeline ??= this.computeNow(GLOW_WGSL))
+  }
+  private computeNow(code: string): GPUComputePipeline {
+    return this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: this.device.createShaderModule({ code }), entryPoint: 'main' },
+    })
+  }
   /** chromatic-v1 matcher; null unless the profile carries chromatic data. */
   readonly pipeChromatic: GPUComputePipeline | null
   readonly atlasTexture: GPUTexture
@@ -147,6 +190,16 @@ export class AsciiEngine {
       )
     }
     const { atlas, structural } = profile
+    // The binding limit for a large charset. createTexture would fail validation silently, and a
+    // renderer that cannot draw should say why rather than present nothing.
+    const maxDim = device.limits.maxTextureDimension2D
+    if (atlas.width > maxDim || atlas.height > maxDim) {
+      throw new Error(
+        `Profile ${profile.id}'s glyph atlas is ${atlas.width}×${atlas.height}, larger than this ` +
+          `GPU's ${maxDim}px texture limit (${profile.glyphCount} glyphs). Use a smaller charset ` +
+          'or the CPU backend.',
+      )
+    }
     const atlasTexture = device.createTexture({
       size: [atlas.width, atlas.height],
       format: 'r8unorm',
@@ -223,7 +276,7 @@ export class AsciiEngine {
     const [reduce, features, match, motion, mipgen, mipgenRgba, chromatic] = await Promise.all([
       mkCompute(REDUCE_WGSL),
       mkCompute(FEATURES_WGSL),
-      mkCompute(matchWgsl(MAX_GPU_GLYPHS)),
+      mkCompute(MATCH_WGSL),
       mkCompute(MOTION_WGSL),
       device.createRenderPipelineAsync({
         layout: 'auto',
@@ -235,7 +288,11 @@ export class AsciiEngine {
         ? device.createRenderPipelineAsync({
             layout: 'auto',
             vertex: { module: mipModule, entryPoint: 'vs' },
-            fragment: { module: mipModule, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
+            fragment: {
+              module: mipModule,
+              entryPoint: 'fs',
+              targets: [{ format: 'rgba8unorm' }],
+            },
             primitive: { topology: 'triangle-list' },
           })
         : Promise.resolve(null),
@@ -354,8 +411,19 @@ export class AsciiStream {
   /** Densest glyph coverage, per profile — the §6 flat ramp's ceiling. Cached by
    * fingerprint so a profile swap recomputes rather than carrying the old ceiling. */
   private covMaxFor = { fingerprint: '', value: 1 }
-  private readonly compScratch = new ArrayBuffer(96)
+  private readonly compScratch = new ArrayBuffer(128)
   private readonly fxScratch = new ArrayBuffer(64)
+  /** palette-v1 state: the resolved palette (null = off) and the snapped copy of the cells. */
+  private palette: ResolvedPalette | null = null
+  private paletteKey = ''
+  private readonly qParamsBuf: GPUBuffer
+  private qcellsBuf?: GPUBuffer
+  private bgQuantize?: GPUBindGroup
+  /** Bloom field (GLOW_WGSL), one texel per cell; allocated only while bloom is on. */
+  private readonly gParamsBuf: GPUBuffer
+  private glowTex?: GPUTexture
+  private readonly glowPlaceholder: GPUTexture
+  private bgGlow?: GPUBindGroup
 
   private gridDims?: { columns: number; rows: number }
   private opts: StreamMatchOptions = {}
@@ -411,6 +479,8 @@ export class AsciiStream {
   /** Backdrop the chromatic descriptors were composited against (§C3). */
   private chromaticBackdrop?: string
   private bgComposite?: GPUBindGroup
+  /** The composite bind group for the current palette/bloom state; rebuilt on any change to it. */
+  private bgCompositeKey = ''
 
   constructor(engine: AsciiEngine, compositePipeline: GPURenderPipeline) {
     this.engine = engine
@@ -426,8 +496,24 @@ export class AsciiStream {
       usage: GPUBufferUsage.STORAGE,
     })
     this.compBuf = d.createBuffer({
-      size: 96,
+      // CompParams: the view (96 bytes) followed by the eight post-stage floats.
+      size: 128,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    this.qParamsBuf = d.createBuffer({
+      size: QPARAMS_BYTES,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    this.gParamsBuf = d.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    // Stands in at composite binding 8 without bloom, for the same reason the motion
+    // placeholder does.
+    this.glowPlaceholder = d.createTexture({
+      size: [1, 1],
+      format: 'rgba16float',
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     })
     this.fxBuf = d.createBuffer({
       // FxParams grew a `source` selector plus its padding to the 16-byte
@@ -516,6 +602,10 @@ export class AsciiStream {
       this.stagingBuf?.destroy()
       this.motionBuf?.destroy()
       this.motionBuf = undefined
+      this.qcellsBuf?.destroy()
+      this.qcellsBuf = undefined
+      this.glowTex?.destroy()
+      this.glowTex = undefined
       this.reducedBuf = d.createBuffer({
         size: n * 64 * 4,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
@@ -629,19 +719,116 @@ export class AsciiStream {
         { binding: 6, resource: { buffer: this.prevReducedBuf ?? this.reducedBuf! } },
       ],
     })
-    this.bgComposite = d.createBindGroup({
+    this.srcView = srcView
+    this.bgCompositeKey = ''
+    this.bgQuantize = undefined
+    this.bgGlow = undefined
+  }
+
+  private srcView?: GPUTextureView
+
+  /**
+   * Allocate or drop the palette and bloom resources for the current grid. Called from syncView,
+   * after configure() has settled the grid; their bind groups are rebuilt lazily on first use.
+   */
+  private syncComposite(view: StreamViewOptions): void {
+    const d = this.engine.device
+    const n = this.gridDims!.columns * this.gridDims!.rows
+    const paletteKey = view.palette ? JSON.stringify(view.palette) : ''
+    if (paletteKey !== this.paletteKey) {
+      this.paletteKey = paletteKey
+      this.palette = view.palette ? resolvePalette(view.palette) : null
+    }
+    if (this.palette && !this.qcellsBuf) {
+      this.qcellsBuf = d.createBuffer({
+        size: n * 16,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      })
+      this.bgQuantize = undefined
+      this.bgGlow = undefined
+    } else if (!this.palette && this.qcellsBuf) {
+      this.qcellsBuf.destroy()
+      this.qcellsBuf = undefined
+      this.bgGlow = undefined
+    }
+    // Rewritten every sync rather than on palette change alone: it also carries the grid and the
+    // colour mode, which configure() can change underneath an unchanged palette.
+    if (this.palette) this.writeQuantizeParams()
+
+    // glyph frames emit no glow (their colour is in the art), so they get no field either.
+    const bloom = this.colorMode() === 'glyph' ? 0 : resolvePost(view.post).bloom
+    if (bloom > 0 && !this.glowTex) {
+      this.glowTex = d.createTexture({
+        size: [this.gridDims!.columns, this.gridDims!.rows],
+        format: 'rgba16float',
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+      })
+      this.bgGlow = undefined
+    } else if (bloom === 0 && this.glowTex) {
+      this.glowTex.destroy()
+      this.glowTex = undefined
+      this.bgGlow = undefined
+    }
+  }
+
+  /** The matcher's cells, or the palette-snapped copy when a palette is on. */
+  private get displayCells(): GPUBuffer {
+    return this.palette && this.qcellsBuf ? this.qcellsBuf : this.cellsBuf!
+  }
+
+  private writeQuantizeParams(): void {
+    const p = this.palette!
+    const words = new Uint32Array(QPARAMS_BYTES / 4)
+    const ints = new Int32Array(words.buffer)
+    words[0] = this.gridDims?.columns ?? 0
+    words[1] = this.gridDims?.rows ?? 0
+    words[2] = p.size
+    words[3] = p.colors.length
+    words[4] = COLOR_MODE_CODE[this.colorMode()]
+    ints.set(p.offsets, 8)
+    words.set(p.colors, 8 + 64)
+    this.engine.device.queue.writeBuffer(this.qParamsBuf, 0, words)
+  }
+
+  private compositeBindGroup(): GPUBindGroup {
+    const key = `${this.displayCells === this.cellsBuf ? 'raw' : 'q'}|${this.glowTex ? 'glow' : '-'}`
+    if (this.bgComposite && key === this.bgCompositeKey) return this.bgComposite
+    this.bgCompositeKey = key
+    this.bgComposite = this.engine.device.createBindGroup({
       layout: this.pipeComposite.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.compBuf } },
-        { binding: 1, resource: { buffer: this.cellsBuf! } },
+        { binding: 1, resource: { buffer: this.displayCells } },
         { binding: 2, resource: this.engine.atlasTexture.createView() },
         { binding: 3, resource: this.engine.sampler },
         { binding: 4, resource: { buffer: this.fxBuf } },
-        { binding: 5, resource: srcView },
+        { binding: 5, resource: this.srcView! },
         { binding: 6, resource: this.engine.atlasRgbaTexture.createView() },
         { binding: 7, resource: { buffer: this.motionBuf ?? this.motionPlaceholder } },
+        { binding: 8, resource: (this.glowTex ?? this.glowPlaceholder).createView() },
       ],
     })
+    return this.bgComposite
+  }
+
+  /** Snap the cells to the palette (QUANTIZE_WGSL). Cheap: one invocation per cell. */
+  private encodeQuantize(enc: GPUCommandEncoder): void {
+    if (!this.palette || !this.qcellsBuf) return
+    const d = this.engine.device
+    this.bgQuantize ??= d.createBindGroup({
+      layout: this.engine.pipeQuantize.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.qParamsBuf } },
+        { binding: 1, resource: { buffer: this.cellsBuf! } },
+        { binding: 2, resource: { buffer: this.qcellsBuf } },
+      ],
+    })
+    const n = this.gridDims!.columns * this.gridDims!.rows
+    const pass = enc.beginComputePass()
+    pass.setPipeline(this.engine.pipeQuantize)
+    pass.setBindGroup(0, this.bgQuantize)
+    pass.dispatchWorkgroups(Math.ceil(n / 64))
+    pass.end()
   }
 
   private syncMatchParams(baseCol = 0, baseRow = 0): void {
@@ -797,6 +984,7 @@ export class AsciiStream {
   }
 
   syncView(view: StreamViewOptions): void {
+    this.syncComposite(view)
     const { columns, rows } = this.gridDims!
     const { atlas } = this.engine.profile
     const color = this.colorMode()
@@ -867,7 +1055,27 @@ export class AsciiStream {
     dv.setFloat32(84, clear[1], true)
     dv.setFloat32(88, clear[2], true)
     dv.setFloat32(92, clear[3], true)
+    const post = resolvePost(view.post)
+    f(24, cw)
+    f(25, ch)
+    f(26, post.scanlines)
+    f(27, post.vignette)
+    f(28, post.curvature)
+    f(29, post.grain)
+    f(30, post.aberration)
+    // Bloom has nothing to sample without its field; glyph mode never allocates one.
+    f(31, this.glowTex ? post.bloom : 0)
     this.engine.device.queue.writeBuffer(this.compBuf, 0, this.compScratch)
+
+    if (this.glowTex) {
+      const g = new Uint32Array(8)
+      g[0] = columns
+      g[1] = rows
+      g[2] = COLOR_MODE_CODE[color]
+      // Only a ground that is drawn can glow: full's per-cell plane, or mono's opaque backdrop.
+      g[3] = color === 'full' || (color === 'mono' && !transparent) ? 1 : 0
+      this.engine.device.queue.writeBuffer(this.gParamsBuf, 0, g)
+    }
   }
 
   syncFx(fx: StreamFxState, canvasW: number, canvasH: number): void {
@@ -888,13 +1096,35 @@ export class AsciiStream {
   }
 
   encodeComposite(enc: GPUCommandEncoder, target: GPUTextureView): void {
+    // Both passes run every composite rather than tracking whether the cells moved: each is one
+    // invocation per cell, far below the per-pixel draw that follows.
+    this.encodeQuantize(enc)
+    if (this.glowTex) {
+      this.bgGlow ??= this.engine.device.createBindGroup({
+        layout: this.engine.pipeGlow.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.gParamsBuf } },
+          { binding: 1, resource: { buffer: this.displayCells } },
+          { binding: 2, resource: { buffer: this.engine.coverageBuf } },
+          { binding: 3, resource: this.glowTex.createView() },
+        ],
+      })
+      const cpass = enc.beginComputePass()
+      cpass.setPipeline(this.engine.pipeGlow)
+      cpass.setBindGroup(0, this.bgGlow)
+      cpass.dispatchWorkgroups(
+        Math.ceil(this.gridDims!.columns / 8),
+        Math.ceil(this.gridDims!.rows / 8),
+      )
+      cpass.end()
+    }
     const pass = enc.beginRenderPass({
       colorAttachments: [
         { view: target, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' },
       ],
     })
     pass.setPipeline(this.pipeComposite)
-    pass.setBindGroup(0, this.bgComposite!)
+    pass.setBindGroup(0, this.compositeBindGroup())
     pass.draw(3)
     pass.end()
   }
@@ -906,7 +1136,10 @@ export class AsciiStream {
     const n = columns * rows
     const d = this.engine.device
     const enc = d.createCommandEncoder()
-    enc.copyBufferToBuffer(this.cellsBuf!, 0, this.stagingBuf!, 0, n * 16)
+    // With a palette, the export is the snapped frame — what is on screen. Snapped here rather
+    // than trusted from the last composite, which may predate a palette change.
+    this.encodeQuantize(enc)
+    enc.copyBufferToBuffer(this.displayCells, 0, this.stagingBuf!, 0, n * 16)
     d.queue.submit([enc.finish()])
     await this.stagingBuf!.mapAsync(GPUMapMode.READ)
     const words = new Uint32Array(this.stagingBuf!.getMappedRange())
@@ -954,5 +1187,10 @@ export class AsciiStream {
     this.chromaticBuf?.destroy()
     this.compBuf.destroy()
     this.fxBuf.destroy()
+    this.qParamsBuf.destroy()
+    this.qcellsBuf?.destroy()
+    this.gParamsBuf.destroy()
+    this.glowTex?.destroy()
+    this.glowPlaceholder.destroy()
   }
 }

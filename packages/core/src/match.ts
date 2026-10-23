@@ -7,8 +7,6 @@ import { AsciiFrame } from './frame.js'
 import { blankGlyphId } from './blankGlyph.js'
 import { deriveGrid } from './grid.js'
 import { jitterHash } from './jitter.js'
-import { matchFrameRamp, matchFrameShape6 } from './shape6.js'
-import { matchFrameChromatic } from './chromatic.js'
 
 export const ALGORITHM_VERSION = 'structural-v1'
 export { blankGlyphId }
@@ -39,30 +37,40 @@ export interface BandReuse {
   cells: StructuralCells
 }
 
+/** The function each non-structural matcher moved to when `matchFrame` stopped dispatching. */
+const MOVED: Record<string, string> = {
+  shape6: 'matchFrameShape6',
+  ramp: 'matchFrameRamp',
+  chromatic: 'matchFrameChromatic',
+}
+
 /**
  * structural-v1 reference matcher (ALGORITHM.md §§3–11). Deterministic and
  * all-integer; this implementation defines correctness for every backend.
- * Approximate matchers (§18–19) are explicit opt-ins, never fallbacks.
+ *
+ * Structural only. The approximate matchers (§18–19) and chromatic-v1 are their
+ * own functions — `matchFrameShape6`, `matchFrameRamp`, `matchFrameChromatic` —
+ * so a bundle that never calls them never contains them, and opting into one is
+ * an import rather than a flag.
  */
 export function matchFrame(source: RawImage, options: MatchOptions): AsciiFrame {
   const profile = options.profile
   if (!profile)
     throw new Error('matchFrame requires options.profile (build one with @ascii-fx/compiler).')
-  const matcher = options.matcher ?? 'structural'
-  if (options.color === 'glyph' && matcher !== 'chromatic') {
+  // `matcher` left the options in 0.9. Untyped callers still pass it, and quietly running
+  // structural-v1 instead of what they asked for would be the silent fallback §11 rules out.
+  const legacy = (options as { matcher?: string }).matcher
+  if (legacy !== undefined && legacy !== 'structural') {
     throw new Error(
-      `color: 'glyph' is produced by matcher: 'chromatic'; ${matcher} fits colour to a mask.`,
+      `matchFrame is structural-v1 only; for matcher: '${legacy}' call ` +
+        `${MOVED[legacy] ?? 'the matcher function'}(source, options) from @ascii-fx/core instead.`,
     )
   }
-  if ((options.jitter ?? 0) > 0 && matcher !== 'structural') {
+  if (options.color === 'glyph') {
     throw new Error(
-      `jitter is a structural-v1 effect (ALGORITHM.md §20); matcher: '${matcher}' has no rerank ` +
-        'candidates to vary among.',
+      "color: 'glyph' is produced by matchFrameChromatic; matchFrame fits colour to a mask.",
     )
   }
-  if (matcher === 'shape6') return matchFrameShape6(source, options)
-  if (matcher === 'ramp') return matchFrameRamp(source, options)
-  if (matcher === 'chromatic') return matchFrameChromatic(source, options)
 
   const { columns, rows } = deriveGrid(
     source.width,

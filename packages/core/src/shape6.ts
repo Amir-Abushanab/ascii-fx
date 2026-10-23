@@ -127,6 +127,23 @@ function fitColors(
   return [packRGBA(fR, fG, fB), packRGBA(bgOpt[0], bgOpt[1], bgOpt[2])]
 }
 
+/** Refuse the options shape6 and ramp cannot honour; returns the colour mode they can. */
+function approxColor(options: MatchOptions): 'mono' | 'foreground' | 'full' {
+  const color = options.color ?? 'mono'
+  if (color === 'glyph') {
+    throw new Error(
+      "color: 'glyph' is produced by matchFrameChromatic; shape6 and ramp fit colour to a mask.",
+    )
+  }
+  if ((options.jitter ?? 0) > 0) {
+    throw new Error(
+      'jitter is a structural-v1 effect (ALGORITHM.md §20); shape6 and ramp have no rerank ' +
+        'candidates to vary among.',
+    )
+  }
+  return color
+}
+
 /**
  * Shared per-cell scaffold for the approximate matchers: gathers samples,
  * handles transparent and flat cells with exact semantics, then delegates the
@@ -138,12 +155,7 @@ function runApproxMatcher(
   pick: (pl: Uint8Array, sr: Uint8Array, sg: Uint8Array, sb: Uint8Array, meanL: number) => number,
 ): AsciiFrame {
   const profile = options.profile
-  const color = options.color ?? 'mono'
-  if (color === 'glyph') {
-    throw new Error(
-      "color: 'glyph' is produced by matcher: 'chromatic'; shape6 and ramp fit colour to a mask.",
-    )
-  }
+  const color = approxColor(options)
   const alphaMode = options.alpha ?? 'mask'
   const flatT = options.flatThreshold ?? 15
   const fgOpt = options.foreground ?? ([255, 255, 255] as const)
@@ -269,6 +281,8 @@ function runApproxMatcher(
 }
 
 export function matchFrameShape6(source: RawImage, options: MatchOptions): AsciiFrame {
+  // Before the profile check: an option this matcher cannot honour is the more basic mistake.
+  approxColor(options)
   const shape6 = options.profile.shape6
   if (!shape6) {
     throw new Error(
