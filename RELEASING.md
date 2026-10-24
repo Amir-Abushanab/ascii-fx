@@ -27,6 +27,12 @@ nothing, here as in CI). A release therefore lands a few minutes after the merge
 before CI finishes. If CI fails, nothing is versioned or published; if a newer push cancels that
 CI run, the release stops and says so — re-run CI on the commit, then the release.
 
+The Version PR's own CI is started by `release.yml` too. The branch is pushed with the workflow's
+`GITHUB_TOKEN`, and GitHub runs no workflow for an event that token makes, so the PR's
+`pull_request` run fails straight away with zero jobs. The release job dispatches `ci.yml` on the
+branch instead; those checks sit on the branch head and show on the PR. The zero-job failure may
+still be listed beside them, and can be ignored.
+
 Nothing publishes without a changeset, and a docs-only or benchmark-only push skips `release.yml`
 entirely via its `paths` filter.
 

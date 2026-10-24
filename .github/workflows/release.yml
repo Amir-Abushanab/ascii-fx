@@ -35,7 +35,7 @@ permissions:
   contents: write # version PR, tags, GitHub releases
   pull-requests: write # the Version Packages PR
   id-token: write # OIDC trusted publishing + provenance
-  actions: read # ci-gate reads the CI run for this commit
+  actions: write # ci-gate reads the CI run for this commit; CI is dispatched on the Version PR
 
 jobs:
   # Publishing waits for CI on this exact commit. The two workflows trigger on the same push,
@@ -187,3 +187,22 @@ jobs:
           gh pr create --base main --head "$branch" \
             --title "chore: version packages" \
             --body "Automated version bump from changesets. Merging this publishes the bumped \`@ascii-fx/*\` packages to npm. Opened by the release workflow's self-heal step because \`changesets/action\` could not create it."
+
+      # CI for the Version PR. The action pushes that branch with this workflow's token, and
+      # GitHub runs nothing for a token-made event: the PR's pull_request run fails at once with
+      # zero jobs, and only went green after a manual approve or re-run. workflow_dispatch is
+      # the one trigger that token may fire, and its checks land on the branch head, so they
+      # show on the PR.
+      - name: Run CI on the Version PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          branch=changeset-release/main
+          ahead=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$branch" --jq '.ahead_by' 2>/dev/null || echo "")
+          case "$ahead" in
+            '' | *[!0-9]* | 0) echo "::notice::no Version PR to test"; exit 0 ;;
+          esac
+          gh workflow run ci.yml -R "$GITHUB_REPOSITORY" --ref "$branch"
+          echo "Dispatched CI on $branch"
