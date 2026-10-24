@@ -21,6 +21,12 @@ and publishes the packages.
 3. Merge that PR. The same workflow publishes every package version npm does not already have,
    tags each one, and cuts the GitHub Releases.
 
+Both steps wait for CI on the same commit: `release.yml`'s first job polls the `ci.yml` run for that
+commit and goes on only once both check & build jobs and coverage have passed (the audit gates
+nothing, here as in CI). A release therefore lands a few minutes after the merge rather than
+before CI finishes. If CI fails, nothing is versioned or published; if a newer push cancels that
+CI run, the release stops and says so — re-run CI on the commit, then the release.
+
 Nothing publishes without a changeset, and a docs-only or benchmark-only push skips `release.yml`
 entirely via its `paths` filter.
 

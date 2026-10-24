@@ -35,8 +35,62 @@ permissions:
   contents: write # version PR, tags, GitHub releases
   pull-requests: write # the Version Packages PR
   id-token: write # OIDC trusted publishing + provenance
+  actions: read # ci-gate reads the CI run for this commit
 
 jobs:
+  # Publishing waits for CI on this exact commit. The two workflows trigger on the same push,
+  # and without this the release (about a minute) finished before CI's check jobs (2-11) and
+  # shipped a commit CI had not yet passed. The publish stays in this file rather than becoming
+  # a job in ci.yml for two reasons: npm's trusted publisher for every package is bound to the
+  # workflow file release.yml, and ci.yml cancels in-progress runs on a newer push, which must
+  # never land in the middle of a publish.
+  #
+  # Gates on the jobs that test what ships: both check & build jobs and coverage. The audit job
+  # is deliberately not a gate (see ci.yml), and the docs deploy is not a test.
+  ci-gate:
+    name: Wait for CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The CI run for this commit: the push run, or for a manual dispatch whatever
+          # pushed this commit to main. Polled, because it may not be registered yet.
+          while :; do
+            run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" \
+              --event push --limit 1 --json databaseId,status,conclusion \
+              --jq '.[0] // empty | "\(.databaseId) \(.status) \(.conclusion)"')
+            if [ -n "$run" ]; then
+              read -r id status conclusion <<<"$run"
+              [ "$status" = "completed" ] && break
+              echo "CI run $id is $status"
+            else
+              echo "no CI run for $SHA yet"
+            fi
+            sleep 20
+          done
+
+          if [ "$conclusion" = "cancelled" ]; then
+            echo "::error::CI run $id for $SHA was cancelled (a newer push to main supersedes it). Nothing was published. If that push does not touch packages/ or .changeset/, release.yml will not run for it, so re-run CI on this commit and then this workflow (or dispatch it on main)."
+            exit 1
+          fi
+
+          # Required jobs only: the run's own conclusion also counts the audit, which gates nothing.
+          failed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs" \
+            --jq '.jobs[] | select((.name | startswith("Check & build")) or .name == "Coverage")
+                  | select(.conclusion != "success") | "\(.name): \(.conclusion)"')
+          required=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs" \
+            --jq '[.jobs[] | select((.name | startswith("Check & build")) or .name == "Coverage")] | length')
+          if [ -n "$failed" ] || [ "$required" -lt 3 ]; then
+            echo "::error::CI run $id did not pass the jobs a release needs:"
+            echo "${failed:-  (found $required of 3 required jobs)}"
+            exit 1
+          fi
+          echo "CI run $id passed check & build (Node 22, 24) and coverage for $SHA"
+
   preflight:
     name: Publish gate
     runs-on: ubuntu-latest
@@ -53,7 +107,7 @@ jobs:
 
   release:
     name: Version or publish
-    needs: preflight
+    needs: [ci-gate, preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -63,12 +117,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Gate both the version PR and the publish on the suite. ci.yml runs on these same
-      # pushes but is a SEPARATE workflow with no dependency here, so without this step a
-      # red suite could still publish to npm — the one thing this pipeline does that cannot
-      # be taken back. Deliberately `test` and not `check`: it covers the code being shipped
-      # without letting a docs-only lint or typecheck failure block a package release.
-      - run: pnpm test
       # Trusted publishing needs npm >= 11.5.1; Node 24 may ship an older npm.
       - run: npm install -g npm@latest
       - name: Version Packages PR / publish
