@@ -1,8 +1,8 @@
 # Releasing
 
 Versioning and publishing are driven by [changesets](https://github.com/changesets/changesets).
-Two workflows do the work: `ci.yml` gates every push and deploys the docs, `release.yml` versions
-and publishes the packages.
+Three workflows do the work: `ci.yml` gates every push and deploys the docs, `version.yml` opens
+the Version PR, and `release.yml` publishes the packages.
 
 ## The normal loop
 
@@ -15,26 +15,36 @@ and publishes the packages.
    Pick the packages and bump levels, and describe the change the way you would in a changelog —
    the text lands verbatim in `CHANGELOG.md` and in the GitHub Release.
 
-2. Merge to `main`. `release.yml` opens (or updates) a **"chore: version packages"** PR that bumps
-   versions, writes changelogs, and syncs the skill's `metadata.library_version`.
+2. Merge to `main`. `version.yml` opens (or updates) a **"chore: version packages"** PR that bumps
+   versions, writes changelogs, and syncs the skill's `metadata.library_version`. It runs on pushes
+   that touch `packages/**` or `.changeset/**`, and never publishes.
 
-3. Merge that PR. The same workflow publishes every package version npm does not already have,
-   tags each one, and cuts the GitHub Releases.
+3. Merge that PR. The merge changes `packages/**/CHANGELOG.md`, which triggers `release.yml`: it
+   publishes every package version npm does not already have, tags each one, and cuts the GitHub
+   Releases. A changeset that landed after the PR was last versioned is removed from that run's
+   checkout so the merged versions go out; `version.yml` versions it into the next PR.
 
-Both steps wait for CI on the same commit: `release.yml`'s first job polls the `ci.yml` run for that
-commit and goes on only once both check & build jobs and coverage have passed (the audit gates
+The two workflows have separate concurrency groups (`version` and `release`), and neither cancels
+a run in progress. GitHub keeps only the newest pending run per group and cancels the one before
+it, so when versioning and publishing shared a group, a feature push carrying changesets could
+cancel a waiting publish and then publish nothing itself. Now only Version PR merges queue for
+`release`.
+
+Publishing waits for CI on the same commit: `release.yml`'s first job polls the `ci.yml` run for
+that commit and goes on only once both check & build jobs and coverage have passed (the audit gates
 nothing, here as in CI). A release therefore lands a few minutes after the merge rather than
-before CI finishes. If CI fails, nothing is versioned or published; if a newer push cancels that
-CI run, the release stops and says so — re-run CI on the commit, then the release.
+before CI finishes. If CI fails, nothing is published; if a newer push cancels that CI run, the
+release stops and says so — re-run CI on the commit, then re-run the release run. Versioning does
+not wait for CI. The release no longer soft-fails, so a failed publish shows as a red run.
 
-The Version PR's own CI is started by `release.yml` too. The branch is pushed with the workflow's
+The Version PR's own CI is started by `version.yml`. The branch is pushed with the workflow's
 `GITHUB_TOKEN`, and GitHub runs no workflow for an event that token makes, so the PR's
-`pull_request` run fails straight away with zero jobs. The release job dispatches `ci.yml` on the
+`pull_request` run fails straight away with zero jobs. The version job dispatches `ci.yml` on the
 branch instead; those checks sit on the branch head and show on the PR. The zero-job failure may
 still be listed beside them, and can be ignored.
 
-Nothing publishes without a changeset, and a docs-only or benchmark-only push skips `release.yml`
-entirely via its `paths` filter.
+Nothing publishes without a changeset, and a docs-only or benchmark-only push skips both workflows
+via their `paths` filters.
 
 ## One-time setup
 
@@ -49,13 +59,15 @@ npm login
 pnpm release          # builds, then publishes only what npm is missing
 ```
 
-`release.yml`'s preflight job checks whether `@ascii-fx/core` exists on npm and manages Version PRs
-only until it does, so runs before this stay green rather than failing on a missing package.
+`release.yml`'s preflight job checks whether `@ascii-fx/core` exists on npm and publishes nothing
+until it does, so runs before this stay green rather than failing on a missing package.
+`version.yml` keeps managing Version PRs meanwhile.
 
 **Trusted Publishing.** On each `@ascii-fx/*` package's npm settings, add a Trusted Publisher
-pointing at this repo and the `release.yml` workflow. After that CI publishes with no stored token,
-with provenance attached. If OIDC misbehaves, add an `NPM_TOKEN` secret and uncomment the
-`NODE_AUTH_TOKEN` line in `release.yml`.
+pointing at this repo and the `release.yml` workflow. `release.yml` is still the publisher;
+`version.yml` never publishes and needs no Trusted Publisher. After that CI publishes with no
+stored token, with provenance attached. If OIDC misbehaves, add an `NPM_TOKEN` secret and uncomment
+the `NODE_AUTH_TOKEN` line in the `env` of `release.yml`'s Publish step.
 
 ## Scripts
 
@@ -63,7 +75,7 @@ with provenance attached. If OIDC misbehaves, add an `NPM_TOKEN` secret and unco
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm check`         | The gate: build, format, lint, typecheck, node tests, browser-cpu tests, knip, depcruise, skill validation + staleness. Also the pre-commit hook.                                                                                                                                                                 |
 | `pnpm quality`       | `check` plus `pnpm audit --audit-level low`. Local only — CI audits at `high` in a job that gates nothing, because an advisory lands with no change on our side and should not red-light an unrelated PR.                                                                                                         |
-| `pnpm run version`   | `changeset version` + sync the skill version. Needs `run` — bare `pnpm version` is pnpm's own built-in. Needs `GITHUB_TOKEN` too (the changelog plugin resolves commits and authors via the API); `GITHUB_TOKEN=$(gh auth token) pnpm run version` works locally. Normally the release workflow's job, not yours. |
+| `pnpm run version`   | `changeset version` + sync the skill version. Needs `run` — bare `pnpm version` is pnpm's own built-in. Needs `GITHUB_TOKEN` too (the changelog plugin resolves commits and authors via the API); `GITHUB_TOKEN=$(gh auth token) pnpm run version` works locally. Normally the version workflow's job, not yours. |
 | `pnpm package:check` | publint + are-the-types-wrong + smoke, on every packed tarball (see below). Needs a build first.                                                                                                                                                                                                                  |
 | `pnpm release`       | Build, `package:check`, then publish only the versions npm is missing.                                                                                                                                                                                                                                            |
 
