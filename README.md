@@ -194,7 +194,7 @@ The cells are identical in all three. Full tables and methodology: [`RESULTS.md`
 
 - [`ALGORITHM.md`](./ALGORITHM.md), the normative spec: every constant, bit layout, and tie-break of `structural-v1`, `shape6-v1`, `ramp-v1`, `jitter-v1`, `motion-v1`, `palette-v1`, `chromatic-v1`, and the binary formats.
 - [`ascii-fx-spec.md`](./ascii-fx-spec.md), the product spec this repo implements.
-- [`RELEASING.md`](./RELEASING.md): changesets, the release workflow, and one-time npm and Pages setup.
+- [`RELEASING.md`](./RELEASING.md): changesets, the release workflows, and one-time npm and Pages setup.
 - [`SECURITY.md`](./SECURITY.md): what counts as attack surface here, and how to report it.
 
 ## Development
