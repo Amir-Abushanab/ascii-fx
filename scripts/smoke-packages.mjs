@@ -31,11 +31,11 @@ const PACKAGES = ['core', 'gpu', 'compiler', 'three', 'react', 'react-three', 'v
 // pnpm only warns on a peer mismatch, so nothing caught it before this npm install.
 // Refresh these alongside the workspace versions they mirror.
 const PEERS = {
-  react: '19.2.8',
-  'react-dom': '19.2.8',
-  three: '0.185.1',
-  '@react-three/fiber': '9.7.0',
-  vite: '8.2.2',
+  react: '19.3.1',
+  'react-dom': '19.3.1',
+  three: '0.186.1',
+  '@react-three/fiber': '9.8.2',
+  vite: '8.3.5',
 }
 
 // pnpm exports its own settings to child processes as npm_config_* environment

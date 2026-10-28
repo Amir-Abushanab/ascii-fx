@@ -106,7 +106,7 @@ frameToText(frame) // also frameToAnsi, frameToHTML, frameToSVG — standalone, 
 A **profile** is a compiled font: every glyph's 8×8 mask, its coverage, and an atlas tile. Matching
 needs one. Three ways to get one, in order of preference:
 
-```ts
+```ts no-check
 // 1. Compiled ahead of time — deterministic, ~13 KB, identical on every machine.
 const profile = await loadProfile('/default.asciip')
 

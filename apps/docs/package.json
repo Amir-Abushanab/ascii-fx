@@ -13,13 +13,13 @@
     "@ascii-fx/core": "workspace:*",
     "@ascii-fx/gpu": "workspace:*",
     "katex": "^0.19.0",
-    "lucide": "^1.58.0",
+    "lucide": "^1.61.0",
     "shiki": "^4.5.0"
   },
   "devDependencies": {
     "@ascii-fx/compiler": "workspace:*",
     "@ascii-fx/vite": "workspace:*",
-    "astro": "^7.4.0",
+    "astro": "^7.4.1",
     "typescript": "^7.0.2"
   }
 }
