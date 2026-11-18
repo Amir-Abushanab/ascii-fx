@@ -1,7 +1,10 @@
 import type { AlphaMode, ColorMode } from '@ascii-fx/core'
 
 export interface AsciiProfileConfig {
-  /** Path to the font file, relative to the config file. */
+  /**
+   * Path to the font file, relative to the config file — or to the Vite root, for a config
+   * passed to the plugin inline rather than loaded from a file.
+   */
   font: string
   /** Which face of a .ttc/.otc collection: PostScript name or index. */
   face?: string | number
@@ -13,7 +16,7 @@ export interface AsciiProfileConfig {
 
 /** Static build-time frame (spec §16). Matching happens at build, not runtime. */
 export interface AsciiFrameConfig {
-  /** Path to the source image (PNG in v1), relative to the config file. */
+  /** Path to the source image (PNG in v1). Relative to the same place as a profile's `font`. */
   image: string
   /** Profile name from `profiles`. Default 'default'. */
   profile?: string

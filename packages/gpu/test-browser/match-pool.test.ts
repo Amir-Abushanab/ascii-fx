@@ -89,6 +89,25 @@ describe('matcher worker pool', () => {
     })
   }
 
+  // jitter-v1 hashes a cell's frame row, so a band has to be told where it starts or the
+  // assembled frame stops matching a whole-frame one (ALGORITHM.md §20).
+  it('assembles jittered cells byte-identical to matchFrame', async () => {
+    const profile = randomProfile(40, 11)
+    const source = randomImage(157, 91, 23, true)
+    const options = { color: 'full', alpha: 'mask', jitter: 120, jitterSeed: 7 } as const
+    const expected = matchFrame(source, { profile, columns: 19, rows: 11, ...options })
+    const plain = matchFrame(source, { profile, columns: 19, rows: 11, ...options, jitter: 0 })
+    expect(expected.glyphIds).not.toEqual(plain.glyphIds)
+
+    const pool = MatchPool.create(profile, 4)!
+    await waitFor(() => pool.ready)
+    const cells = await cellsOf(pool, source, 19, 11, options)
+    expect(cells.glyphIds).toEqual(expected.glyphIds)
+    expect(cells.foreground).toEqual(expected.foreground)
+    expect(cells.background).toEqual(expected.background)
+    pool.destroy()
+  })
+
   it('refuses a second submit while a frame is in flight', async () => {
     const profile = randomProfile(24, 3)
     const source = randomImage(96, 64, 5)
@@ -143,6 +162,223 @@ describe('matcher worker pool', () => {
   })
 })
 
+/** A live source: a canvas whose pixels are `image`'s. Opaque images only, so it round-trips. */
+const paint = (
+  image: ReturnType<typeof randomImage>,
+  onto?: HTMLCanvasElement,
+): HTMLCanvasElement => {
+  const canvas = onto ?? document.createElement('canvas')
+  canvas.width = image.width
+  canvas.height = image.height
+  canvas
+    .getContext('2d')!
+    .putImageData(new ImageData(new Uint8ClampedArray(image.data), image.width, image.height), 0, 0)
+  return canvas
+}
+
+const sameBytes = (a: Uint8ClampedArray, b: Uint8ClampedArray): boolean =>
+  a.length === b.length && a.every((v, i) => v === b[i])
+
+/** How many animation frames anything on the page asks for over `ms`. */
+const countFrameRequests = async (ms: number): Promise<number> => {
+  const original = window.requestAnimationFrame
+  let count = 0
+  window.requestAnimationFrame = (cb) => {
+    count++
+    return original.call(window, cb)
+  }
+  try {
+    await new Promise((r) => setTimeout(r, ms))
+  } finally {
+    window.requestAnimationFrame = original
+  }
+  return count
+}
+
+describe('renderer on a worker pool', () => {
+  const profile = makeProfile(STANDARD_SIX)
+  const make = async (workers: number | false, columns = 16) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 320
+    canvas.height = 180
+    const renderer = await createAsciiRenderer({
+      canvas,
+      profile,
+      backend: 'cpu',
+      columns,
+      color: 'full',
+      workers,
+    })
+    return { canvas, renderer }
+  }
+
+  // A still has no next frame to hide a frame of latency behind. Pipelining one presented
+  // the old cells, left the new ones in the pool for good, and re-presented at 60 Hz
+  // waiting for a render that never came.
+  it('a still shows new options on the render that follows them, and then goes quiet', async () => {
+    const source = randomImage(128, 72, 91)
+    const reference = await make(false, 8)
+    reference.renderer.setSource(source)
+    reference.renderer.render()
+
+    const { canvas, renderer } = await make(3, 16)
+    renderer.setSource(source)
+    renderer.render()
+    const before = readPixels(canvas)
+    await new Promise((r) => setTimeout(r, 500)) // ample time for a pool to come up
+    renderer.setOptions({ columns: 8 })
+    renderer.render()
+    const after = readPixels(canvas)
+
+    expect(sameBytes(after, before)).toBe(false)
+    expect(sameBytes(after, readPixels(reference.canvas))).toBe(true)
+    // Static sources are matched inline (types.ts `workers`), so no pool was ever spawned.
+    expect(renderer.pipeline.matcher).toBe('main-thread')
+    expect(await countFrameRequests(300)).toBe(0)
+    renderer.destroy()
+    reference.renderer.destroy()
+  })
+
+  it('a live source rendered by hand gets its frame without another render()', async () => {
+    const live = paint(randomImage(128, 72, 41))
+    const { canvas, renderer } = await make(3)
+    renderer.setSource(live)
+    renderer.render()
+    await waitFor(() => renderer.pipeline.matcher === 'workers')
+    await settle()
+    await settle()
+
+    // New content, one render: it goes to the pool, and the old frame is presented.
+    paint(randomImage(128, 72, 77), live)
+    renderer.render()
+
+    const reference = await make(false)
+    reference.renderer.setSource(live)
+    reference.renderer.render()
+    const expected = readPixels(reference.canvas)
+    await waitFor(() => sameBytes(readPixels(canvas), expected))
+    // Adopted and presented once; a hand-rendered source must not become a loop.
+    await settle()
+    expect(await countFrameRequests(300)).toBe(0)
+    renderer.destroy()
+    reference.renderer.destroy()
+  })
+
+  it('honours jitter on the main thread, and refuses it for chromatic', async () => {
+    const random = randomProfile(40, 11)
+    const source = randomImage(128, 72, 5)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile: random,
+      backend: 'cpu',
+      workers: false,
+      columns: 16,
+      color: 'full',
+      jitter: 120,
+      jitterSeed: 3,
+    })
+    renderer.setSource(source)
+    const options = { columns: 16, color: 'full', jitter: 120, jitterSeed: 3 } as const
+    const expected = matchFrame(source, { profile: random, ...options })
+    expect((await renderer.captureFrame()).glyphIds).toEqual(expected.glyphIds)
+    expect(expected.glyphIds).not.toEqual(
+      matchFrame(source, { profile: random, ...options, jitter: 0 }).glyphIds,
+    )
+    expect(() => renderer.setOptions({ matcher: 'chromatic' })).toThrow(/jitter/)
+    expect(() => renderer.setOptions({ jitter: 256 })).toThrow(/0\.\.255/)
+    renderer.destroy()
+  })
+})
+
+describe('renderer housekeeping on the CPU backend', () => {
+  const profile = makeProfile(STANDARD_SIX)
+
+  it('repaints a still after setOptions without being asked', async () => {
+    const source = randomImage(128, 72, 91)
+    const build = async (columns: number) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 320
+      canvas.height = 180
+      const renderer = await createAsciiRenderer({
+        canvas,
+        profile,
+        backend: 'cpu',
+        columns,
+        color: 'full',
+        workers: false,
+      })
+      renderer.setSource(source)
+      renderer.render()
+      return { canvas, renderer }
+    }
+    const reference = await build(8)
+    const subject = await build(16)
+    subject.renderer.setOptions({ columns: 8 })
+    await settle()
+    expect(sameBytes(readPixels(subject.canvas), readPixels(reference.canvas))).toBe(true)
+    subject.renderer.destroy()
+    reference.renderer.destroy()
+  })
+
+  it('forwards an interaction passed through setOptions', async () => {
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'cpu',
+      workers: false,
+    })
+    renderer.setOptions({ interaction: { type: 'reveal' } })
+    expect((renderer as unknown as { interaction: unknown }).interaction).toEqual({
+      type: 'reveal',
+    })
+    // Refused the way setInteraction refuses it, rather than swallowed.
+    expect(() => renderer.setOptions({ interaction: { type: 'wave', source: 'motion' } })).toThrow(
+      /single origin/,
+    )
+    renderer.destroy()
+  })
+
+  // A source that cannot be read for a moment throws from render(). From the loop that used
+  // to end the loop for good, while leaving it marked as running.
+  it('keeps its loop through a frame that could not be rendered', async () => {
+    const live = paint(randomImage(128, 72, 41))
+    const canvas = document.createElement('canvas')
+    canvas.width = 320
+    canvas.height = 180
+    const renderer = await createAsciiRenderer({
+      canvas,
+      profile,
+      backend: 'cpu',
+      columns: 16,
+      color: 'full',
+      workers: false,
+    })
+    renderer.setSource(live)
+    renderer.start()
+    await settle()
+    const first = readPixels(canvas)
+
+    const logged: unknown[][] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => void logged.push(args)
+    try {
+      live.width = 0 // unreadable: every tick throws
+      await settle()
+      await settle()
+    } finally {
+      console.error = original
+    }
+    // Said once, not once a frame.
+    expect(logged).toHaveLength(1)
+
+    paint(randomImage(128, 72, 77), live)
+    await settle()
+    await settle()
+    expect(sameBytes(readPixels(canvas), first)).toBe(false)
+    renderer.destroy()
+  })
+})
+
 describe('captureFrame with a worker pool', () => {
   it('returns the current source, not the frame still in flight', async () => {
     const profile = makeProfile(STANDARD_SIX)
@@ -158,14 +394,16 @@ describe('captureFrame with a worker pool', () => {
       workers: 3,
     })
 
-    const first = randomImage(128, 72, 41)
-    renderer.setSource(first)
+    // A live source, since only those are pipelined: a still is matched inline and never
+    // has a frame in flight.
+    const live = paint(randomImage(128, 72, 41))
+    renderer.setSource(live)
     renderer.render()
-    await settle()
+    await waitFor(() => renderer.pipeline.matcher === 'workers')
 
-    // A second source with a pipelined render in flight against it.
+    // New content with a pipelined render in flight against it.
     const second = randomImage(128, 72, 77)
-    renderer.setSource(second)
+    paint(second, live)
     renderer.render()
 
     const captured = await renderer.captureFrame()

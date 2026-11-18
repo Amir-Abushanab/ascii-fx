@@ -210,7 +210,7 @@ err(g) = Σ over k:  c = (bit k of g) ? fg : bg
                     (r[k]−c.r)² + (g[k]−c.g)² + (b[k]−c.b)²
 ```
 
-Early exit (`err ≥ best ⇒ break`) is permitted; it cannot change the winner. **Winner: strictly smaller error replaces; ties keep the earlier candidate** (i.e. lowest (score, id) order). Output fitted colors are the winner's u8-rounded means — they are part of the algorithm, not a rendering detail.
+Early exit (`err ≥ best ⇒ break`) is permitted; it cannot change the winner. So is evaluating the sum in closed form: for the samples of one side `S` drawn in colour `c`, `Σ(s−c)² = Σs² − 2c·Σs + |S|·c²` per channel is an integer identity, so with `c` the already-rounded colour it yields the same `err(g)` from the side sums the colour fit already needs. The CPU reference does this. **Winner: strictly smaller error replaces; ties keep the earlier candidate** (i.e. lowest (score, id) order). Output fitted colors are the winner's u8-rounded means — they are part of the algorithm, not a rendering detail.
 
 ## 11. Output packing
 
@@ -518,7 +518,9 @@ Multiplications are u32-wrapping (`Math.imul`), shifts are logical. Position, ne
 
 **`rowOffset` is frame-global.** `cy` is band-local, so a band must be given the frame row its first cell row sits at or its cells hash differently than they would in a whole-frame match, and band concatenation stops being byte-identical. It is inert at `jitter = 0`, which is why §§5–10 never mention it.
 
-Hold `jitterSeed` constant for a dither that is stable frame to frame; pass a frame counter for one that moves. No GPU backend implements §20 yet, so it is reachable through `@ascii-fx/core` only.
+Hold `jitterSeed` constant for a dither that is stable frame to frame; pass a frame counter for one that moves. A changed seed is a changed option: exact temporal reuse (§21) must not carry a cell across it.
+
+Both backends of `@ascii-fx/gpu` implement §20 and are held to §17 on it. One trap for a u32 implementation: `rdiv(bestErr · jitter, 255)` written as `(2n + d) / 2d` overflows, since `n` reaches 12,484,800 · 255 ≈ 3.18 · 10⁹. `(n + 127) / 255` is the same value for every `n` and stays in range.
 
 ## 21. motion-v1 (per-cell motion field)
 

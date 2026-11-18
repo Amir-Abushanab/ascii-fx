@@ -185,6 +185,9 @@ export class GlCompositor {
     this.lost = true
   }
 
+  /** Called once the pipeline has been rebuilt on a restored context. The canvas is empty. */
+  onRestore?: () => void
+
   private onRestored = (): void => {
     if (this.destroyed) return
     const gl = this.canvas.getContext('webgl2') as WebGL2RenderingContext | null
@@ -196,7 +199,9 @@ export class GlCompositor {
       this.lost = false
     } catch {
       this.lost = true
+      return
     }
+    this.onRestore?.()
   }
 
   /** True when the context is gone and present() would paint nothing. */

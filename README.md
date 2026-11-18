@@ -67,7 +67,7 @@ ascii.start()
 
 Without WebGPU, matching runs on a pool of workers and the grid is painted by a WebGL2 fullscreen draw, so the main thread only does the texture upload. Live sources pay one frame of latency for this. The first frame, static sources, and `captureFrame()` are matched inline. `workers: false` matches on the main thread instead, and `compositor: 'canvas2d'` paints with Canvas2D.
 
-`temporal: true` skips cells whose 64 samples are byte-identical to the previous frame. The output is unchanged, since a cell depends only on its own samples. At 320×84, a frame where nothing moved matches in 8.9 ms instead of 125.7 ms. The WebGPU backend and the worker pool both honour it; the inline path always matches in full. Details in [`@ascii-fx/gpu`](./packages/gpu).
+`temporal: true` skips cells whose 64 samples are byte-identical to the previous frame. The output is unchanged, since a cell depends only on its own samples. At 320×84, a frame where nothing moved matches in 6.7 ms instead of 46.6 ms. The WebGPU backend and the worker pool both honour it; the inline path always matches in full. Details in [`@ascii-fx/gpu`](./packages/gpu).
 
 ## Tilt
 
@@ -100,7 +100,15 @@ Taking the argmin means a cell whose top candidates score almost the same always
 const frame = matchFrame(source, { profile, jitter: 40 }) // 0 (default) = off, 255 = widest
 ```
 
-The draw is seeded by a hash of the cell position, so results are reproducible and splitting a frame into bands doesn't change them. `jitterSeed` is constant by default; pass a frame counter to animate the dither. Only `@ascii-fx/core` implements it so far. [`ALGORITHM.md §20`](./ALGORITHM.md).
+The draw is seeded by a hash of the cell position, so results are reproducible and splitting a frame into bands doesn't change them. `jitterSeed` is constant by default; pass a frame counter to animate the dither.
+
+The renderer and the React components take the same two options, on every backend:
+
+```tsx
+<AsciiVideo src="/clip.mp4" color="full" jitter={40} />
+```
+
+The hash and the weights are integer arithmetic, so the WebGPU matcher makes the same pick as the CPU one for every cell, and `pnpm test:gpu` checks that. [`ALGORITHM.md §20`](./ALGORITHM.md).
 
 ## Motion
 
@@ -172,21 +180,21 @@ Published libraries, the same animated 1280×720 source, the same 160×42 grid w
 
 | approach                 | picks glyphs by              | p50 ms/frame | ~fps |
 | ------------------------ | ---------------------------- | -----------: | ---: |
-| ascii-fx, WebGPU         | shape + fitted color (exact) |          2.8 |  357 |
-| ascii-fx, no WebGPU      | shape + fitted color (exact) |          2.8 |  357 |
-| textmode.js 0.17 (WebGL) | brightness + color           |          4.5 |  222 |
-| three.js AsciiEffect     | brightness                   |          8.2 |  122 |
-| aalib.js 2.0, mono       | brightness                   |         10.3 |   97 |
-| aalib.js 2.0, colored    | brightness + color           |         16.8 |   60 |
-| chafa-wasm 0.3           | shape-aware blocks + fg/bg   |         50.1 |   20 |
+| ascii-fx, WebGPU         | shape + fitted color (exact) |          2.5 |  400 |
+| ascii-fx, no WebGPU      | shape + fitted color (exact) |          2.3 |  435 |
+| textmode.js 0.18 (WebGL) | brightness + color           |          3.7 |  270 |
+| three.js AsciiEffect     | brightness                   |          6.0 |  167 |
+| aalib.js 2.0, mono       | brightness                   |          8.9 |  112 |
+| aalib.js 2.0, colored    | brightness + color           |         13.8 |   72 |
+| chafa-wasm 0.3           | shape-aware blocks + fg/bg   |         46.8 |   21 |
 
-The scene-only floor is 2.7 ms, so neither path adds measurable main-thread cost. Without a GPU the matcher runs on workers and the grid is painted by WebGL2. Removing those one at a time:
+The scene-only floor is 2.4 ms, so neither path adds measurable main-thread cost. Without a GPU the matcher runs on workers and the grid is painted by WebGL2. Removing those one at a time:
 
 | fallback, by stage                   | p50 ms/frame | ~fps |
 | ------------------------------------ | -----------: | ---: |
-| matcher on the main thread, Canvas2D |         42.0 |   24 |
-| matcher on workers, Canvas2D         |         31.9 |   31 |
-| matcher on workers, WebGL2 composite |          2.8 |  357 |
+| matcher on the main thread, Canvas2D |         39.3 |   25 |
+| matcher on workers, Canvas2D         |         29.7 |   34 |
+| matcher on workers, WebGL2 composite |          2.3 |  435 |
 
 The cells are identical in all three. Full tables and methodology: [`RESULTS.md`](./apps/benchmarks/RESULTS.md).
 

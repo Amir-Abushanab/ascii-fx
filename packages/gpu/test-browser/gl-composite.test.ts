@@ -7,7 +7,12 @@ import { describe, expect, it } from 'vitest'
 import type { ColorMode } from '@ascii-fx/core'
 import { createAsciiRenderer } from '@ascii-fx/gpu'
 import { GlCompositor } from '../src/glCompositor.js'
-import { STANDARD_SIX, makeProfile, randomImage } from '../../core/test/synthetic.js'
+import {
+  STANDARD_SIX,
+  makeChromaticProfile,
+  makeProfile,
+  randomImage,
+} from '../../core/test/synthetic.js'
 
 const settle = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
@@ -83,6 +88,29 @@ describe('webgl2 compositor', () => {
     })
   }
 
+  // A chromatic frame is 'glyph' whatever `color` says, and `color` is unset in the usual
+  // call. Drawn as the mono default, each emoji came out as its alpha silhouette in the
+  // foreground colour: the right shapes in the wrong picture, which nothing but pixels shows.
+  it('draws chromatic glyphs in their own colours, as Canvas2D does', async () => {
+    const hues: Array<[number, number, number]> = [
+      [220, 40, 40],
+      [40, 200, 60],
+      [50, 80, 230],
+      [230, 200, 30],
+    ]
+    const chromatic = makeChromaticProfile(
+      hues.map((c, i) => ({
+        char: String.fromCodePoint(0x1f300 + i),
+        at: (x: number, y: number): [number, number, number, number] =>
+          (x + y + i) % 3 === 0 ? [c[2], c[0], c[1], 255] : [c[0], c[1], c[2], 255],
+      })),
+    )
+    const options = { profile: chromatic, matcher: 'chromatic', background: [11, 11, 15] }
+    const gl = await draw('auto', 'mono', options)
+    const c2d = await draw('canvas2d', 'mono', options)
+    expect(meanAbsDiff(gl.data, c2d.data)).toBeLessThan(8)
+  })
+
   it('paints something rather than an empty canvas', async () => {
     const { data } = await draw('auto', 'full')
     let lit = 0
@@ -98,6 +126,40 @@ describe('webgl2 compositor', () => {
     expect(data[3]).toBe(0) // top-left corner, in the letterbox
     const mid = ((256 >> 1) * 320 + 160) * 4
     expect(data[mid + 3]).toBeGreaterThan(0) // middle of the grid, painted
+  })
+
+  // The canvas is bound to WebGL, so there is no 2D context to fall back to while the
+  // context is lost: presenting used to reach for one anyway and throw.
+  it('survives a lost context and repaints once it is restored', async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 320
+    canvas.height = 192
+    const renderer = await createAsciiRenderer({
+      canvas,
+      profile: makeProfile(STANDARD_SIX),
+      backend: 'cpu',
+      columns: 20,
+      color: 'full',
+      workers: false,
+    })
+    renderer.setSource(source)
+    renderer.render()
+    const before = readPixels(canvas)
+
+    const lose = (canvas.getContext('webgl2') as WebGL2RenderingContext).getExtension(
+      'WEBGL_lose_context',
+    )!
+    lose.loseContext()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(() => renderer.render()).not.toThrow()
+    expect(() => renderer.resize(320, 192)).not.toThrow()
+    expect(renderer.pipeline.compositor).toBe('webgl2')
+
+    lose.restoreContext()
+    await new Promise((r) => setTimeout(r, 100))
+    // Nothing asked for a render: the restore repainted the still by itself.
+    expect(meanAbsDiff(readPixels(canvas), before)).toBeLessThan(1)
+    renderer.destroy()
   })
 
   it('reports unavailable after the context is lost', async () => {

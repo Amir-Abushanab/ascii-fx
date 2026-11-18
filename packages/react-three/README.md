@@ -11,7 +11,15 @@ import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three/webgpu'
 import { AsciiEffect } from '@ascii-fx/react-three'
 
-;<Canvas gl={(canvas) => new THREE.WebGPURenderer({ canvas })}>
+;<Canvas
+  gl={async (props) => {
+    // R3F hands the factory its renderer props (canvas, antialias, …), not the canvas itself,
+    // and waits on the promise: WebGPURenderer has to be initialized before its first render.
+    const renderer = new THREE.WebGPURenderer(props as never)
+    await renderer.init()
+    return renderer
+  }}
+>
   <mesh>
     <torusKnotGeometry />
     <meshNormalMaterial />
@@ -29,7 +37,7 @@ This is the only entry point in the project that pulls in `three` _and_ `@react-
 ## Components
 
 - **`<AsciiEffect>`** — post-processes the scene through the exact matcher on the renderer's own device, no readback.
-- **`<AsciiGlyphs>`** — an instanced glyph mesh you can place, light, and move within the scene.
+- **`<AsciiGlyphs>`** — an instanced, unlit glyph mesh you can place and move within the scene; give it a matched `frame`.
 - **`useAsciiEffect`** — the hook underneath, when you want the pass without the component.
 
 Requires an R3F v9 `<Canvas>` running `THREE.WebGPURenderer`; see [`@ascii-fx/three`](../three) for why WebGL isn't supported.

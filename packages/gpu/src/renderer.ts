@@ -1,4 +1,5 @@
 import type { AsciiFrame, AsciiProfile } from '@ascii-fx/core'
+import { deriveGrid } from '@ascii-fx/core'
 import { AsciiEngine, AsciiStream } from './engine.js'
 import { MAX_GPU_GLYPHS } from './limits.js'
 import type {
@@ -11,6 +12,7 @@ import type {
 } from './types.js'
 import {
   assertInteraction,
+  assertJitter,
   isLiveSource,
   isRawImage,
   outputCanBeTransparent,
@@ -59,6 +61,18 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   private velY = 0
   private readonly t0 = performance.now()
   private renderScheduled = false
+  /**
+   * Which loop is running, if one is. A requestAnimationFrame loop repaints every frame by
+   * itself, so one-off repaints stand down for it. A video-frame loop fires only when the
+   * video presents a frame — not while it is paused, ended or buffering — so a pointer move
+   * or a resize still has to ask for its own repaint.
+   */
+  private rafLoop = false
+  private frameLoop = false
+  /** What the caller last asked for, which a device loss must not overwrite. */
+  private wantRunning = false
+  /** A throw from the loop has been logged and not yet followed by a good frame. */
+  private loopFaulted = false
 
   private running = false
   private loopGeneration = 0
@@ -95,6 +109,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       onError,
       ...rest
     } = options
+    assertJitter(rest)
     this.opts = rest
     assertInteraction(interaction)
     this.interaction = interaction ?? null
@@ -236,9 +251,12 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       // A loss long after the last recovery is a fresh incident, not evidence
       // that recovery failed — its attempt budget starts from zero.
       if (Date.now() - this.lastRecoverAt > RECOVERY_INCIDENT_MS) this.recoverAttempts = 0
-      const wasRunning = this.running
+      // The loop stops for the rebuild, but that is not the caller stopping it: start() and
+      // stop() during the rebuild still decide whether it comes back running.
+      const want = this.wantRunning
       this.stop()
-      const attempt = this.recover(info, wasRunning).finally(() => {
+      this.wantRunning = want
+      const attempt = this.recover(info).finally(() => {
         if (this.recovery === attempt) this.recovery = undefined
       })
       this.recovery = attempt
@@ -251,7 +269,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
    * — a context can be reconfigured onto a new device, it just cannot change
    * context type — so the caller's canvas element stays valid.
    */
-  private async recover(info: GPUDeviceLostInfo, wasRunning: boolean): Promise<void> {
+  private async recover(info: GPUDeviceLostInfo): Promise<void> {
     try {
       // A replacement device can arrive already lost — a stale adapter
       // resolves rather than rejects, every op on the dead device no-ops, so
@@ -294,8 +312,6 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.sourceDirty = true
       this.matchDirty = true
       this.compositeDirty = true
-      if (wasRunning) this.start()
-      else this.render()
     } catch {
       // Out of our hands: recovery needs a working GPU, and if there is not one
       // the caller has to decide (swap in a fresh canvas on the CPU backend, or
@@ -305,6 +321,29 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       if (this.onDeviceLost) this.onDeviceLost(info)
       else
         console.error('[ascii-fx] WebGPU device lost and not recovered:', info.reason, info.message)
+      return
+    }
+    // Outside the try: the device is back, so a first frame that fails is a render problem
+    // and must not be reported as a device that could not be recovered.
+    if (this.wantRunning) this.start()
+    else this.renderGuarded()
+  }
+
+  /**
+   * render() for callers with nobody to throw to: a loop tick, a scheduled repaint. A source
+   * that cannot be read right now — a canvas at zero size, a video frame the browser has
+   * dropped — throws from render(); from a loop that used to end the loop while leaving it
+   * marked running, so start() could not bring it back. The failure is logged once, and the
+   * next frame that renders clears it.
+   */
+  private renderGuarded(): void {
+    try {
+      this.render()
+      this.loopFaulted = false
+    } catch (err) {
+      if (this.loopFaulted) return
+      this.loopFaulted = true
+      console.error('[ascii-fx] render failed; it will be retried on the next frame:', err)
     }
   }
 
@@ -328,8 +367,13 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       )
     }
     const previous = this.opts
+    assertJitter({ ...previous, ...options })
     const transparentBefore = this.canBeTransparent()
-    this.opts = { ...previous, ...options }
+    // `interaction` is in the options type because it is a creation option. It has its own
+    // setter, and used to be dropped here without a word; it is forwarded now.
+    const { interaction, ...rest } = options
+    if ('interaction' in options) this.setInteraction(interaction ?? null)
+    this.opts = { ...previous, ...rest }
     const matchChanged =
       previous.columns !== this.opts.columns ||
       previous.rows !== this.opts.rows ||
@@ -340,7 +384,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       previous.foreground !== this.opts.foreground ||
       previous.background !== this.opts.background ||
       previous.flatThreshold !== this.opts.flatThreshold ||
-      previous.temporal !== this.opts.temporal
+      previous.temporal !== this.opts.temporal ||
+      previous.jitter !== this.opts.jitter ||
+      previous.jitterSeed !== this.opts.jitterSeed
     const adaptiveChanged = previous.adaptiveResolution !== this.opts.adaptiveResolution
     if (adaptiveChanged && !this.opts.adaptiveResolution) {
       this.adaptiveScale = 1
@@ -359,6 +405,8 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.configureContext()
     }
     this.compositeDirty = true
+    // Like every other setter: a renderer with no loop has nothing else to repaint it.
+    this.scheduleRender()
   }
 
   setInteraction(interaction: InteractionOptions | null): void {
@@ -371,11 +419,11 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
 
   /** Coalesce pointer/interaction updates into one composite-only render. */
   private scheduleRender(): void {
-    if (this.running || this.renderScheduled || this.destroyed || !this.source) return
+    if (this.rafLoop || this.renderScheduled || this.destroyed || !this.source) return
     this.renderScheduled = true
     const run = (): void => {
       this.renderScheduled = false
-      if (!this.destroyed) this.render()
+      if (!this.destroyed) this.renderGuarded()
     }
     if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(run)
     else run()
@@ -388,21 +436,29 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     // Setting canvas dims discards the presented frame; without a running
     // loop nothing else would repaint and the canvas stays blank (the CPU
     // backend re-presents synchronously here). scheduleRender no-ops while
-    // the loop runs.
+    // a requestAnimationFrame loop runs.
     this.scheduleRender()
   }
 
   private reconfigureStream(): void {
     // Adaptive resolution (spec §46): scale below the requested baseline only;
     // explicit user resolution remains the upper bound.
-    const baseColumns = this.opts.columns
-    const scaled =
-      this.opts.adaptiveResolution && this.adaptiveScale < 1
-        ? Math.max(40, Math.round((baseColumns ?? 120) * this.adaptiveScale))
-        : baseColumns
+    let columns = this.opts.columns
+    let rows = this.opts.rows
+    if (this.opts.adaptiveResolution && this.adaptiveScale < 1) {
+      // Scale the grid the options actually resolve to, both ways. Scaling `columns ?? 120`
+      // alone raised a grid that was under the floor to begin with (16 columns became 40),
+      // and next to an explicit `rows` it changed the picture's aspect.
+      const base = deriveGrid(this.srcW, this.srcH, this.profile, columns, rows)
+      columns = Math.max(Math.min(40, base.columns), Math.round(base.columns * this.adaptiveScale))
+      rows =
+        rows === undefined
+          ? undefined
+          : Math.max(1, Math.round((base.rows * columns) / base.columns))
+    }
     const { gridChanged } = this.stream.configure(this.srcTexture!, this.srcW, this.srcH, {
-      columns: scaled,
-      rows: this.opts.rows,
+      columns,
+      rows,
       color: this.opts.color,
       matcher: this.opts.matcher,
       alpha: this.opts.alpha,
@@ -411,6 +467,8 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       flatThreshold: this.opts.flatThreshold,
       hysteresis: this.opts.hysteresis,
       temporal: this.opts.temporal,
+      jitter: this.opts.jitter,
+      jitterSeed: this.opts.jitterSeed,
       motion: this.interaction?.source === 'motion' ? (this.interaction.motion ?? {}) : undefined,
     })
     if (gridChanged) this.compositeDirty = true
@@ -487,7 +545,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       return
     }
 
-    if (this.sourceDirty || this.sourceLive) {
+    // Under a video-frame loop the callback says when there is a new frame (it sets
+    // sourceDirty), so the repaints in between — a pointer move over a paused video — are
+    // composites of the frame already matched rather than a re-upload of the same pixels.
+    if (this.sourceDirty || (this.sourceLive && !this.frameLoop)) {
       this.prepareSource()
       this.uploadSource()
       this.matchDirty = true
@@ -553,7 +614,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   }
 
   start(): void {
-    if (this.running || this.destroyed || this.deviceLost) return
+    if (this.destroyed) return
+    // Recorded before the device check: a start() during a rebuild is honoured when it ends.
+    this.wantRunning = true
+    if (this.running || this.deviceLost) return
     this.running = true
     const generation = ++this.loopGeneration
     const video =
@@ -561,18 +625,20 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
         ? this.source
         : null
     if (video && 'requestVideoFrameCallback' in video) {
+      this.frameLoop = true
       const cb = (): void => {
         if (!this.running || generation !== this.loopGeneration) return
         this.sourceDirty = true
-        this.render()
+        this.renderGuarded()
         this.rvfcId = video.requestVideoFrameCallback(cb)
       }
       this.rvfcId = video.requestVideoFrameCallback(cb)
     } else {
+      this.rafLoop = true
       const tick = (): void => {
         if (!this.running || generation !== this.loopGeneration) return
         if (this.opts.adaptiveResolution) this.paceAdaptive()
-        this.render()
+        this.renderGuarded()
         this.rafId = requestAnimationFrame(tick)
       }
       this.rafId = requestAnimationFrame(tick)
@@ -610,6 +676,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
 
   stop(): void {
     this.running = false
+    this.wantRunning = false
+    this.rafLoop = false
+    this.frameLoop = false
     this.loopGeneration++
     // The pacing clock measures the gap between consecutive rendered frames.
     // A stopped loop is not a slow frame, so drop the timestamp: without this

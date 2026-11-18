@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -52,6 +53,20 @@ export interface AsciiCommonProps {
   foreground?: RGB
   background?: RGB
   flatThreshold?: number
+  /**
+   * 'chromatic' matches colour glyphs (emoji) by their own colours and needs a profile
+   * compiled with chromatic data. Default 'structural'.
+   */
+  matcher?: 'structural' | 'chromatic'
+  /** chromatic only: keep the previous glyph unless a challenger beats it by this fraction. */
+  hysteresis?: number
+  /**
+   * Break up banding by letting each cell pick among near-equal glyphs, 0..255. Default 0
+   * (off). Structural matcher only; see AsciiRendererOptions.
+   */
+  jitter?: number
+  /** Seed for `jitter`. Constant for a stable dither; a frame counter for one that moves. */
+  jitterSeed?: number
   fit?: FitMode
   clearColor?: readonly [number, number, number, number]
   interaction?: InteractionOptions | null
@@ -81,8 +96,10 @@ export interface AsciiCommonProps {
   /** Honor the user's reduced-motion preference for autoplay and interactions. Default true. */
   respectReducedMotion?: boolean
   /**
-   * Called when the renderer cannot be created, or when a GPU device loss could not be
-   * recovered from. Visually this needs no handling — the `<img>`/`<video>` fallback is
+   * Called when the ASCII render is not going to appear: the profile could not be loaded,
+   * the renderer could not be created, the source could not be read (a cross-origin image
+   * or video without `crossOrigin`), an option was refused, or a GPU device loss could not
+   * be recovered from. Visually this needs no handling — the `<img>`/`<video>` fallback is
    * already on screen and stays there (spec §18) — but without this there is no way for
    * an app to log it or report it, so a silent degrade looks identical to success.
    */
@@ -156,9 +173,51 @@ function useErrorCallback(error: Error | null, onError?: (error: Error) => void)
   }, [error])
 }
 
+/**
+ * A source the renderer could not read, kept as state so it reaches `onError`.
+ *
+ * Both backends read the source's pixels the moment they render, and the browser refuses
+ * that for anything cross-origin loaded without CORS. Thrown from an effect, the refusal
+ * unmounts the tree; thrown from a `load` listener, it goes to the console and nowhere
+ * else. Either way the fallback element is what should stay on screen, with the app told
+ * why — which is what a failed init already does.
+ */
+function useSourceError(): {
+  sourceError: Error | null
+  /** Run an attach; false, with the error recorded, if it threw. */
+  guard: (attach: () => void) => boolean
+  clear: () => void
+  /** The same fact as `sourceError`, readable in the commit that set it. */
+  failed: React.RefObject<boolean>
+} {
+  const [sourceError, setSourceError] = useState<Error | null>(null)
+  // One report per source. The same refusal comes back from every later render of it — a
+  // resize, say — and those are the one failure again, not new ones.
+  const failed = useRef(false)
+  const guard = useCallback((attach: () => void): boolean => {
+    try {
+      attach()
+      return true
+    } catch (err) {
+      if (!failed.current) {
+        failed.current = true
+        console.error('[ascii-fx] source could not be rendered:', err)
+        setSourceError(err instanceof Error ? err : new Error(String(err)))
+      }
+      return false
+    }
+  }, [])
+  const clear = useCallback((): void => {
+    failed.current = false
+    setSourceError(null)
+  }, [])
+  return { sourceError, guard, clear, failed }
+}
+
 function useCanvasAutosize(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   renderer: AsciiRenderer | null,
+  guard: (render: () => void) => boolean,
 ): void {
   useEffect(() => {
     const canvas = canvasRef.current
@@ -169,15 +228,19 @@ function useCanvasAutosize(
       const w = Math.max(1, Math.round(rect.width * dpr))
       const h = Math.max(1, Math.round(rect.height * dpr))
       if (canvas.width !== w || canvas.height !== h) {
-        renderer.resize(w, h)
-        renderer.render()
+        // Guarded like an attach: this renders whatever source is set, readable or not,
+        // and the first run is in an effect body.
+        guard(() => {
+          renderer.resize(w, h)
+          renderer.render()
+        })
       }
     }
     sync()
     const ro = new ResizeObserver(sync)
     ro.observe(canvas)
     return () => ro.disconnect()
-  }, [canvasRef, renderer])
+  }, [canvasRef, renderer, guard])
 }
 
 function useHandle(
@@ -340,6 +403,14 @@ function useContinuousPlayback(
   pauseWhenOffscreen: boolean,
   respectReducedMotion: boolean,
   mediaRef?: React.RefObject<HTMLVideoElement | null>,
+  /** Set when the source just refused to render; a loop over it would throw every frame. */
+  blocked?: React.RefObject<boolean>,
+  /**
+   * Whether this also plays and pauses the media element. False for a video the page drives
+   * itself (`autoPlay={false}`): the render loop still follows visibility, but when the video
+   * plays is the caller's business, and motion they started is not motion to suppress.
+   */
+  drivesMedia = true,
 ): boolean {
   const reducedMotion = usePrefersReducedMotion()
 
@@ -356,11 +427,14 @@ function useContinuousPlayback(
 
     const stopGate = observeRunGate(
       wrapperRef.current,
-      { pauseWhenOffscreen, motionAllowed: !respectReducedMotion || !reducedMotion },
+      {
+        pauseWhenOffscreen,
+        motionAllowed: !drivesMedia || !respectReducedMotion || !reducedMotion,
+      },
       (shouldRun, visible) => {
-        const media = mediaRef?.current
+        const media = drivesMedia ? mediaRef?.current : null
         if (shouldRun) {
-          if (!running) renderer.start()
+          if (!running && !blocked?.current) renderer.start()
           if (media?.paused) void media.play().catch(() => {})
         } else {
           renderer.stop()
@@ -375,7 +449,7 @@ function useContinuousPlayback(
     return () => {
       stopGate()
       renderer.stop()
-      mediaElement?.pause()
+      if (drivesMedia) mediaElement?.pause()
     }
   }, [
     wrapperRef,
@@ -385,6 +459,8 @@ function useContinuousPlayback(
     respectReducedMotion,
     reducedMotion,
     mediaRef,
+    blocked,
+    drivesMedia,
   ])
 
   return reducedMotion
@@ -482,6 +558,8 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
     ...options,
   })
 
+  const { sourceError, guard, clear } = useSourceError()
+
   const reducedMotion = usePrefersReducedMotion()
   // Read at paint time rather than depended on: an inline `draw={(ctx) => …}` changes
   // identity every commit, and re-running the effect on that would rebuild the buffer and
@@ -508,6 +586,9 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
     let stopGate: (() => void) | undefined
 
     const attach = (): void => {
+      guard(attachSource)
+    }
+    const attachSource = (): void => {
       if (!live || img.naturalWidth === 0) return
       const buffer = drawn ? document.createElement('canvas') : undefined
       if (buffer) {
@@ -565,14 +646,26 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
       stopGate?.()
       repaintRef.current = null
       setReady(false)
+      clear()
     }
+  }, [
+    renderer,
     // `src` is not read above, but it is a real dependency: swapping it has to
     // run this cleanup so readiness resets and the new source re-attaches.
     // oxlint-disable-next-line react/exhaustive-effect-dependencies
-  }, [renderer, src, drawn, animate, fps, pauseWhenOffscreen, respectReducedMotion, reducedMotion])
+    src,
+    drawn,
+    animate,
+    fps,
+    pauseWhenOffscreen,
+    respectReducedMotion,
+    reducedMotion,
+    guard,
+    clear,
+  ])
 
-  useErrorCallback(error, onError)
-  useCanvasAutosize(canvasRef, renderer)
+  useErrorCallback(error ?? sourceError, onError)
+  useCanvasAutosize(canvasRef, renderer, guard)
   usePointerForward(wrapperRef, renderer)
   useHandle(ref, renderer, useTiltForward(renderer, tilt, respectReducedMotion))
 
@@ -594,21 +687,41 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
 
 export interface AsciiVideoProps extends AsciiCommonProps {
   src: string
+  /**
+   * Needed for a video served from another origin: without it the browser refuses to let
+   * the frames be read, the ASCII render never appears, and `onError` says so. The server
+   * has to send CORS headers for it too.
+   */
+  crossOrigin?: 'anonymous' | 'use-credentials'
   poster?: string
   muted?: boolean
   loop?: boolean
+  /**
+   * Default true. With `false` nothing plays until you say so: take the element from
+   * `videoRef` and call `play()` on it, and the ASCII render follows the video from there —
+   * playing, paused, or scrubbed.
+   */
   autoPlay?: boolean
   playsInline?: boolean
+  /** The `<video>` underneath, for playback you drive yourself: play, pause, seek, volume. */
+  videoRef?: React.Ref<HTMLVideoElement>
+  /** The video's accessible name. A `<video>` has no `alt`, so without one it is unnamed. */
+  'aria-label'?: string
+  'aria-labelledby'?: string
 }
 
 export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function AsciiVideo(props, ref) {
   const {
     src,
+    crossOrigin,
     poster,
     muted = true,
     loop = true,
     autoPlay = true,
     playsInline = true,
+    videoRef: outerVideoRef,
+    'aria-label': ariaLabel,
+    'aria-labelledby': ariaLabelledBy,
     className,
     style,
     profile,
@@ -623,6 +736,9 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  // The <video> is mounted for the component's whole life, so the caller's ref can simply
+  // be handed the same element once it exists.
+  useImperativeHandle(outerVideoRef, () => videoRef.current as HTMLVideoElement, [])
   const [ready, setReady] = useState(false)
   const { renderer, canvasKey, error } = useAscii(canvasRef, {
     profile,
@@ -631,6 +747,7 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
     respectReducedMotion,
     ...options,
   })
+  const { sourceError, guard, clear } = useSourceError()
 
   useEffect(() => {
     const video = videoRef.current
@@ -638,9 +755,13 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
     let live = true
     const attach = (): void => {
       if (!live || video.videoWidth === 0) return
-      renderer.setSource(video)
-      renderer.render()
-      setReady(true)
+      // `ready` stays false if this throws, so the loop never starts on a source it
+      // cannot read and the <video> itself keeps playing underneath.
+      guard(() => {
+        renderer.setSource(video)
+        renderer.render()
+        setReady(true)
+      })
     }
     if (video.readyState >= 2) attach()
     video.addEventListener('loadeddata', attach)
@@ -649,23 +770,28 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
       video.removeEventListener('loadeddata', attach)
       renderer.stop()
       setReady(false)
+      clear()
     }
     // `src` is not read above, but it is a real dependency: swapping it has to
     // run this cleanup so readiness resets and the new source re-attaches.
     // oxlint-disable-next-line react/exhaustive-effect-dependencies
-  }, [renderer, src])
+  }, [renderer, src, guard, clear])
 
   const reducedMotion = useContinuousPlayback(
     wrapperRef,
     renderer,
-    ready && autoPlay,
+    // Not `ready && autoPlay`: a video the page plays itself still needs the loop, or
+    // pressing play moves the video and leaves the ASCII on its first frame.
+    ready,
     pauseWhenOffscreen,
     respectReducedMotion,
     videoRef,
+    undefined,
+    autoPlay,
   )
 
-  useErrorCallback(error, onError)
-  useCanvasAutosize(canvasRef, renderer)
+  useErrorCallback(error ?? sourceError, onError)
+  useCanvasAutosize(canvasRef, renderer, guard)
   usePointerForward(wrapperRef, renderer)
   useHandle(ref, renderer, useTiltForward(renderer, tilt, respectReducedMotion))
 
@@ -674,6 +800,9 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
       <video
         ref={videoRef}
         src={src}
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
+        crossOrigin={crossOrigin}
         poster={poster}
         muted={muted}
         loop={loop}
@@ -691,6 +820,13 @@ export interface AsciiCanvasProps extends AsciiCommonProps {
   source?: HTMLCanvasElement | OffscreenCanvas | null
   /** 'continuous' re-matches every animation frame (§45). Default 'continuous'. */
   renderMode?: 'manual' | 'continuous'
+  /**
+   * An accessible name for the picture. The canvas itself is hidden from assistive
+   * technology, so without this, or `children` that describe it, there is nothing to read.
+   * With one, the wrapper is exposed as an image by that name.
+   */
+  'aria-label'?: string
+  'aria-labelledby'?: string
   children?: ReactNode
 }
 
@@ -699,6 +835,8 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(
     const {
       source,
       renderMode = 'continuous',
+      'aria-label': ariaLabel,
+      'aria-labelledby': ariaLabelledBy,
       children,
       className,
       style,
@@ -721,28 +859,46 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(
       ...options,
     })
 
+    const { sourceError, guard, clear, failed } = useSourceError()
+
     useEffect(() => {
       if (!renderer || !source) return
-      renderer.setSource(source)
-      renderer.render()
-      return () => renderer.stop()
-    }, [renderer, source])
+      guard(() => {
+        renderer.setSource(source)
+        renderer.render()
+      })
+      return () => {
+        renderer.stop()
+        clear()
+      }
+    }, [renderer, source, guard, clear])
 
     useContinuousPlayback(
       wrapperRef,
       renderer,
-      Boolean(source) && renderMode === 'continuous',
+      Boolean(source) && !sourceError && renderMode === 'continuous',
       pauseWhenOffscreen,
       respectReducedMotion,
+      undefined,
+      // `sourceError` is state, so it is a commit behind the attach that set it; this effect
+      // runs in that same commit and needs the answer now.
+      failed,
     )
 
-    useErrorCallback(error, onError)
-    useCanvasAutosize(canvasRef, renderer)
+    useErrorCallback(error ?? sourceError, onError)
+    useCanvasAutosize(canvasRef, renderer, guard)
     usePointerForward(wrapperRef, renderer)
     useHandle(ref, renderer, useTiltForward(renderer, tilt, respectReducedMotion))
 
     return (
-      <div ref={wrapperRef} className={className} style={wrapperStyle(style)}>
+      <div
+        ref={wrapperRef}
+        className={className}
+        style={wrapperStyle(style)}
+        role={ariaLabel || ariaLabelledBy ? 'img' : undefined}
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
+      >
         {children}
         <canvas key={canvasKey} ref={canvasRef} aria-hidden style={canvasStyle} />
       </div>

@@ -52,6 +52,20 @@ describe('AsciiFrame exports', () => {
     expect(monoSvg).toContain('fill="#ff0000"')
   })
 
+  it('toSVG keeps a font family from closing its attribute', () => {
+    // The family comes from profile metadata, and a profile can be someone else's file.
+    const hostile = {
+      ...profile,
+      metadata: { ...profile.metadata, fontFamily: 'x" onmouseover="alert(1)' },
+    }
+    const frame = matchFrame(topDark, { profile: hostile, columns: 1, rows: 1, color: 'mono' })
+    for (const svg of [frameToSVG(frame), frameToSVG(frame, { fontFamily: 'a" onclick="x' })]) {
+      const tag = svg.match(/<g font-family=[^>]*>/)![0]
+      expect(tag).not.toMatch(/ on\w+="/)
+      expect(tag).toContain('&quot;')
+    }
+  })
+
   it('toSVG skips blank cells instead of emitting them', () => {
     const blank = matchFrame(
       makeCell(() => [0, 0, 0]),

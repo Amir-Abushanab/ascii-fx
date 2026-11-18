@@ -178,10 +178,10 @@ export function matchBand(
   const sr = new Uint8Array(64)
   const sg = new Uint8Array(64)
   const sb = new Uint8Array(64)
+  // r² + g² + b² per sample, for the closed-form rerank error (§10).
+  const sq = new Int32Array(64)
   const candId = new Int32Array(8)
   const candScore = new Int32Array(8)
-  // jitter-v1 needs every candidate's error and its own fitted colours, not just
-  // the winner's, so it carries them out of the rerank loop.
   const candErr = jitterOn ? new Int32Array(8) : undefined
   const candFg = jitterOn ? new Uint32Array(8) : undefined
   const candBg = jitterOn ? new Uint32Array(8) : undefined
@@ -224,6 +224,7 @@ export function matchBand(
       let sumB = 0
       let sumL = 0
       let sumA = 0
+      let sumQ = 0
       for (let j = 0; j < 8; j++) {
         let p = ((cy * 8 + j) * SW + cx * 8) * 4
         for (let i = 0; i < 8; i++, p += 4) {
@@ -234,6 +235,9 @@ export function matchBand(
           sr[k] = r
           sg[k] = g
           sb[k] = b
+          const q = r * r + g * g + b * b
+          sq[k] = q
+          sumQ += q
           const l = luma8(r, g, b)
           if (l < minL) {
             minL = l
@@ -348,6 +352,13 @@ export function matchBand(
       }
 
       // Exact rerank (§10).
+      //
+      // The error is evaluated in closed form rather than sample by sample. For a set S
+      // of samples drawn in one colour c, Σ(s − c)² = Σs² − 2c·Σs + |S|·c² — an integer
+      // identity, so with c the already-rounded fitted colour this is the same number the
+      // 64-sample sum produces, bit for bit (peak 64·3·255² = 12,484,800). That leaves
+      // one pass per candidate, over whichever side of its mask has fewer samples; the
+      // other side is the cell totals minus it.
       let bestErr = 0x7fffffff
       let bestId = candId[0]
       let bestFg = 0
@@ -356,6 +367,42 @@ export function matchBand(
         const g = candId[c]
         const gLo = masksLo[g]
         const gHi = masksHi[g]
+        const iN = popcount32(gLo) + popcount32(gHi)
+        const oN = 64 - iN
+        const flip = iN > 32
+        let aR = 0
+        let aG = 0
+        let aB = 0
+        let aQ = 0
+        let m = flip ? ~gLo : gLo | 0
+        while (m !== 0) {
+          const t = m & -m
+          const k = 31 - Math.clz32(t)
+          aR += sr[k]
+          aG += sg[k]
+          aB += sb[k]
+          aQ += sq[k]
+          m ^= t
+        }
+        m = flip ? ~gHi : gHi | 0
+        while (m !== 0) {
+          const t = m & -m
+          const k = 63 - Math.clz32(t)
+          aR += sr[k]
+          aG += sg[k]
+          aB += sb[k]
+          aQ += sq[k]
+          m ^= t
+        }
+        const iR = flip ? sumR - aR : aR
+        const iG = flip ? sumG - aG : aG
+        const iB = flip ? sumB - aB : aB
+        const iQ = flip ? sumQ - aQ : aQ
+        const oR = sumR - iR
+        const oG = sumG - iG
+        const oB = sumB - iB
+        const oQ = sumQ - iQ
+
         let fR: number
         let fG: number
         let fB: number
@@ -369,67 +416,30 @@ export function matchBand(
           bR = bgOpt[0]
           bG = bgOpt[1]
           bB = bgOpt[2]
+        } else if (full) {
+          const hasInk = iN > 0
+          const hasOff = oN > 0
+          fR = hasInk ? rdiv(iR, iN) : rdiv(oR, oN)
+          fG = hasInk ? rdiv(iG, iN) : rdiv(oG, oN)
+          fB = hasInk ? rdiv(iB, iN) : rdiv(oB, oN)
+          bR = hasOff ? rdiv(oR, oN) : fR
+          bG = hasOff ? rdiv(oG, oN) : fG
+          bB = hasOff ? rdiv(oB, oN) : fB
         } else {
-          let iR = 0
-          let iG = 0
-          let iB = 0
-          let iN = 0
-          let oR = 0
-          let oG = 0
-          let oB = 0
-          let oN = 0
-          for (let k = 0; k < 64; k++) {
-            const on = k < 32 ? (gLo >>> k) & 1 : (gHi >>> (k - 32)) & 1
-            if (on) {
-              iR += sr[k]
-              iG += sg[k]
-              iB += sb[k]
-              iN++
-            } else {
-              oR += sr[k]
-              oG += sg[k]
-              oB += sb[k]
-              oN++
-            }
-          }
-          if (full) {
-            const hasInk = iN > 0
-            const hasOff = oN > 0
-            const inkR = hasInk ? rdiv(iR, iN) : rdiv(oR, oN)
-            const inkG = hasInk ? rdiv(iG, iN) : rdiv(oG, oN)
-            const inkB = hasInk ? rdiv(iB, iN) : rdiv(oB, oN)
-            const offR = hasOff ? rdiv(oR, oN) : inkR
-            const offG = hasOff ? rdiv(oG, oN) : inkG
-            const offB = hasOff ? rdiv(oB, oN) : inkB
-            fR = inkR
-            fG = inkG
-            fB = inkB
-            bR = offR
-            bG = offG
-            bB = offB
-          } else {
-            fR = iN > 0 ? rdiv(iR, iN) : bgOpt[0]
-            fG = iN > 0 ? rdiv(iG, iN) : bgOpt[1]
-            fB = iN > 0 ? rdiv(iB, iN) : bgOpt[2]
-            bR = bgOpt[0]
-            bG = bgOpt[1]
-            bB = bgOpt[2]
-          }
+          fR = iN > 0 ? rdiv(iR, iN) : bgOpt[0]
+          fG = iN > 0 ? rdiv(iG, iN) : bgOpt[1]
+          fB = iN > 0 ? rdiv(iB, iN) : bgOpt[2]
+          bR = bgOpt[0]
+          bG = bgOpt[1]
+          bB = bgOpt[2]
         }
-        // §10 permits stopping a candidate that has already lost. jitter-v1
-        // weights every candidate, so it needs the full error and raises the
-        // limit past anything reachable (max 64·3·255² = 12,484,800) instead of
-        // branching inside the loop.
-        const errLimit = jitterOn ? 0x7fffffff : bestErr
-        let err = 0
-        for (let k = 0; k < 64; k++) {
-          const on = k < 32 ? (gLo >>> k) & 1 : (gHi >>> (k - 32)) & 1
-          const e0 = sr[k] - (on ? fR : bR)
-          const e1 = sg[k] - (on ? fG : bG)
-          const e2 = sb[k] - (on ? fB : bB)
-          err += e0 * e0 + e1 * e1 + e2 * e2
-          if (err >= errLimit) break
-        }
+        const err =
+          iQ -
+          2 * (fR * iR + fG * iG + fB * iB) +
+          iN * (fR * fR + fG * fG + fB * fB) +
+          (oQ - 2 * (bR * oR + bG * oG + bB * oB) + oN * (bR * bR + bG * bG + bB * bB))
+        // jitter-v1 weights every candidate, so it carries each one's error and colours
+        // out of the loop, not just the winner's.
         if (jitterOn) {
           candErr![c] = err
           candFg![c] = packRGBA(fR, fG, fB)

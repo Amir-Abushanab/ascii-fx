@@ -16,6 +16,9 @@ export interface BandOptions {
    * pool has to hand a band to the same worker every frame.
    */
   temporal?: boolean
+  /** jitter-v1 (ALGORITHM.md §20). Each band is told its frame row, so the draw is band-proof. */
+  jitter?: number
+  jitterSeed?: number
   /**
    * Ask each band for a motion field (ALGORITHM.md §21) alongside its cells.
    * Independent of `temporal` — the field carries its own previous-luma state

@@ -21,7 +21,7 @@ ascii.setSource(video)
 ascii.start()
 ```
 
-~2.6 ms/frame on an M3 Pro at 160×42 — indistinguishable from drawing the source alone, because matching and compositing overlap on the GPU.
+~2.5 ms/frame on an M3 Pro at 160×42 — indistinguishable from drawing the source alone, because matching and compositing overlap on the GPU.
 
 ## The fallback is not a downgrade
 
@@ -41,7 +41,7 @@ await createAsciiRenderer({ canvas, profile, backend: 'cpu', workers: 4 }) // pi
 await createAsciiRenderer({ canvas, profile, backend: 'cpu', compositor: 'canvas2d' }) // paint on Canvas2D
 ```
 
-At 160×42 on an M3 Pro, taking those one at a time: 42.0 ms/frame on the main thread with Canvas2D, 31.9 with the worker pool, **2.8 with the WebGL2 composite as well** — the same number the WebGPU backend posts, and the scene-only floor is 2.7.
+At 160×42 on an M3 Pro, taking those one at a time: 39.3 ms/frame on the main thread with Canvas2D, 29.7 with the worker pool, **2.3 with the WebGL2 composite as well** — within a tenth or two of the WebGPU backend's 2.5 and of the scene-only floor, 2.4.
 
 A live source pays one frame of latency for the matcher: the renderer presents a frame while the next one matches. The first frame, static sources, and `captureFrame()` are matched inline and pay none. `chromatic` carries frame-to-frame hysteresis and stays on the main thread, though it is painted by the same WebGL2 composite.
 

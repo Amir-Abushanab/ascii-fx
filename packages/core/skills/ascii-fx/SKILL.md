@@ -111,7 +111,7 @@ needs one. Three ways to get one, in order of preference:
 const profile = await loadProfile('/default.asciip')
 
 // 2. Vite virtual module (compiles at build time, hot-reloads in dev).
-import profile from 'virtual:ascii-fx/profile/default'
+import profileRef from 'virtual:ascii-profile/default' // { url, id } — pass to loadProfile()
 
 // 3. Rasterised in the browser from an installed font — convenient, NOT deterministic.
 import { createAsciiProfile } from '@ascii-fx/core'
@@ -142,7 +142,7 @@ index). The GPU takes as many glyphs as fit one atlas texture (~4,000 kanji); pa
 | `compositor`         | How the CPU backend paints: `auto` (WebGL2 where available) or `canvas2d`. Escape hatch only.                                                                                                       |
 | `temporal`           | Skip re-matching cells whose pixels did not change. Exact, great for video. WebGPU and the CPU worker pool; the CPU inline path always matches in full.                                             |
 | `adaptiveResolution` | Lower `columns` under frame pressure and recover. **WebGPU only** — so two backends can land on different grids.                                                                                    |
-| `jitter`             | `0` (default, off) to `255`. Vary a cell's glyph among the candidates that reconstruct it nearly as well, so near-ties stop banding. `@ascii-fx/core` only, no GPU backend.                         |
+| `jitter`             | `0` (default, off) to `255`. Vary a cell's glyph among the candidates that reconstruct it nearly as well, so near-ties stop banding. Same pick on every backend; `jitterSeed` moves it.             |
 | `palette`            | `{ colors, dither?, spread? }`: snap fitted colours to a palette (≤256) through an optional Bayer dither. `foreground`/`full` only. Never rematches; `captureFrame()` includes it.                  |
 | `post`               | `{ scanlines, vignette, curvature, aberration, grain, bloom }` strengths, 0 = off. Screen-space, never in a captured frame. Canvas2D draws only scanlines, vignette and bloom.                      |
 | `interaction`        | Pointer/time effects composited on top (`reveal`, `displace`, `wave`, `push`…). Never re-runs matching. `source: 'motion'` drives them from where the source is moving instead of from the pointer. |

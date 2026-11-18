@@ -29,6 +29,7 @@ import type {
 } from './types.js'
 import {
   assertInteraction,
+  assertJitter,
   isLiveSource,
   isRawImage,
   outputCanBeTransparent,
@@ -45,6 +46,13 @@ const COMPOSITE_ONLY = new Set(['palette', 'post', 'fit', 'clearColor'])
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
 const TIME_BASED = new Set(['wave', 'displace'])
+
+/**
+ * How many animation frames render() has to go uncalled before the adoption fallback takes a
+ * finished band job itself. More than the two that separate the frames of a 30 fps video on
+ * a 60 Hz display, so a playing video is left to adopt in its own callbacks.
+ */
+const ADOPT_AFTER_QUIET_FRAMES = 3
 
 const smoothstep = (edge0: number, edge1: number, x: number): number => {
   const t = Math.min(1, Math.max(0, (x - edge0) / Math.max(edge1 - edge0, 1e-6)))
@@ -135,17 +143,31 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   /** The grid and colour mode the in-flight band job was submitted with. */
   private pending?: { columns: number; rows: number; colorMode: ColorMode }
   private adoptScheduled = false
+  /** Whether the running loop is requestAnimationFrame's, which re-enters render() by itself. */
+  private rafLoop = false
+  /** Bumped by every render(), so the adoption fallback can tell whether anyone is calling it. */
+  private renderSeq = 0
+  private fullRenderScheduled = false
+  /** A throw from the loop has been logged and not yet followed by a good frame. */
+  private loopFaulted = false
 
   constructor(options: AsciiRendererOptions) {
     this.canvas = options.canvas
     this.profile = options.profile
     const { canvas: _c, profile: _p, backend: _b, interaction, ...rest } = options
+    assertJitter(rest)
     this.opts = rest
     assertInteraction(interaction ?? null)
     this.interaction = interaction ?? null
     this.syncPalette()
     if (options.compositor !== 'canvas2d') {
       this.glc = GlCompositor.tryCreate(this.canvas, this.profile)
+      // A restored context comes back empty, and a still has nothing else to repaint it.
+      if (this.glc) {
+        this.glc.onRestore = () => {
+          if (!this.destroyed && this.lastFrame) this.present(this.lastFrame)
+        }
+      }
     }
     if (!this.glc) {
       const ctx = this.canvas.getContext('2d') as Ctx2D | null
@@ -184,9 +206,13 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       typeof this.workersOption === 'number' ? this.workersOption : undefined,
       (err) => {
         this.pool = undefined
+        // The band job in flight died with the pool, so what it was matching still needs
+        // matching: the next render does it on the main thread.
+        if (this.pending) this.matchDirty = true
         this.pending = undefined
         // Matching is still exact on the main thread, but it is now the main
-        // thread's ~25 ms/frame. Say so rather than let the page just be slow.
+        // thread's time, some 15 ms a frame at 160×42. Say so rather than let the
+        // page just be slow.
         console.error(
           '[ascii-fx] matcher workers unavailable, matching on the main thread:',
           err.message,
@@ -204,7 +230,9 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   get pipeline(): AsciiPipeline {
     return {
       matcher: this.pool?.ready ? 'workers' : 'main-thread',
-      compositor: this.glc && !this.glc.unavailable ? 'webgl2' : 'canvas2d',
+      // The canvas is bound to whichever one took it, for good: a lost WebGL context is a
+      // WebGL compositor that is not painting, not a Canvas2D one.
+      compositor: this.glc ? 'webgl2' : 'canvas2d',
     }
   }
 
@@ -229,9 +257,17 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   setOptions(options: AsciiRendererRuntimeOptions): void {
     const previous = this.opts
-    this.opts = { ...previous, ...options }
+    assertJitter({ ...previous, ...options })
+    // `interaction` is in the options type because it is a creation option. It has its own
+    // setter, and used to be dropped here — while forcing a rematch, since it is not a
+    // composite-only key. It is forwarded now.
+    const { interaction, ...rest } = options
+    if ('interaction' in options) this.setInteraction(interaction ?? null)
+    this.opts = { ...previous, ...rest }
     this.syncPalette()
-    if (Object.keys(options).every((k) => COMPOSITE_ONLY.has(k))) return
+    // Like every other setter: a renderer with no loop has nothing else to repaint it.
+    this.scheduleRender()
+    if (Object.keys(rest).every((k) => COMPOSITE_ONLY.has(k))) return
     // One-frame hysteresis suppression happens after an option *change*, not
     // after any call — a value-identical setOptions must keep incumbents, or
     // this backend diverges from the WebGPU key-based reset. Field list
@@ -246,7 +282,9 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       previous.foreground !== this.opts.foreground ||
       previous.background !== this.opts.background ||
       previous.flatThreshold !== this.opts.flatThreshold ||
-      previous.temporal !== this.opts.temporal
+      previous.temporal !== this.opts.temporal ||
+      previous.jitter !== this.opts.jitter ||
+      previous.jitterSeed !== this.opts.jitterSeed
     if (changed) {
       this.hysteresisPrimed = false
       // The in-flight band job was submitted against the old options; adopting
@@ -316,9 +354,42 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (this.lastFrame) this.present(this.lastFrame)
   }
 
-  /** Coalesce pointer/interaction updates into one composite-only present. */
+  /** Coalesce option changes into one render, which rematches only if something needs it. */
+  private scheduleRender(): void {
+    if (this.rafLoop || this.fullRenderScheduled || this.destroyed) return
+    if (typeof requestAnimationFrame === 'undefined') return
+    this.fullRenderScheduled = true
+    requestAnimationFrame(() => {
+      this.fullRenderScheduled = false
+      if (!this.destroyed && this.source) this.renderGuarded()
+    })
+  }
+
+  /**
+   * render() for callers with nobody to throw to: a loop tick, a scheduled repaint. A source
+   * that cannot be read right now — a canvas at zero size — throws from render(); from a loop
+   * that used to end the loop while leaving it marked running, so start() could not bring it
+   * back. The failure is logged once, and the next frame that renders clears it.
+   */
+  private renderGuarded(): void {
+    try {
+      this.render()
+      this.loopFaulted = false
+    } catch (err) {
+      if (this.loopFaulted) return
+      this.loopFaulted = true
+      console.error('[ascii-fx] render failed; it will be retried on the next frame:', err)
+    }
+  }
+
+  /**
+   * Coalesce pointer/interaction updates into one composite-only present. Stands down for a
+   * requestAnimationFrame loop, which repaints every frame anyway — but not for a video-frame
+   * loop, which fires only while the video is presenting frames and leaves a paused one
+   * with nothing to repaint a hover effect.
+   */
   private scheduleFxPresent(): void {
-    if (this.running || this.renderScheduled || this.destroyed || !this.lastFrame) return
+    if (this.rafLoop || this.renderScheduled || this.destroyed || !this.lastFrame) return
     this.renderScheduled = true
     const run = (): void => {
       this.renderScheduled = false
@@ -330,12 +401,12 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   /** Time-based effects keep compositing (never rematching) while static. */
   private ensureFxLoop(): void {
-    if (this.fxRafId || this.running || this.destroyed) return
+    if (this.fxRafId || this.rafLoop || this.destroyed) return
     if (!this.interaction || !TIME_BASED.has(this.interaction.type)) return
     if (typeof requestAnimationFrame === 'undefined') return
     const tick = (): void => {
       this.fxRafId = 0
-      if (this.destroyed || this.running) return
+      if (this.destroyed || this.rafLoop) return
       if (!this.interaction || !TIME_BASED.has(this.interaction.type)) return
       if (this.lastFrame) this.present(this.lastFrame)
       this.fxRafId = requestAnimationFrame(tick)
@@ -376,6 +447,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         color: this.opts.color,
         foreground: this.opts.foreground,
         flatThreshold: this.opts.flatThreshold,
+        jitter: this.opts.jitter,
+        jitterSeed: this.opts.jitterSeed,
       }
     }
     // chromatic-v1 fits no colour, so foreground/flat have nothing to act on.
@@ -440,7 +513,10 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     const { atlas } = this.profile
     const cw = this.canvas.width
     const ch = this.canvas.height
-    const color = this.opts.color ?? 'mono'
+    // The frame's own mode, not `opts.color`: a chromatic frame is 'glyph' whatever `color`
+    // says (it is ignored for that matcher), and drawing one as mono tints the coverage
+    // atlas — the emoji's alpha — instead of sampling its art.
+    const color = frame.colorMode
     const gridW = frame.columns * atlas.cellWidth
     const gridH = frame.rows * atlas.cellHeight
     const fit = this.opts.fit ?? 'contain'
@@ -584,8 +660,10 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   /** Draw the composited frame to the target with fit + interaction effects. */
   private present(matched: AsciiFrame): void {
-    if (this.glc && !this.glc.unavailable) {
-      this.presentGl(matched)
+    if (this.glc) {
+      // A lost context paints nothing until the browser restores it, and there is no
+      // Canvas2D path to fall to: the canvas is bound to WebGL, so `ctx` does not exist.
+      if (!this.glc.unavailable) this.presentGl(matched)
       return
     }
     const frame = this.display(matched)
@@ -594,8 +672,18 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     const ctx = this.ctx!
     const cw = this.canvas.width
     const ch = this.canvas.height
-    const color = this.opts.color ?? 'mono'
-    const clear = this.opts.clearColor ?? (color === 'foreground' ? [0, 0, 0, 0] : [0, 0, 0, 1])
+    // Same defaults as presentGl and the WebGPU view: a chromatic frame letterboxes in its
+    // backdrop, or in nothing when the output is transparent.
+    const color = frame.colorMode
+    const transparent = outputCanBeTransparent(this.opts)
+    const bd = this.opts.background ?? [0, 0, 0]
+    const clear =
+      this.opts.clearColor ??
+      (color === 'foreground' || (color === 'glyph' && transparent)
+        ? [0, 0, 0, 0]
+        : color === 'glyph'
+          ? [bd[0] / 255, bd[1] / 255, bd[2] / 255, 1]
+          : [0, 0, 0, 1])
     ctx.clearRect(0, 0, cw, ch)
     if (clear[3] > 0) {
       ctx.fillStyle = `rgba(${(clear[0] * 255) | 0},${(clear[1] * 255) | 0},${(clear[2] * 255) | 0},${clear[3]})`
@@ -979,13 +1067,16 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   render(): void {
     if (this.destroyed || !this.source) return
+    this.renderSeq++
+    this.adoptFinished()
     if (this.matchDirty || this.sourceLive || !this.lastFrame) {
-      if (!this.matchOnWorkers()) {
+      if (!this.submitToWorkers()) {
         this.lastFrame = this.matchInline()
         this.hysteresisPrimed = true
         this.matchDirty = false
       }
     }
+    if (this.pending) this.scheduleAdopt()
     if (this.lastFrame) this.present(this.lastFrame)
   }
 
@@ -1041,38 +1132,50 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   }
 
   /**
-   * Pipelined matching on the worker pool: adopt whatever finished since the
-   * last frame, then dispatch this one. Costs one frame of latency on live
-   * sources and gives the main thread back the ~25 ms/frame the cell loop
-   * takes at 160×42 — the cells themselves are the same bytes either way
-   * (@ascii-fx/core's band tests). Returns false when the caller has to match
-   * on the main thread instead.
+   * Take the band job that finished since the last look, if one did. Separate from
+   * submitting the next one, because the two are wanted at different times: every render
+   * adopts, but only a render with something new to match submits.
    */
-  private matchOnWorkers(): boolean {
+  private adoptFinished(): boolean {
+    if (!this.pending || !this.pool) return false
+    const done = this.pool.take()
+    if (!done) return false
+    this.lastFrame = new AsciiFrame({
+      columns: this.pending.columns,
+      rows: this.pending.rows,
+      colorMode: this.pending.colorMode,
+      glyphIds: done.cells.glyphIds,
+      foreground: done.cells.foreground,
+      background: done.cells.background,
+      flags: done.cells.flags,
+      profile: this.profile,
+    })
+    this.lastMotion = done.motion
+    this.hysteresisPrimed = true
+    this.pending = undefined
+    return true
+  }
+
+  /**
+   * Pipelined matching on the worker pool: dispatch this frame and keep showing the last
+   * one until it comes back. Costs one frame of latency on live sources and gives the main
+   * thread back the cell loop — the cells themselves are the same bytes either way
+   * (@ascii-fx/core's band tests). Returns false when the caller has to match on the main
+   * thread instead.
+   */
+  private submitToWorkers(): boolean {
     // chromatic-v1 carries frame-to-frame hysteresis and is not banded.
     if (this.opts.matcher === 'chromatic') return false
+    // A source that only changes when the caller says so is matched where the caller can
+    // see the result: a still has no next frame to hide a frame of latency behind, so
+    // pipelining it would present the old cells and leave the new ones for a render that
+    // may never come. Checked before the pool is spawned, so a page of stills starts no
+    // workers at all.
+    if (!this.sourceLive) return false
     const pool = this.ensurePool()
     if (!pool || !pool.ready || pool.failed) return false
     // Nothing on screen yet: match now rather than show a frame of nothing.
     if (!this.lastFrame) return false
-
-    const done = pool.take()
-    if (done && this.pending) {
-      this.lastFrame = new AsciiFrame({
-        columns: this.pending.columns,
-        rows: this.pending.rows,
-        colorMode: this.pending.colorMode,
-        glyphIds: done.cells.glyphIds,
-        foreground: done.cells.foreground,
-        background: done.cells.background,
-        flags: done.cells.flags,
-        profile: this.profile,
-      })
-      this.lastMotion = done.motion
-      this.hysteresisPrimed = true
-      this.pending = undefined
-      this.matchDirty = false
-    }
 
     if (!pool.busy) {
       const source = this.extract()
@@ -1091,42 +1194,64 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         foreground: this.opts.foreground,
         background: this.opts.background,
         temporal: this.opts.temporal,
+        jitter: this.opts.jitter,
+        jitterSeed: this.opts.jitterSeed,
         motion: this.motionWanted ? (this.interaction?.motion ?? {}) : false,
       }
       if (pool.submit(source, columns, rows, options)) {
         this.pending = { columns, rows, colorMode }
+        // Cleared by the submit, not by the adoption: it means "this source state has
+        // been handed to a matcher", and an adopted frame is an earlier state's.
         this.matchDirty = false
-        this.scheduleAdopt()
       }
     }
     return true
   }
 
   /**
-   * Drive adoption when nothing else will. A running loop re-enters render()
-   * on its own, but a caller who renders by hand — a still image, a manual
-   * loop — would otherwise submit a band job whose result nobody ever picks
-   * up, leaving the last frame on the canvas for good.
+   * Drive adoption when nothing else will. A requestAnimationFrame loop re-enters render()
+   * every frame and adopts there. Nothing else is sure to: a caller who renders by hand may
+   * have no next call coming, and a video-frame loop stops calling the moment the video
+   * pauses or ends, with its last frame still in flight.
+   *
+   * This is a fallback and waits to be needed. A caller that is rendering every frame adopts
+   * in its own render(), which also submits the next frame in the same breath — so the pool
+   * works while that frame is being painted. Adopting from here instead would take the
+   * frame without submitting another and leave the pool idle through the paint. So it
+   * steps in only once render() has gone uncalled for a few frames, and then it adopts and
+   * presents. It matches again in exactly one case: a frame arrived while the pool was busy
+   * and was never submitted, and now there is room for it.
    */
   private scheduleAdopt(): void {
-    if (this.running || this.adoptScheduled || this.destroyed) return
+    if (this.rafLoop || this.adoptScheduled || this.destroyed) return
+    if (typeof requestAnimationFrame === 'undefined') return
     this.adoptScheduled = true
-    requestAnimationFrame(() => {
-      this.adoptScheduled = false
-      if (this.destroyed || this.running) return
-      this.render()
-      if (this.pending) this.scheduleAdopt()
-    })
+    let seen = this.renderSeq
+    let quiet = 0
+    const tick = (): void => {
+      if (this.destroyed || this.rafLoop || !this.pending) {
+        this.adoptScheduled = false
+        return
+      }
+      if (this.renderSeq !== seen) {
+        seen = this.renderSeq
+        quiet = 0
+      } else if (++quiet >= ADOPT_AFTER_QUIET_FRAMES && this.adoptFinished()) {
+        this.adoptScheduled = false
+        // render() re-arms this if it submits; a plain present has nothing left in flight.
+        if (this.matchDirty) this.render()
+        else if (this.lastFrame) this.present(this.lastFrame)
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
   }
 
   start(): void {
     if (this.running || this.destroyed) return
     this.running = true
     const generation = ++this.loopGeneration
-    if (this.fxRafId) {
-      cancelAnimationFrame(this.fxRafId)
-      this.fxRafId = 0
-    }
     const video =
       typeof HTMLVideoElement !== 'undefined' && this.source instanceof HTMLVideoElement
         ? this.source
@@ -1135,14 +1260,21 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       const cb = (): void => {
         if (!this.running || generation !== this.loopGeneration) return
         this.matchDirty = true
-        this.render()
+        this.renderGuarded()
         this.rvfcId = video.requestVideoFrameCallback(cb)
       }
       this.rvfcId = video.requestVideoFrameCallback(cb)
+      // Time-based effects keep their own clock here: this loop only ticks with the video.
+      this.ensureFxLoop()
     } else {
+      this.rafLoop = true
+      if (this.fxRafId) {
+        cancelAnimationFrame(this.fxRafId)
+        this.fxRafId = 0
+      }
       const tick = (): void => {
         if (!this.running || generation !== this.loopGeneration) return
-        this.render()
+        this.renderGuarded()
         this.rafId = requestAnimationFrame(tick)
       }
       this.rafId = requestAnimationFrame(tick)
@@ -1151,6 +1283,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   stop(): void {
     this.running = false
+    this.rafLoop = false
     this.loopGeneration++
     if (this.rafId) cancelAnimationFrame(this.rafId)
     const video =
