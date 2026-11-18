@@ -1,5 +1,36 @@
 # @ascii-fx/gpu
 
+## 0.10.0
+
+### Minor Changes
+
+- [#40](https://github.com/Amir-Abushanab/ascii-fx/pull/40) [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - `jitter` and `jitterSeed` work in the renderer, on both backends. jitter-v1 (ALGORITHM.md §20) lets a cell pick among the glyphs that reconstruct it nearly as well as the best one, which breaks up the banding of a wide near-tie; until now only `matchFrame` in `@ascii-fx/core` had it.
+
+  ```tsx
+  <AsciiVideo src="/clip.mp4" color="full" jitter={40} />
+  ```
+
+  The WebGPU matcher makes the same pick as the CPU reference for every cell, and the conformance suite holds it to that. `createAsciiRenderer`, the React components, `AsciiPass` and `<AsciiEffect>` all take the two options. `<AsciiEffect>` and `useAsciiEffect` also take `palette` and `post`, which `AsciiPass` already supported, and the React components now type `matcher` and `hysteresis`.
+
+### Patch Changes
+
+- [#40](https://github.com/Amir-Abushanab/ascii-fx/pull/40) [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Three fixes to the CPU backend, the path taken when there is no WebGPU adapter:
+
+  - **A still source no longer goes stale.** With the worker pool up, `setOptions()` or `setSource()` followed by `render()` on an image presented the old cells, left the new ones in the pool for good, and kept a 60 Hz `requestAnimationFrame` loop running until `destroy()`. Static sources are now matched inline, as the docs always said, and a page of stills starts no workers at all. A live source rendered by hand, and a video that pauses or ends, now get their last frame without another `render()`.
+  - **Emoji draw in colour on the WebGL2 compositor.** A `matcher: 'chromatic'` frame was drawn in the `color` option's mode, which is ignored for that matcher and defaults to `mono`: every emoji came out as a white silhouette. The Canvas2D and WebGPU paths were already right.
+  - **`adaptiveResolution` only ever lowers the grid.** A grid under 40 columns was raised to 40 under frame pressure, and an explicit `rows` kept its value while `columns` shrank, which changed the picture's aspect. Both dimensions now scale from the grid the options resolve to. WebGPU backend.
+
+- [#40](https://github.com/Amir-Abushanab/ascii-fx/pull/40) [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Fixes for a renderer that is not in a plain animation loop, on both backends unless noted:
+
+  - **A paused or ended video keeps responding.** `start()` on a `<video>` runs on video-frame callbacks, which stop when the video does. Pointer moves and `setInteraction()` stood down for "the running loop" anyway, so a hover effect froze, and on WebGPU a resize left the canvas blank until playback resumed. They repaint now, as a composite of the frame already matched rather than a re-upload. On the CPU backend, `wave` and `displace` keep animating too.
+  - **`setOptions()` repaints.** It was the one setter that left the repaint to someone else, so a still changed only on the next pointer move or resize. `setOptions({ interaction })` is forwarded to `setInteraction()` instead of being dropped.
+  - **One bad frame no longer ends the loop.** A source that could not be read for a moment (a canvas at zero size) threw out of the loop, which then stopped while still marked as running, so `start()` could not revive it. The failure is logged once and the loop carries on.
+  - **A lost WebGL context does not throw.** The CPU backend's compositor fell through to a Canvas2D path its canvas cannot have. It now waits, and repaints when the browser restores the context.
+  - **`start()` and `stop()` during a device rebuild are honoured** (WebGPU). The loop came back as it was when the device was lost, whatever had been asked for since. A first frame that fails after a successful rebuild is no longer reported as an unrecovered device loss.
+
+- Updated dependencies [[`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f)]:
+  - @ascii-fx/core@0.10.0
+
 ## 0.9.1
 
 ### Patch Changes

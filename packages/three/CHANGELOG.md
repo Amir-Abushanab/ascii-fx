@@ -1,5 +1,32 @@
 # @ascii-fx/three
 
+## 0.10.0
+
+### Minor Changes
+
+- [#40](https://github.com/Amir-Abushanab/ascii-fx/pull/40) [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - `jitter` and `jitterSeed` work in the renderer, on both backends. jitter-v1 (ALGORITHM.md §20) lets a cell pick among the glyphs that reconstruct it nearly as well as the best one, which breaks up the banding of a wide near-tie; until now only `matchFrame` in `@ascii-fx/core` had it.
+
+  ```tsx
+  <AsciiVideo src="/clip.mp4" color="full" jitter={40} />
+  ```
+
+  The WebGPU matcher makes the same pick as the CPU reference for every cell, and the conformance suite holds it to that. `createAsciiRenderer`, the React components, `AsciiPass` and `<AsciiEffect>` all take the two options. `<AsciiEffect>` and `useAsciiEffect` also take `palette` and `post`, which `AsciiPass` already supported, and the React components now type `matcher` and `hysteresis`.
+
+- [#40](https://github.com/Amir-Abushanab/ascii-fx/pull/40) [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - **Changes what you see:** `AsciiPass` matches the scene as the canvas would have shown it. It rendered into a plain render target, which skips three's output pass: the renderer's `toneMapping` was dropped (React Three Fiber turns ACES on by default, so mounting `<AsciiEffect>` changed a scene's colours), there was no antialiasing, and linear values sat in an 8-bit texture before being sRGB-encoded. The target is now the renderer's output target, so tone mapping, `outputColorSpace` and MSAA all apply. Colours under the pass will shift for any scene that uses tone mapping; that is the fix.
+
+  Also:
+
+  - `pass.init()` initializes the renderer if nothing has yet, so the README's quickstart works as written. It was missing the `init()` call altogether.
+  - The render target follows the renderer's drawing buffer, so `renderer.setSize()` is all a resize takes. `width`/`height` or `pass.setSize()` still pin it. `<AsciiEffect>` relies on this now, which also picks up a change of device pixel ratio that it used to miss.
+  - An interaction with `source: 'motion'` gets its motion field under the pass, as it does in the renderer; it was silently inert.
+  - README: the `AsciiGlyphs` example used an API that does not exist (`scene.add(glyphs)`, `glyphs.setSource()`); it is `glyphs.mesh` and `glyphs.updateFromFrame(frame)`. The React Three Fiber example's `gl` factory took the canvas where R3F 9 passes its renderer props, and never initialized the renderer.
+
+### Patch Changes
+
+- Updated dependencies [[`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f)]:
+  - @ascii-fx/gpu@0.10.0
+  - @ascii-fx/core@0.10.0
+
 ## 0.9.1
 
 ### Patch Changes

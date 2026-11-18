@@ -1,5 +1,36 @@
 # @ascii-fx/react
 
+## 0.10.0
+
+### Minor Changes
+
+- [#40](https://github.com/Amir-Abushanab/ascii-fx/pull/40) [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - `jitter` and `jitterSeed` work in the renderer, on both backends. jitter-v1 (ALGORITHM.md §20) lets a cell pick among the glyphs that reconstruct it nearly as well as the best one, which breaks up the banding of a wide near-tie; until now only `matchFrame` in `@ascii-fx/core` had it.
+
+  ```tsx
+  <AsciiVideo src="/clip.mp4" color="full" jitter={40} />
+  ```
+
+  The WebGPU matcher makes the same pick as the CPU reference for every cell, and the conformance suite holds it to that. `createAsciiRenderer`, the React components, `AsciiPass` and `<AsciiEffect>` all take the two options. `<AsciiEffect>` and `useAsciiEffect` also take `palette` and `post`, which `AsciiPass` already supported, and the React components now type `matcher` and `hysteresis`.
+
+- [#40](https://github.com/Amir-Abushanab/ascii-fx/pull/40) [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - `onError` hears about every way the ASCII render can fail to appear, and none of them takes the tree down:
+
+  - **A source the renderer cannot read.** An image or video from another origin, loaded without CORS, makes the first render throw. From an effect that unmounted the component tree; from a `load` listener it went to the console and `onError` never fired. It is now reported, and the `<img>`/`<video>` fallback stays on screen.
+  - **`<AsciiVideo>` takes `crossOrigin`.** Without it a video from a CDN could not work at all.
+  - **A profile that fails to load**, which was only logged, and **an option the renderer refuses** (a chromatic matcher on a profile without chromatic data, `jitter` out of range), which threw from an effect.
+
+  `<AsciiVideo>` and `<AsciiCanvas>` can be named and driven:
+
+  - **`aria-label` / `aria-labelledby`.** A `<video>` has no `alt`, so `<AsciiVideo>` had no accessible name, and an `<AsciiCanvas>` without children exposed nothing at all, since the canvas is hidden from assistive technology. The label goes on the video, or makes the canvas wrapper an image by that name.
+  - **`autoPlay={false}` is usable.** The render loop only ran when `autoPlay` was on, so a video you started yourself played underneath an ASCII render stuck on its first frame. `videoRef` hands you the `<video>`; call `play()`, pause or seek on it and the render follows.
+
+  Also: changing `columns`, `palette` or any other option on a still `<AsciiImage>` repaints it straight away rather than on the next pointer move or resize, and switching `compositor`, or a profile swap that moves `backend: 'auto'` from WebGPU to the CPU matcher, gets a fresh canvas instead of failing on one bound to the other context type.
+
+### Patch Changes
+
+- Updated dependencies [[`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f), [`37c5e81`](https://github.com/Amir-Abushanab/ascii-fx/commit/37c5e817d26bae920b12d7462c376ff965bf876f)]:
+  - @ascii-fx/gpu@0.10.0
+  - @ascii-fx/core@0.10.0
+
 ## 0.9.1
 
 ### Patch Changes
