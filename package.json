@@ -48,22 +48,22 @@
     "@ascii-fx/core": "workspace:*",
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.3",
-    "@types/node": "^26.6.5",
-    "@vitest/browser-playwright": "^5.0.5",
-    "@vitest/coverage-v8": "^5.0.5",
-    "dependency-cruiser": "^18.7.0",
-    "knip": "^6.42.1",
+    "@types/node": "^26.6.6",
+    "@vitest/browser-playwright": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.0",
+    "dependency-cruiser": "^18.7.2",
+    "knip": "^6.45.1",
     "npm-check-updates": "^23.1.1",
-    "oxfmt": "^0.74.0",
-    "oxlint": "^1.89.0",
-    "playwright": "^1.64.1",
+    "oxfmt": "^0.78.0",
+    "oxlint": "^1.93.0",
+    "playwright": "^1.65.0",
     "pngjs": "^7.0.0",
     "publint": "^0.3.25",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   },
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@12.15.0"
+  "packageManager": "pnpm@12.19.0"
 }
