@@ -70,6 +70,52 @@ describe.skipIf(!gpuAvailable)('webgpu device loss', () => {
     }
   })
 
+  // A rebuild takes a few frames, and the page does not stop making decisions while it
+  // runs. The loop used to come back as it was when the device went, whatever had been
+  // asked for since.
+  it('honours start() and stop() called while the device is being rebuilt', async () => {
+    const { devices, restore } = captureDevices()
+    try {
+      const profile = makeProfile(STANDARD_SIX)
+      const make = async () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = 128
+        canvas.height = 128
+        const renderer = await createAsciiRenderer({
+          canvas,
+          profile,
+          columns: 8,
+          backend: 'webgpu',
+        })
+        renderer.setSource(randomImage(64, 64, 7))
+        renderer.render()
+        return renderer as typeof renderer & { running: boolean }
+      }
+
+      const stopped = await make()
+      stopped.start()
+      devices.at(-1)!.destroy()
+      const afterFirst = devices.length
+      stopped.stop() // while the replacement is still being built
+      expect(await until(() => devices.length > afterFirst)).toBe(true)
+      await stopped.captureFrame() // resolves once the rebuild has finished
+      expect(stopped.running).toBe(false)
+      stopped.destroy()
+
+      const started = await make()
+      devices.at(-1)!.destroy()
+      const afterSecond = devices.length
+      await new Promise((r) => setTimeout(r, 0)) // let the loss be noticed
+      started.start() // refused by the dead device, remembered for the new one
+      expect(await until(() => devices.length > afterSecond)).toBe(true)
+      await started.captureFrame()
+      expect(started.running).toBe(true)
+      started.destroy()
+    } finally {
+      restore()
+    }
+  })
+
   it('does not treat its own destroy() as a loss to recover from', async () => {
     const { devices, restore } = captureDevices()
     try {

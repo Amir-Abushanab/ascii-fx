@@ -70,6 +70,27 @@ export interface InteractionOptions {
  */
 const MOTION_INCOMPATIBLE = new Set<InteractionType>(['wave', 'push', 'resolution'])
 
+/**
+ * jitter-v1's preconditions (ALGORITHM.md §20), checked where the options arrive rather than
+ * left to the first frame — and, on WebGPU, to nothing at all, since a shader cannot throw.
+ */
+export function assertJitter(options: {
+  jitter?: number
+  matcher?: 'structural' | 'chromatic'
+}): void {
+  const jitter = options.jitter ?? 0
+  if (jitter === 0) return
+  if (!Number.isInteger(jitter) || jitter < 0 || jitter > 255) {
+    throw new Error(`jitter must be an integer 0..255; got ${jitter}`)
+  }
+  if (options.matcher === 'chromatic') {
+    throw new Error(
+      'jitter is a structural-v1 effect (ALGORITHM.md §20); chromatic-v1 has no rerank ' +
+        'candidates to vary among.',
+    )
+  }
+}
+
 export function assertInteraction(interaction: InteractionOptions | null | undefined): void {
   if (interaction?.source === 'motion' && MOTION_INCOMPATIBLE.has(interaction.type)) {
     throw new Error(
@@ -147,6 +168,20 @@ export interface AsciiRendererOptions {
   foreground?: RGB
   background?: RGB
   flatThreshold?: number
+  /**
+   * jitter-v1 (ALGORITHM.md §20), structural matcher only. 0..255, default 0 (off). Lets each
+   * cell pick among the candidates that reconstruct it nearly as well as the best one,
+   * weighted toward the better ones, which breaks up the banding of a wide near-tie. Seeded
+   * by cell position, so both backends make the same pick. Rejected with
+   * `matcher: 'chromatic'`, which has no rerank candidates to vary among.
+   */
+  jitter?: number
+  /**
+   * jitter-v1 seed, default 0. Hold it constant for a dither that is stable frame to frame;
+   * pass a frame counter for one that moves. Changing it rematches, and switches exact
+   * temporal reuse off for that frame, since every cell's pick may differ.
+   */
+  jitterSeed?: number
   /** chromatic-v1 only (§C5): keep the previous glyph unless a challenger beats it by this fraction. */
   hysteresis?: number
   /** How the ASCII grid maps onto the canvas. Default 'contain'. */

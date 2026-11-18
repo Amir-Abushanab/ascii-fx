@@ -35,6 +35,8 @@ export const rendererOptionsKey = (options: AsciiRendererRuntimeOptions): string
     options.background,
     options.flatThreshold,
     options.hysteresis,
+    options.jitter,
+    options.jitterSeed,
     options.fit,
     options.clearColor,
     options.temporal,

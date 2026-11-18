@@ -15,6 +15,9 @@ Usage:
   ascii-fx frame build --image <file.png> --profile <file.asciip> --out <file.asciif>
                        [--columns N] [--rows N] [--color mono|foreground|full] [--alpha mask|ignore]
   ascii-fx inspect <file.asciip | file.asciif>
+
+Flags take a value as --flag value or --flag=value; use the second form for a value that
+starts with a dash (--characters=-=+#).
 `
 
 const requireStr = (args: Args, key: string): string => {

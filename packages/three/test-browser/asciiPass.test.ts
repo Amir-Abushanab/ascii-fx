@@ -98,6 +98,59 @@ describe.runIf(gpuAvailable)('AsciiPass (three WebGPURenderer)', () => {
     renderer.dispose()
   })
 
+  // Rendered into a plain render target, three skips its output pass: no tone mapping, and
+  // linear values in an 8-bit texture. As the *output* target the scene arrives as the
+  // canvas would have shown it.
+  it("applies the renderer's tone mapping, and follows its size", async () => {
+    const THREE = await import('three/webgpu')
+    const { AsciiPass } = await import('@ascii-fx/three')
+    const { makeProfile, STANDARD_SIX } = await import('../../core/test/synthetic.js')
+
+    const canvas = document.createElement('canvas')
+    const renderer = new THREE.WebGPURenderer({ canvas, antialias: false })
+    renderer.setSize(96, 64, false)
+    renderer.toneMapping = THREE.ReinhardToneMapping
+
+    const scene = new THREE.Scene()
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+    camera.position.z = 1
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    )
+    mesh.position.z = -1
+    scene.add(mesh)
+
+    const pass = new AsciiPass({
+      profile: makeProfile(STANDARD_SIX),
+      renderer,
+      columns: 12,
+      color: 'full',
+    })
+    // No renderer.init() here: the pass does it.
+    await pass.init()
+    pass.render(scene, camera)
+    const frame = await pass.captureFrame()
+    // Reinhard maps white to 0.5 linear, which is 188 in sRGB. Without the output pass
+    // this is 255.
+    const level = frame.foreground![0] & 0xff
+    expect(level).toBeGreaterThan(178)
+    expect(level).toBeLessThan(198)
+
+    expect([pass.renderTarget.width, pass.renderTarget.height]).toEqual([96, 64])
+    renderer.setSize(128, 32, false)
+    pass.render(scene, camera)
+    expect([pass.renderTarget.width, pass.renderTarget.height]).toEqual([128, 32])
+    // Pinned sizes stay pinned.
+    pass.setSize(48, 48)
+    renderer.setSize(96, 64, false)
+    pass.render(scene, camera)
+    expect([pass.renderTarget.width, pass.renderTarget.height]).toEqual([48, 48])
+
+    pass.dispose()
+    renderer.dispose()
+  })
+
   it('AsciiGlyphs builds an instanced grid from a frame', async () => {
     const { AsciiGlyphs } = await import('@ascii-fx/three')
     const { makeProfile, STANDARD_SIX, makeCell } = await import('../../core/test/synthetic.js')

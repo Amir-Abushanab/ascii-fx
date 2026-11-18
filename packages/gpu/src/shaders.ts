@@ -25,6 +25,8 @@ struct Params {
   motionT: u32,        // §21 threshold, 0..255 (floored at 1 by the caller)
   motionDecay: u32,    // §21 trail retention, 0..255
   motionPrimed: u32,   // 1 = the state buffer holds a previous frame's luma
+  jitter: u32,         // jitter-v1 §20 amount, 0..255; 0 = off
+  jitterSeed: u32,     // jitter-v1 §20 seed
 }
 
 fn luma8(r: u32, g: u32, b: u32) -> u32 {
@@ -33,6 +35,14 @@ fn luma8(r: u32, g: u32, b: u32) -> u32 {
 
 fn rdivU(n: u32, d: u32) -> u32 {
   return (2u * n + d) / (2u * d);
+}
+
+// jitter-v1's cell hash (ALGORITHM.md §20). u32 multiplication wraps, as Math.imul does.
+fn jitterHash(cx: u32, cy: u32, seed: u32) -> u32 {
+  var h = seed ^ (cx * 0x27d4eb2du) ^ (cy * 0x165667b1u);
+  h = (h ^ (h >> 15u)) * 0x2545f491u;
+  h = (h ^ (h >> 13u)) * 0x27d4eb2du;
+  return h ^ (h >> 16u);
 }
 
 fn srgbEncode1(v: f32) -> f32 {
@@ -390,6 +400,12 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k
   let sg = (smp >> 8u) & 0xffu;
   let sb = (smp >> 16u) & 0xffu;
 
+  // jitter-v1 (§20) weighs every candidate, so lane 0 keeps each one's error and its own
+  // fitted colours. The loop below has no early exit, so the errors are already complete.
+  var jErr: array<u32, 8>;
+  var jFg: array<u32, 8>;
+  var jBg: array<u32, 8>;
+
   // Exact rerank (§10), candidates in (score, id) order; ties keep the earlier.
   for (var c = 0u; c < candCount; c++) {
     if (k == 0u) {
@@ -476,6 +492,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k
     workgroupBarrier();
     if (k == 0u) {
       let err = atomicLoad(&wErr);
+      jErr[c] = err;
+      jFg[c] = fg;
+      jBg[c] = bg;
       if (err < wBestErr) {
         wBestErr = err;
         wBestId = g;
@@ -487,7 +506,40 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) k
   }
 
   if (k == 0u) {
-    cells[ci] = vec4<u32>(wBestId, wBestFg, wBestBg, 0u);
+    var outId = wBestId;
+    var outFg = wBestFg;
+    var outBg = wBestBg;
+    // jitter-v1 (§20): swap the argmin for a hash-chosen candidate within a tolerance of
+    // it, weighted linearly toward the winner. Off at 0, where §10 stands untouched.
+    if (P.jitter > 0u) {
+      let best = wBestErr;
+      // rdiv(best · jitter, 255). rdivU's 2n + d would overflow here (n reaches
+      // 12,484,800 · 255 ≈ 3.18e9); (n + 127) / 255 is the same value and fits.
+      let tol = (best * P.jitter + 127u) / 255u;
+      var total = 0u;
+      for (var c = 0u; c < candCount; c++) {
+        let delta = jErr[c] - best;
+        if (delta <= tol) {
+          total += tol + 1u - delta;
+        }
+      }
+      var r = jitterHash(cellX, cellY, P.jitterSeed) % total;
+      for (var c = 0u; c < candCount; c++) {
+        let delta = jErr[c] - best;
+        var w = 0u;
+        if (delta <= tol) {
+          w = tol + 1u - delta;
+        }
+        if (r < w) {
+          outId = wCand[c] & 0xffffu;
+          outFg = jFg[c];
+          outBg = jBg[c];
+          break;
+        }
+        r -= w;
+      }
+    }
+    cells[ci] = vec4<u32>(outId, outFg, outBg, 0u);
   }
 }
 `

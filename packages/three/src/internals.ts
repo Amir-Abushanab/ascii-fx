@@ -1,6 +1,8 @@
 // Access to WebGPURenderer backend internals. Three does not yet expose the
 // GPUDevice / canvas context / texture handles publicly; these accessors are
-// the supported-in-practice interop points, verified against r170–r185.
+// the supported-in-practice interop points. The test suite runs against the
+// three version pinned in this package's devDependencies (r187); the peer range
+// reaches back to r170, where the same three properties exist.
 import type { Texture } from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
 
@@ -28,7 +30,7 @@ export function getCanvasContext(renderer: WebGPURenderer): GPUCanvasContext {
   const context = backendOf(renderer)?.context
   if (!context) {
     throw new Error(
-      'Could not access the WebGPU canvas context via renderer.backend (supported: three r170–r185).',
+      'Could not access the WebGPU canvas context via renderer.backend (tested against three r187).',
     )
   }
   return context
@@ -40,7 +42,7 @@ export function getGpuTexture(renderer: WebGPURenderer, texture: Texture): GPUTe
   if (!gpuTexture) {
     throw new Error(
       'Could not access the render target GPU texture via renderer.backend — render to the target once first ' +
-        '(supported: three r170–r185).',
+        '(tested against three r187).',
     )
   }
   return gpuTexture

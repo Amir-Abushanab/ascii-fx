@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -106,6 +106,23 @@ describe('@ascii-fx/vite plugin', () => {
     await expect(runHooks(plugin, 'virtual:ascii-frame/nope', [])).rejects.toThrow(
       /available: hero/,
     )
+  })
+
+  // The config types say paths are relative to the config file. They were resolved against
+  // the Vite root, which is the same place only while the config sits in it.
+  it('resolves font paths against the config file, not the Vite root', async () => {
+    const project = mkdtempSync(join(tmpdir(), 'ascii-fx-vite-cfg-'))
+    mkdirSync(join(project, 'config'))
+    writeFileSync(join(project, 'config', 'font.ttf'), readFileSync(FONT_PATH))
+    writeFileSync(
+      join(project, 'config', 'ascii.config.mjs'),
+      `export default { profiles: { default: { font: './font.ttf' } } }\n`,
+    )
+    const nested = ascii({ config: './config/ascii.config.mjs', cacheDir: join(project, 'cache') })
+    ;(nested.configResolved as (c: { root: string }) => void)({ root: project })
+    const watched: string[] = []
+    await runHooks(nested, 'virtual:ascii-profile/default', watched)
+    expect(watched.some((f) => f.endsWith('/config/font.ttf'))).toBe(true)
   })
 
   it('ignores unrelated ids', () => {

@@ -33,7 +33,14 @@ A renderer that can't be built is invisible by design — the fallback is alread
 <AsciiVideo src="/clip.mp4" onError={(e) => reportToSentry(e)} autoPlay muted loop />
 ```
 
-It fires once per distinct failure, for a failed init and for a GPU device loss that couldn't be recovered from.
+It fires once per distinct failure: a profile that couldn't be loaded, a failed init, a source the renderer couldn't read, an option it refused, and a GPU device loss that couldn't be recovered from.
+
+The source case is the one to know about. Rendering reads the image's or video's pixels, and the browser refuses that for media from another origin unless it was loaded with CORS. Pass `crossOrigin` (the server has to send the headers too), or the ASCII render never appears and `onError` gets a `SecurityError`:
+
+```tsx
+<AsciiImage src="https://cdn.example.com/cat.jpg" alt="Cat" crossOrigin="anonymous" />
+<AsciiVideo src="https://cdn.example.com/clip.mp4" crossOrigin="anonymous" autoPlay muted loop />
+```
 
 ## Painting the source
 
@@ -57,6 +64,19 @@ grain in ~16px blocks is not.
 `animate` re-runs `draw` on a loop throttled to `fps` (default 12, not the display rate — every
 frame is a full re-match). Without it an image is matched once and left, which is why a still costs
 nothing per frame.
+
+## Video you control, and names for what isn't an image
+
+`<AsciiVideo>` autoplays by default. With `autoPlay={false}` nothing plays until you say so: `videoRef` hands you the `<video>` underneath, and the ASCII render follows it whether it is playing, paused or scrubbed.
+
+```tsx
+const video = useRef<HTMLVideoElement>(null)
+
+<AsciiVideo src="/clip.mp4" autoPlay={false} videoRef={video} aria-label="Product walkthrough" />
+<button onClick={() => video.current?.play()}>Play</button>
+```
+
+A `<video>` has no `alt`, so give `<AsciiVideo>` an `aria-label` (or `aria-labelledby`). `<AsciiCanvas>` takes the same two props: its canvas is hidden from assistive technology, so without a label or children that describe it there is nothing to read.
 
 ## Motion and cost
 

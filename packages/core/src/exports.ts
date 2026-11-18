@@ -23,6 +23,13 @@ export interface SvgExportOptions {
 const escapeHtml = (s: string): string =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 
+/**
+ * For a double-quoted attribute value. The font family reaches one from a profile's metadata,
+ * and a profile is a file someone else may have built: an unescaped quote there would close the
+ * attribute and let the rest of the name add attributes of its own.
+ */
+const escapeAttr = (s: string): string => escapeHtml(s).replaceAll('"', '&quot;')
+
 /** Trim an SVG coordinate to what a viewer can resolve, without trailing zeros. */
 const num = (v: number): string => String(Math.round(v * 100) / 100)
 
@@ -247,7 +254,7 @@ export function frameToSVG(frame: AsciiFrame, options: SvgExportOptions = {}): s
   // Every glyph is positioned on its own, but a viewer may still shape and reorder a run of
   // right-to-left text before placing it, so the override goes on the group.
   const bidi = textGlyphs(frame.profile).rtl ? ' direction="ltr" unicode-bidi="bidi-override"' : ''
-  out += `<g font-family="${escapeHtml(family)}" font-size="${num(fontSize)}"${bidi}${perCell ? '' : ` fill="${fgFixed}"`}>`
+  out += `<g font-family="${escapeAttr(family)}" font-size="${num(fontSize)}"${bidi}${perCell ? '' : ` fill="${fgFixed}"`}>`
   for (let y = 0; y < frame.rows; y++) {
     const by = num(y * cellH + baseline)
     let x = 0

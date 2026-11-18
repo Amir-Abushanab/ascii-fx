@@ -26,11 +26,15 @@ export default defineAsciiConfig({
 ```
 
 ```ts
-import profileUrl from 'virtual:ascii-profile/default?url'
-import heroUrl from 'virtual:ascii-frame/hero?url'
+import { loadFrame, loadProfile } from '@ascii-fx/core'
+import profileRef from 'virtual:ascii-profile/default' // { url, id }
+import heroRef from 'virtual:ascii-frame/hero' // { url, id, profile }
+
+const profile = await loadProfile(profileRef)
+const hero = await loadFrame(heroRef, profile)
 ```
 
-Typed, hashed, and cached like any other Vite asset. Add `@ascii-fx/vite/client` to your `tsconfig` `types` for the module declarations.
+Each module's default export is a small reference whose `url` points at the compiled asset; `loadProfile`, `loadFrame`, and every `profile` prop in `@ascii-fx/react` take the reference as it is. `font` and `image` paths are relative to the config file. Typed, hashed, and cached like any other Vite asset. Add `@ascii-fx/vite/client` to your `tsconfig` `types` for the module declarations.
 
 ## What it buys you
 

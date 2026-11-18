@@ -89,6 +89,10 @@ export interface StreamMatchOptions {
    * is whatever the cells buffer already holds, so no extra state is needed.
    */
   hysteresis?: number
+  /** jitter-v1 (ALGORITHM.md §20): 0..255, default 0 (off). Structural matcher only. */
+  jitter?: number
+  /** jitter-v1 seed, default 0. */
+  jitterSeed?: number
 }
 
 export interface StreamViewOptions {
@@ -487,7 +491,7 @@ export class AsciiStream {
     this.pipeComposite = compositePipeline
     const d = engine.device
     this.paramsBuf = d.createBuffer({
-      // 21 u32 of Params, rounded up to the 16-byte uniform alignment.
+      // 23 u32 of Params, rounded up to the 16-byte uniform alignment.
       size: 96,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
@@ -582,6 +586,10 @@ export class AsciiStream {
       opts.matcher,
       opts.temporal,
       opts.hysteresis,
+      // A cell's pick under jitter depends on these as much as on its samples, so a
+      // change has to switch temporal reuse off for a frame like any other option.
+      opts.jitter,
+      opts.jitterSeed,
       srcW,
       srcH,
     ])
@@ -881,6 +889,11 @@ export class AsciiStream {
     p[18] = Math.max(1, quantizeUnit(motion?.threshold ?? 0.02))
     p[19] = quantizeUnit(motion?.decay ?? 0.85)
     p[20] = this.motionPrimed ? 1 : 0
+    // §20. chromatic-v1 has no rerank to vary; the renderer rejects the combination, and
+    // this keeps a direct caller of the stream from reaching the shader with it.
+    p[21] = color === 'glyph' ? 0 : (opts.jitter ?? 0)
+    // ToUint32, which is what the CPU hash's `seed ^ …` does to it.
+    p[22] = (opts.jitterSeed ?? 0) >>> 0
     this.engine.device.queue.writeBuffer(this.paramsBuf, 0, p)
   }
 

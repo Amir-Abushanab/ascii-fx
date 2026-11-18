@@ -38,6 +38,9 @@ const reuseKey = (msg: MatchRequest): string => {
     o.flatThreshold ?? '',
     o.foreground?.join(',') ?? '',
     o.background?.join(',') ?? '',
+    // A cell's pick under jitter depends on these as much as on its samples.
+    o.jitter ?? 0,
+    o.jitterSeed ?? 0,
   ].join('|')
 }
 
@@ -99,10 +102,11 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>): void => {
         flatThreshold: msg.options.flatThreshold,
         foreground: msg.options.foreground,
         background: msg.options.background,
-        // Inert for every option this backend exposes, but this is the only
-        // place that splits a frame into bands — so if a row-dependent effect
-        // (ALGORITHM.md §20) ever reaches BandOptions, it hashes against frame
-        // rows rather than band-local ones and assembly stays byte-identical.
+        jitter: msg.options.jitter,
+        jitterSeed: msg.options.jitterSeed,
+        // This is the only place that splits a frame into bands, and jitter-v1
+        // (ALGORITHM.md §20) hashes the cell's row: it has to be the frame row, not
+        // the band-local one, or assembly stops being byte-identical.
         rowOffset: msg.rowStart,
       },
       msg.options.temporal && prev?.key === key

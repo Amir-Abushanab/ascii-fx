@@ -15,6 +15,10 @@ describe('React hook dependency keys', () => {
       rendererOptionsKey({ matcher: 'chromatic' }),
     )
     expect(rendererOptionsKey({ hysteresis: 0 })).not.toBe(rendererOptionsKey({ hysteresis: 0.1 }))
+    expect(rendererOptionsKey({ jitter: 0 })).not.toBe(rendererOptionsKey({ jitter: 40 }))
+    expect(rendererOptionsKey({ jitter: 40, jitterSeed: 1 })).not.toBe(
+      rendererOptionsKey({ jitter: 40, jitterSeed: 2 }),
+    )
     expect(rendererOptionsKey({ adaptiveResolution: false })).not.toBe(
       rendererOptionsKey({ adaptiveResolution: true }),
     )

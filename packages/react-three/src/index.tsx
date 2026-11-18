@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { WebGPURenderer } from 'three/webgpu'
-import type { AsciiFrame, AsciiProfile, ProfileSource } from '@ascii-fx/core'
+import type { AsciiFrame, AsciiProfile, PaletteOptions, ProfileSource } from '@ascii-fx/core'
 import { loadProfile } from '@ascii-fx/core'
 import type {
   FitMode,
   InteractionOptions,
   InteractionType,
+  PostOptions,
   StreamMatchOptions,
 } from '@ascii-fx/gpu'
 import { AsciiGlyphs as AsciiGlyphsImpl, AsciiPass } from '@ascii-fx/three'
@@ -15,6 +16,10 @@ export interface UseAsciiEffectOptions extends StreamMatchOptions {
   profile: ProfileSource
   fit?: FitMode
   clearColor?: readonly [number, number, number, number]
+  /** Snap the fitted colours to a palette, optionally dithered. Never rematches. */
+  palette?: PaletteOptions | null
+  /** Screen-space effects (scanlines, bloom, …) over the composite. */
+  post?: PostOptions | null
   /** Interaction preset name or full options (spec §2: interaction="reveal"). */
   interaction?: InteractionType | InteractionOptions | null
 }
@@ -55,10 +60,9 @@ const profileSourceKey = (source: ProfileSource): string => {
  */
 export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null {
   const gl = useThree((s) => s.gl)
-  const size = useThree((s) => s.size)
   const [pass, setPass] = useState<AsciiPass | null>(null)
   const [profile, setProfile] = useState<AsciiProfile | null>(null)
-  const { profile: profileSource, interaction, fit, clearColor, ...match } = options
+  const { profile: profileSource, interaction, fit, clearColor, palette, post, ...match } = options
 
   useEffect(() => {
     let live = true
@@ -84,7 +88,7 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
       return
     }
     let live = true
-    const created = new AsciiPass({ profile, renderer, fit, clearColor })
+    const created = new AsciiPass({ profile, renderer, fit, clearColor, palette, post })
     void created
       .init()
       .then(() => {
@@ -118,11 +122,17 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
     match.temporal,
     match.matcher,
     match.hysteresis,
+    match.jitter,
+    match.jitterSeed,
     fit,
     clearColor,
+    palette,
+    post,
   ])
   useEffect(() => {
-    pass?.set({ ...match, fit, clearColor })
+    // `null` is how the pass is told to drop a palette or the post effects; `undefined`
+    // would leave whatever it had.
+    pass?.set({ ...match, fit, clearColor, palette: palette ?? null, post: post ?? null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pass, matchKey])
 
@@ -131,16 +141,6 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
     pass?.setInteraction(normalizeInteraction(interaction))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pass, interactionKey])
-
-  useEffect(() => {
-    if (!pass) return
-    const renderer = gl as unknown as WebGPURenderer
-    const dpr = renderer.getPixelRatio()
-    pass.setSize(
-      Math.max(1, Math.round(size.width * dpr)),
-      Math.max(1, Math.round(size.height * dpr)),
-    )
-  }, [pass, size, gl])
 
   useFrame((state) => {
     if (!pass) return

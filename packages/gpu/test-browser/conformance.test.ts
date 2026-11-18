@@ -325,6 +325,106 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
     }
   })
 
+  // jitter-v1 (§20) is the one place the GPU has to reproduce a pseudo-random draw: the
+  // hash, the tolerance (whose rdiv overflows u32 in the naive form) and each candidate's
+  // own colours all have to land on the CPU's numbers.
+  it('jitter-v1 agrees on every cell across amounts, seeds and colour modes (§20)', async () => {
+    const res = await fetch(profileUrl)
+    const geist = decodeProfile(new Uint8Array(await res.arrayBuffer()))
+    for (const [label, profile] of [
+      ['geist', geist],
+      ['random40', randomProfile(40, 9)],
+    ] as const) {
+      const renderer = await createAsciiRenderer({
+        canvas: new OffscreenCanvas(64, 64),
+        profile,
+        backend: 'webgpu',
+      })
+      try {
+        const image = randomImage(192, 108, 33)
+        let moved = 0
+        for (const [jitter, jitterSeed] of [
+          [1, 0],
+          [40, 0],
+          [40, 12345],
+          [255, 0xffffffff],
+        ]) {
+          for (const [name, color, fg, bg] of MODES) {
+            const options = {
+              columns: 24,
+              color,
+              foreground: fg,
+              background: bg,
+              alpha: 'ignore',
+              jitter,
+              jitterSeed,
+            } as const
+            renderer.setOptions(options)
+            renderer.setSource(image)
+            const gpuFrame = await renderer.captureFrame()
+            const cpuFrame = matchFrame(image, { profile, ...options })
+            expectFramesEqual(gpuFrame, cpuFrame, `${label} / ${name} / jitter ${jitter}`)
+            const plain = matchFrame(image, { profile, ...options, jitter: 0 })
+            for (let i = 0; i < plain.glyphIds.length; i++) {
+              if (plain.glyphIds[i] !== cpuFrame.glyphIds[i]) moved++
+            }
+          }
+        }
+        // Otherwise this would pass with jitter reaching neither side.
+        expect(moved, `${label}: jitter changed some cell`).toBeGreaterThan(0)
+      } finally {
+        renderer.destroy()
+      }
+    }
+  })
+
+  it('jitter stays exact under temporal reuse and a moving seed', async () => {
+    const profile = randomProfile(40, 13)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+      temporal: true,
+    })
+    try {
+      const image = randomImage(96, 56, 41)
+      // Same source every frame, so temporal reuse would keep every cell — and each new
+      // seed has to defeat that, or the dither freezes on the first frame's picks.
+      for (const jitterSeed of [0, 0, 1, 2, 2]) {
+        const options = { columns: 12, color: 'full', jitter: 120, jitterSeed } as const
+        renderer.setOptions(options)
+        renderer.setSource(image)
+        const gpu = await renderer.captureFrame()
+        expectFramesEqual(gpu, matchFrame(image, { profile, ...options }), `seed ${jitterSeed}`)
+      }
+      // A dirty-rect rematch hashes frame cells, not dispatch-local ones.
+      for (let y = 8; y < 24; y++) {
+        for (let x = 16; x < 48; x++) image.data[(y * 96 + x) * 4] = 250
+      }
+      renderer.invalidate({ x: 16, y: 8, width: 32, height: 16 })
+      const gpu = await renderer.captureFrame()
+      const options = { columns: 12, color: 'full', jitter: 120, jitterSeed: 2 } as const
+      expectFramesEqual(gpu, matchFrame(image, { profile, ...options }), 'jitter + invalidate')
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  it('rejects jitter it cannot honour', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+    })
+    try {
+      expect(() => renderer.setOptions({ jitter: 300 })).toThrow(/0\.\.255/)
+      expect(() => renderer.setOptions({ jitter: 1.5 })).toThrow(/0\.\.255/)
+    } finally {
+      renderer.destroy()
+    }
+  })
+
   it('invalidate(rect) rematches only the region yet lands on the exact full result', async () => {
     const profile = makeProfile(STANDARD_SIX)
     const renderer = await createAsciiRenderer({
@@ -437,6 +537,9 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
         internals.paceAdaptive()
       }
       expect(internals.adaptiveScale).toBeLessThan(1)
+      // Pressure only ever lowers the grid. 16 columns is under the 40-column floor, which
+      // used to pull it *up* to 40.
+      expect(renderer.grid()!.columns).toBeLessThanOrEqual(16)
     } finally {
       renderer.destroy()
     }

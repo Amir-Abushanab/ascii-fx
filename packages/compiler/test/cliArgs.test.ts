@@ -13,6 +13,19 @@ describe('parseArgs', () => {
     expect(a.flags.get('shape6')).toBe(true)
     expect(str(a, 'out')).toBe('y.asciif')
   })
+
+  it('takes --flag=value, including a value that starts with a dash', () => {
+    const a = parseArgs(['frame', 'build', '--columns=160', '--characters=-=+#'])
+    expect(str(a, 'columns')).toBe('160')
+    expect(str(a, 'characters')).toBe('-=+#')
+  })
+
+  // Both of these used to build the default grid and exit 0.
+  it('refuses a flag it does not know, and a valued flag with no value', () => {
+    expect(() => parseArgs(['frame', 'build', '--colums', '160'])).toThrow(/--colums/)
+    expect(() => parseArgs(['frame', 'build', '--columns'])).toThrow(/--columns/)
+    expect(() => parseArgs(['profile', 'build', '--shape6=yes'])).toThrow(/--shape6/)
+  })
 })
 
 describe('enumFlag', () => {

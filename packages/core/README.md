@@ -35,11 +35,11 @@ For a canvas rather than a string, `@ascii-fx/gpu` is the renderer you want — 
 
 Every backend has to agree with this code **bit-for-bit** — same glyph ids, same colours, same flags — and the browser conformance suite exists to prove it. That's only a meaningful contract because the algorithm is exact rather than heuristic: with foreground and background free, the best colours for a given mask are the means of its two sample sets, so the reconstruction error has a closed form and the winning glyph is the true minimum, not the best guess.
 
-That's also why `matchFrame` never silently swaps in something cheaper. `shape6` and `ramp` exist and are much faster, but they're **explicit opt-ins** branded as effects, never fallbacks:
+That's also why `matchFrame` never silently swaps in something cheaper. `shape6` and `ramp` exist and are faster, but they're **explicit opt-ins** branded as effects, never fallbacks:
 
 ```ts
 matchFrame(source, { profile, columns: 120 }) // exact
-matchFrameShape6(source, { profile, columns: 120 }) // 3.3× faster, approximate
+matchFrameShape6(source, { profile, columns: 120 }) // 1.7× faster, approximate
 ```
 
 `shape6` also needs a profile compiled for it — `buildProfile({ font, shape6: { lut: true } })`, or `ascii-fx profile build --shape6-lut`. Asking for it against a plain profile throws rather than quietly falling back to the exact matcher, because a silent fallback would turn a performance opt-in into a no-op you never notice.

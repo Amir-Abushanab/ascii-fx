@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 import type { Plugin } from 'vite'
 import { loadConfigFromFile, normalizePath } from 'vite'
@@ -65,6 +65,12 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
   let root = process.cwd()
   let cacheDir = ''
   let config: AsciiConfig | undefined
+  /**
+   * What `font` and `image` paths resolve against: the config file's directory, as its
+   * JSDoc says, or the Vite root for a config passed inline, which has no file to be
+   * relative to. The two are the same place for the default `<root>/ascii-fx.config.ts`.
+   */
+  let configBase = root
   let configDeps: string[] = []
   const profiles = new Map<string, ProfileEntry>()
   const frames = new Map<string, FrameEntry>()
@@ -75,6 +81,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     const opt = options.config
     if (opt && typeof opt === 'object') {
       config = opt
+      configBase = root
       return config
     }
     const file = resolve(root, typeof opt === 'string' ? opt : 'ascii-fx.config.ts')
@@ -85,6 +92,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
       )
     }
     configDeps = [normalizePath(loaded.path), ...loaded.dependencies.map((d) => abs(root, d))]
+    configBase = dirname(loaded.path)
     config = loaded.config as AsciiConfig
     return config
   }
@@ -99,7 +107,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
         `[ascii-fx] Profile "${name}" is not defined in the config (available: ${Object.keys(cfg.profiles ?? {}).join(', ') || 'none'}).`,
       )
     }
-    const fontPath = abs(root, pc.font)
+    const fontPath = abs(configBase, pc.font)
     if (!existsSync(fontPath))
       throw new Error(`[ascii-fx] Font not found for profile "${name}": ${fontPath}`)
     const font = new Uint8Array(readFileSync(fontPath))
@@ -155,7 +163,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     }
     const profileName = fc.profile ?? 'default'
     const { profile, fontPath } = await ensureProfile(profileName)
-    const imagePath = abs(root, fc.image)
+    const imagePath = abs(configBase, fc.image)
     if (!existsSync(imagePath))
       throw new Error(`[ascii-fx] Image not found for frame "${name}": ${imagePath}`)
     const imageBytes = new Uint8Array(readFileSync(imagePath))
@@ -240,6 +248,7 @@ export function ascii(options: AsciiPluginOptions = {}): Plugin {
     name: 'ascii-fx',
     configResolved(resolved) {
       root = resolved.root
+      configBase = root
       cacheDir = options.cacheDir
         ? abs(root, options.cacheDir)
         : abs(root, 'node_modules/.ascii-fx')
