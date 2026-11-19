@@ -13,6 +13,7 @@ import {
   difference,
   distinctFrames,
   litFraction,
+  untilStill,
 } from '../../gpu/test-browser/videoScenarios.js'
 
 let root: Root | undefined
@@ -90,8 +91,9 @@ export function asciiVideoScenarios(backend: 'cpu' | 'webgpu'): void {
       expect(video.current!.getAttribute('aria-label')).toBe('Test pattern')
       expect(video.current!.paused).toBe(true)
 
-      // Nothing is playing, so the picture does not move.
+      // Nothing is playing, so once the first frame is up the picture does not move.
       const canvas = el.querySelector('canvas')!
+      expect(await untilStill(canvas)).toBe(true)
       expect((await distinctFrames(canvas, 400)).length).toBeLessThanOrEqual(1)
 
       await video.current!.play()
@@ -99,7 +101,8 @@ export function asciiVideoScenarios(backend: 'cpu' | 'webgpu'): void {
       expect(playing.length).toBeGreaterThanOrEqual(4)
 
       video.current!.pause()
-      await new Promise((r) => setTimeout(r, 300))
+      // The last frame may still be on its way through the workers; then nothing moves.
+      expect(await untilStill(canvas)).toBe(true)
       expect((await distinctFrames(canvas, 400)).length).toBeLessThanOrEqual(1)
       expect(errors).toEqual([])
     })
