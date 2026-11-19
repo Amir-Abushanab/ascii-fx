@@ -70,15 +70,31 @@ export async function distinctFrames(
 }
 
 /**
- * Wait for the canvas to stop changing. A paused video's last frame can still be on its way:
- * the CPU backend matches on workers and presents a frame behind, so the final picture lands
- * a moment after `pause()` — how long a moment depends on the machine, and a fixed delay that
- * is plenty on a laptop is not on a two-core CI runner. A render that never stops fails this.
+ * Wait until the renderer has nothing left to deliver for a video that has stopped.
+ *
+ * A paused video's last frames are not on the canvas the moment `pause()` returns. The CPU
+ * backend matches on workers and presents a frame behind, and a frame that arrived while the
+ * pool was busy is matched after that, so the final picture lands one or two worker rounds
+ * later — and how long a round takes is the machine's business. Watching the canvas for a
+ * quiet spell cannot tell "finished" from "between two slow rounds": a two-core CI runner
+ * went quiet for 300 ms and then delivered one more frame. So this asks the renderer:
+ * nothing in flight, nothing waiting to be matched, and it stays that way for long enough
+ * that a last frame callback from the video would have come.
  */
-export async function untilStill(canvas: HTMLCanvasElement, ms = 8000): Promise<boolean> {
+export async function untilSettled(renderer: AsciiRenderer, ms = 20_000): Promise<boolean> {
+  const state = renderer as unknown as {
+    pending?: unknown
+    matchDirty?: boolean
+    adoptScheduled?: boolean
+  }
+  const idle = (): boolean => !state.pending && !state.matchDirty && !state.adoptScheduled
   const deadline = performance.now() + ms
+  let idleSince = -1
   while (performance.now() < deadline) {
-    if ((await distinctFrames(canvas, 300)).length <= 1) return true
+    await nextFrame()
+    if (!idle()) idleSince = -1
+    else if (idleSince < 0) idleSince = performance.now()
+    else if (performance.now() - idleSince >= 700) return true
   }
   return false
 }
@@ -105,11 +121,11 @@ const once = (target: EventTarget, type: string): Promise<void> =>
   new Promise((resolve) => target.addEventListener(type, () => resolve(), { once: true }))
 
 /** Play long enough to be well into the clip, then pause and let the last frame land. */
-async function playThenPause(video: HTMLVideoElement, canvas: HTMLCanvasElement): Promise<void> {
+async function playThenPause(video: HTMLVideoElement, renderer: AsciiRenderer): Promise<void> {
   await video.play()
   await new Promise((r) => setTimeout(r, 400))
   video.pause()
-  expect(await untilStill(canvas), 'the render settles once the video is paused').toBe(true)
+  expect(await untilSettled(renderer), 'the renderer settles once the video is paused').toBe(true)
 }
 
 export function videoScenarios(backend: 'cpu' | 'webgpu'): void {
@@ -160,7 +176,7 @@ export function videoScenarios(backend: 'cpu' | 'webgpu'): void {
 
   it('holds still on a paused video', async () => {
     const { video, canvas, renderer } = await setup()
-    await playThenPause(video, canvas)
+    await playThenPause(video, renderer)
     renderer.resize(canvas.width, canvas.height) // asks for one repaint
     await nextFrame()
     const held = snapshot(canvas)
@@ -175,7 +191,7 @@ export function videoScenarios(backend: 'cpu' | 'webgpu'): void {
   // Pointer moves and resizes used to stand down for the running loop anyway.
   it('keeps answering the pointer while the video is paused', async () => {
     const { video, canvas, renderer } = await setup()
-    await playThenPause(video, canvas)
+    await playThenPause(video, renderer)
 
     renderer.setInteraction({ type: 'reveal', radius: 0.3, feather: 0.05 })
     renderer.pointer.set(0.2, 0.5)
@@ -193,7 +209,7 @@ export function videoScenarios(backend: 'cpu' | 'webgpu'): void {
 
   it('repaints after a resize while the video is paused', async () => {
     const { video, canvas, renderer } = await setup()
-    await playThenPause(video, canvas)
+    await playThenPause(video, renderer)
     renderer.resize(400, 240)
     await nextFrame()
     const shot = snapshot(canvas)
@@ -203,7 +219,7 @@ export function videoScenarios(backend: 'cpu' | 'webgpu'): void {
 
   it('shows the frame a paused video is seeked to', async () => {
     const { video, canvas, renderer } = await setup()
-    await playThenPause(video, canvas)
+    await playThenPause(video, renderer)
     renderer.resize(canvas.width, canvas.height)
     await nextFrame()
     const before = snapshot(canvas)
@@ -227,8 +243,8 @@ export function videoScenarios(backend: 'cpu' | 'webgpu'): void {
   })
 
   it('picks the video back up after a pause', async () => {
-    const { video, canvas } = await setup()
-    await playThenPause(video, canvas)
+    const { video, canvas, renderer } = await setup()
+    await playThenPause(video, renderer)
     await video.play()
     const frames = await distinctFrames(canvas, 4000, 3)
     expect(frames.length).toBeGreaterThanOrEqual(3)

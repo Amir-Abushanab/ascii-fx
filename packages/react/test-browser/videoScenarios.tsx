@@ -6,14 +6,14 @@ import { createRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
-import { AsciiVideo } from '../src/components.js'
+import { AsciiVideo, type AsciiHandle } from '../src/components.js'
 import { makeProfile, STANDARD_SIX } from '../../core/test/synthetic.js'
 import {
   clipUrl,
   difference,
   distinctFrames,
   litFraction,
-  untilStill,
+  untilSettled,
 } from '../../gpu/test-browser/videoScenarios.js'
 
 let root: Root | undefined
@@ -72,9 +72,11 @@ export function asciiVideoScenarios(backend: 'cpu' | 'webgpu'): void {
     // played underneath a render stuck on its first frame.
     it(`waits with autoPlay off, then follows the video you play (${backend})`, async () => {
       const video = createRef<HTMLVideoElement>()
+      const handle = createRef<AsciiHandle>()
       const errors: Error[] = []
       const el = mount(
         <AsciiVideo
+          ref={handle}
           src={clipUrl}
           profile={profile}
           backend={backend}
@@ -93,7 +95,7 @@ export function asciiVideoScenarios(backend: 'cpu' | 'webgpu'): void {
 
       // Nothing is playing, so once the first frame is up the picture does not move.
       const canvas = el.querySelector('canvas')!
-      expect(await untilStill(canvas)).toBe(true)
+      expect(await untilSettled(handle.current!.renderer!)).toBe(true)
       expect((await distinctFrames(canvas, 400)).length).toBeLessThanOrEqual(1)
 
       await video.current!.play()
@@ -101,8 +103,8 @@ export function asciiVideoScenarios(backend: 'cpu' | 'webgpu'): void {
       expect(playing.length).toBeGreaterThanOrEqual(4)
 
       video.current!.pause()
-      // The last frame may still be on its way through the workers; then nothing moves.
-      expect(await untilStill(canvas)).toBe(true)
+      // The last frames may still be on their way through the workers; then nothing moves.
+      expect(await untilSettled(handle.current!.renderer!)).toBe(true)
       expect((await distinctFrames(canvas, 400)).length).toBeLessThanOrEqual(1)
       expect(errors).toEqual([])
     })
