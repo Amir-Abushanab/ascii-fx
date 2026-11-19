@@ -343,6 +343,10 @@ export interface AsciiRendererOptions {
    * these, it drops the work, so without a handler the canvas quietly stops
    * being correct and there is no signal anywhere that anything went wrong.
    * Defaults to logging. WebGPU backend only.
+   *
+   * Renderers on a page share one GPU device, and an error like this is raised on the
+   * device: it may be another renderer's. Each error is reported once per distinct handler,
+   * so pass every renderer the same function to hear about each error once.
    */
   onError?: (error: GpuError) => void
 }

@@ -20,6 +20,13 @@ export interface GpuLease {
   stream: AsciiStream
   /** Hand back the engine and device. The stream is the renderer's to destroy. */
   release(): void
+  /**
+   * Hear about GPU errors nothing caught. They are raised on the device, which is shared, so
+   * there is no telling which renderer's work failed — and each error is therefore reported
+   * once, not once per renderer: to every distinct handler, and once to the console if any
+   * renderer on the device has none. Returns the unsubscribe.
+   */
+  watchErrors(handler: ((error: GPUError) => void) | undefined): () => void
 }
 
 interface EngineEntry {
@@ -35,6 +42,8 @@ interface Shared {
   lost?: GPUDeviceLostInfo
   /** Setups run one at a time: error scopes are a stack on the device, not per caller. */
   queue: Promise<unknown>
+  /** One entry per renderer listening, holding its handler or nothing. */
+  watchers: Set<{ handler?: (error: GPUError) => void }>
 }
 
 let current: Shared | undefined
@@ -75,7 +84,28 @@ async function open(): Promise<Shared> {
     const adapter = await navigator.gpu.requestAdapter()
     if (!adapter) throw new Error('WebGPU is present but no adapter is available on this device.')
     const device = await adapter.requestDevice()
-    const shared: Shared = { device, engines: new Map(), refs: 0, queue: Promise.resolve() }
+    const shared: Shared = {
+      device,
+      engines: new Map(),
+      refs: 0,
+      queue: Promise.resolve(),
+      watchers: new Set(),
+    }
+    // One listener for the device, however many renderers are on it: twenty canvases must
+    // not turn one fault into twenty reports.
+    device.addEventListener('uncapturederror', (event) => {
+      const { error } = event as GPUUncapturedErrorEvent
+      const handlers = new Set<(error: GPUError) => void>()
+      let unhandled = false
+      for (const watcher of shared.watchers) {
+        if (watcher.handler) handlers.add(watcher.handler)
+        else unhandled = true
+      }
+      for (const handler of handlers) handler(error)
+      // Errors outside an explicit scope surface here and nowhere else. Ignoring them is how
+      // a renderer ends up submitting work that is silently dropped.
+      if (unhandled) console.error('[ascii-fx] WebGPU error:', error.message)
+    })
     void device.lost.then((info) => {
       shared.lost = info
       // The next lease opens a fresh device rather than joining this one.
@@ -165,6 +195,11 @@ async function setup(
         if (shared.engines.get(key) === held) shared.engines.delete(key)
       }
       drop(shared)
+    },
+    watchErrors: (handler) => {
+      const watcher = { handler }
+      shared.watchers.add(watcher)
+      return () => void shared.watchers.delete(watcher)
     },
   }
 }

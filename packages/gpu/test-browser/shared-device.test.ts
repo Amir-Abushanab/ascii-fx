@@ -49,6 +49,14 @@ const make = (profile = makeProfile(STANDARD_SIX)): Promise<AsciiRenderer> =>
     color: 'full',
   })
 
+const withHandler = (onError: (error: GPUError) => void): Promise<AsciiRenderer> =>
+  createAsciiRenderer({
+    canvas: new OffscreenCanvas(64, 64),
+    profile: makeProfile(STANDARD_SIX),
+    backend: 'webgpu',
+    onError,
+  })
+
 async function expectExact(
   renderer: AsciiRenderer,
   seed: number,
@@ -150,6 +158,55 @@ describe.skipIf(!gpuAvailable)('shared GPU device', () => {
       b.destroy()
     } finally {
       restore()
+    }
+  })
+
+  // An uncaught GPU error is raised on the device, with nothing to say whose work it was.
+  // With every renderer listening on the one device, a single fault would otherwise be
+  // reported once per canvas on the page.
+  it('reports an uncaught GPU error once, not once per renderer', async () => {
+    const shared: string[] = []
+    const report = (error: GPUError): void => void shared.push(error.message)
+    const own: string[] = []
+    const logged: unknown[][] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => void logged.push(args)
+    const renderers: AsciiRenderer[] = []
+    try {
+      // Three that report to the same place, one with a handler of its own, two with none.
+      renderers.push(
+        await withHandler(report),
+        await withHandler(report),
+        await withHandler(report),
+      )
+      renderers.push(await withHandler((error) => void own.push(error.message)))
+      renderers.push(await make(), await make())
+
+      // Invalid everywhere, and outside any error scope: MAP_READ only pairs with COPY_DST.
+      // The error comes back from the GPU process with the next round trip, which a render
+      // loop makes every frame and this test has to ask for.
+      const provoke = async (): Promise<void> => {
+        const { device } = inside(renderers[0])
+        device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.MAP_WRITE })
+        await device.queue.onSubmittedWorkDone()
+      }
+      await provoke()
+      expect(await until(() => shared.length > 0 && own.length > 0 && logged.length > 0)).toBe(true)
+      await new Promise((r) => setTimeout(r, 100))
+      expect(shared, 'the handler three renderers share').toHaveLength(1)
+      expect(own, 'a handler of its own').toHaveLength(1)
+      expect(logged, 'the two renderers with no handler').toHaveLength(1)
+
+      // A renderer that has gone no longer hears anything.
+      renderers.pop()!.destroy()
+      renderers.pop()!.destroy()
+      await provoke()
+      expect(await until(() => shared.length > 1)).toBe(true)
+      await new Promise((r) => setTimeout(r, 100))
+      expect(logged, 'nobody left without a handler').toHaveLength(1)
+    } finally {
+      console.error = original
+      for (const r of renderers) r.destroy()
     }
   })
 

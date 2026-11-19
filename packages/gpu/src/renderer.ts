@@ -223,18 +223,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
    * whatever was last presented. The only way to notice is to watch for it.
    */
   private watchDevice(device: GPUDevice): void {
-    // Errors outside an explicit scope surface here and nowhere else. Ignoring
-    // them is how a renderer ends up submitting work that is silently dropped. The device
-    // is shared, so this hears every renderer's errors and cannot tell whose they are.
-    const onUncaptured = (event: Event): void => {
-      if (this.destroyed || device !== this.device) return
-      const { error } = event as GPUUncapturedErrorEvent
-      if (this.onError) this.onError(error)
-      else console.error('[ascii-fx] WebGPU error:', error.message)
-    }
+    // Uncaught GPU errors are raised on the device, and the device is shared: the lease
+    // reports each one once across every renderer on it (sharedDevice.ts).
     this.unwatch?.()
-    device.addEventListener('uncapturederror', onUncaptured)
-    this.unwatch = () => device.removeEventListener('uncapturederror', onUncaptured)
+    this.unwatch = this.lease.watchErrors(this.onError)
     void device.lost.then((info) => {
       // destroy() resolves this too, and an already-replaced device resolves it
       // late; neither is a failure.

@@ -51,7 +51,9 @@ A GPU device can vanish — driver reset, tab backgrounded too long, laptop swit
 
 ## One device for the page
 
-Every WebGPU renderer on a page shares one `GPUDevice`, and renderers with the same profile share one engine on it: the compute pipelines and the glyph atlas are built once, and each renderer adds only the buffers for its own canvas. A gallery of thirty images is one device, not thirty — browsers budget devices, and can refuse the next one. The device goes when the last renderer is destroyed. If it is lost, it is replaced once and every renderer moves to the replacement. There is nothing to configure, and `onError` for a GPU validation error may be called on every renderer, since a shared device cannot say whose work failed.
+Every WebGPU renderer on a page shares one `GPUDevice`, and renderers with the same profile share one engine on it: the compute pipelines and the glyph atlas are built once, and each renderer adds only the buffers for its own canvas. A gallery of thirty images is one device, not thirty — browsers budget devices, and can refuse the next one. The device goes when the last renderer is destroyed. If it is lost, it is replaced once and every renderer moves to the replacement. There is nothing to configure.
+
+One thing follows from it. A GPU error that nothing caught is raised on the device, with nothing to say which renderer's work failed, so it is reported once for the page rather than once per canvas: to each distinct `onError` handler, and once to the console if any renderer has none. Give every renderer the same `onError` function and it hears about each error exactly once.
 
 ## Interactions
 
