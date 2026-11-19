@@ -54,6 +54,13 @@ export interface GlFxParams {
   time: number
   /** Only reveal (1) and original-mix (8) sample it. */
   source?: TexImageSource
+  /**
+   * Changes when `source`'s pixels may have: a new source, or a new frame read from it. The
+   * texture is uploaded again only then, so a pointer moving over a still does not push the
+   * whole image to the GPU on every move — and a VideoFrame or ImageBitmap closed after it
+   * was matched is not touched again.
+   */
+  sourceEpoch: number
   /** 0 pointer, 1 motion. */
   sourceKind: number
   /** Per-cell motion (§21), `columns · rows`. Required when sourceKind is 1. */
@@ -128,6 +135,9 @@ export class GlCompositor {
   private glowTex!: WebGLTexture
   private cellData?: Uint32Array
   private cellDims = { columns: 0, rows: 0 }
+  /** What the cells texture currently holds, so an unchanged frame is not packed again. */
+  private cellsFor?: { frame: AsciiFrame; fg: number; bg: number }
+  private srcEpoch = -1
   private lost = false
   private destroyed = false
 
@@ -193,7 +203,10 @@ export class GlCompositor {
     const gl = this.canvas.getContext('webgl2') as WebGL2RenderingContext | null
     if (!gl) return
     this.gl = gl
+    // Every texture went with the old context.
     this.cellDims = { columns: 0, rows: 0 }
+    this.cellsFor = undefined
+    this.srcEpoch = -1
     try {
       this.build()
       this.lost = false
@@ -324,10 +337,15 @@ export class GlCompositor {
     const gl = this.gl
     const { columns, rows } = frame
     const n = columns * rows
-    if (!this.cellData || this.cellData.length !== n * 4) this.cellData = new Uint32Array(n * 4)
-    const out = this.cellData
     const monoFg = pack24(view.foreground)
     const monoBg = pack24(view.background)
+    // A frame is immutable once matched, and most presents are of the frame already up:
+    // every pointer move, every tick of a time-based effect.
+    const held = this.cellsFor
+    if (held && held.frame === frame && held.fg === monoFg && held.bg === monoBg) return
+    this.cellsFor = { frame, fg: monoFg, bg: monoBg }
+    if (!this.cellData || this.cellData.length !== n * 4) this.cellData = new Uint32Array(n * 4)
+    const out = this.cellData
     const fg = frame.foreground
     const bg = frame.background
     for (let i = 0; i < n; i++) {
@@ -368,9 +386,10 @@ export class GlCompositor {
 
     this.uploadCells(frame, view)
 
-    if (fx.source && (fx.kind === 1 || fx.kind === 8)) {
+    if (fx.source && (fx.kind === 1 || fx.kind === 8) && fx.sourceEpoch !== this.srcEpoch) {
       gl.bindTexture(gl.TEXTURE_2D, this.srcTex)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, fx.source)
+      this.srcEpoch = fx.sourceEpoch
     }
 
     gl.activeTexture(gl.TEXTURE0)
@@ -444,9 +463,10 @@ export class GlCompositor {
     gl.uniform1f(u('uLod'), view.lod)
     gl.uniform4f(
       u('uClearColor'),
-      view.clearColor[0],
-      view.clearColor[1],
-      view.clearColor[2],
+      // Premultiplied, as the shader's own output is; see engine.ts syncView.
+      view.clearColor[0] * view.clearColor[3],
+      view.clearColor[1] * view.clearColor[3],
+      view.clearColor[2] * view.clearColor[3],
       view.clearColor[3],
     )
     gl.uniform2f(u('uCanvas'), view.canvasWidth, view.canvasHeight)

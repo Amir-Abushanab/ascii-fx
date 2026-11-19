@@ -10,6 +10,8 @@ apps/benchmarks/results/
 apps/docs/public/bench/
 apps/docs/public/emoji/
 coverage/
+# Written and removed by scripts/check-doc-snippets.mjs; here in case a run is killed midway.
+.doc-snippets/
 .assets-frames/
 
 # Written by the Hyper Hivemind agent tool after installs; local notes, not project docs.

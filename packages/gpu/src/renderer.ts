@@ -52,6 +52,14 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   private adaptiveEma = 1000 / 60
   private adaptiveHealthy = 0
   private adaptiveCooldown = 0
+  /**
+   * How long the GPU takes to finish a frame's work, smoothed, in ms; negative until
+   * measured. Frame intervals alone cannot tell a slow renderer from a slow display — a
+   * screen throttled to 30 Hz delivers 33 ms frames however little work each one is — so
+   * pacing asks both.
+   */
+  private adaptiveGpuMs = -1
+  private gpuProbePending = false
   private lastTickAt = 0
 
   private interaction: InteractionOptions | null = null
@@ -73,6 +81,11 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   private wantRunning = false
   /** A throw from the loop has been logged and not yet followed by a good frame. */
   private loopFaulted = false
+  /** Whether srcTexture holds a frame of the current source yet. */
+  private uploaded = false
+  /** Bumped per wait for a video's first frame, so only the latest wait's wake-up counts. */
+  private frameWait = 0
+  private frameWaitTries = 0
 
   private running = false
   private loopGeneration = 0
@@ -393,6 +406,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.adaptiveEma = 1000 / 60
       this.adaptiveHealthy = 0
       this.adaptiveCooldown = 0
+      this.adaptiveGpuMs = -1
       this.lastTickAt = 0
     }
     if (matchChanged || adaptiveChanged) {
@@ -411,9 +425,15 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
 
   setInteraction(interaction: InteractionOptions | null): void {
     assertInteraction(interaction)
-    // The field is allocated by configure(), which reads this.
-    if (interaction?.source !== this.interaction?.source) this.matchDirty = true
+    // The field is allocated by configure(), which reads this — and which a still never
+    // reaches again by itself, so a motion source asked for after the first frame used to
+    // stay pointer-driven.
+    const sourceChanged = interaction?.source !== this.interaction?.source
     this.interaction = interaction
+    if (sourceChanged) {
+      this.matchDirty = true
+      if (this.srcTexture) this.reconfigureStream()
+    }
     this.scheduleRender()
   }
 
@@ -503,11 +523,18 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       })
       this.srcW = w
       this.srcH = h
+      this.uploaded = false
     }
     this.reconfigureStream()
   }
 
-  private uploadSource(): void {
+  /**
+   * Copy the source into srcTexture. False when the source is a video with no frame to give
+   * yet, which is not a failure: a video reports itself loaded a moment before the browser
+   * has a decoded frame it can hand over, and the copy throws in that window. The texture
+   * keeps what it had and the copy is retried when the frame arrives.
+   */
+  private uploadSource(): boolean {
     const source = this.source!
     if (isRawImage(source)) {
       this.device.queue.writeTexture(
@@ -517,12 +544,44 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
         [this.srcW, this.srcH],
       )
     } else {
-      this.device.queue.copyExternalImageToTexture(
-        { source: source as GPUCopyExternalImageSource },
-        { texture: this.srcTexture!, premultipliedAlpha: false, colorSpace: 'srgb' },
-        [this.srcW, this.srcH],
-      )
+      try {
+        this.device.queue.copyExternalImageToTexture(
+          { source: source as GPUCopyExternalImageSource },
+          { texture: this.srcTexture!, premultipliedAlpha: false, colorSpace: 'srgb' },
+          [this.srcW, this.srcH],
+        )
+      } catch (err) {
+        const video =
+          typeof HTMLVideoElement !== 'undefined' && source instanceof HTMLVideoElement
+            ? source
+            : null
+        // A cross-origin video without CORS is a SecurityError, and that one is real.
+        const name = err instanceof Error ? err.name : ''
+        if (!video || (name !== 'OperationError' && name !== 'InvalidStateError')) throw err
+        this.awaitVideoFrame(video)
+        return false
+      }
     }
+    this.uploaded = true
+    this.frameWaitTries = 0
+    return true
+  }
+
+  /** Render again once `video` has a frame, by whichever of the two signals comes first. */
+  private awaitVideoFrame(video: HTMLVideoElement): void {
+    // A video that never produces a frame is not polled for ever.
+    if (this.frameWaitTries++ > 40) return
+    const wait = ++this.frameWait
+    const wake = (): void => {
+      if (wait !== this.frameWait || this.destroyed || this.source !== video) return
+      this.frameWait++
+      this.sourceDirty = true
+      this.scheduleRender()
+    }
+    // The frame callback is the precise signal, but it only comes for a video the browser
+    // is compositing; the timer covers one that is not on the page.
+    if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(wake)
+    setTimeout(wake, 120)
   }
 
   render(): void {
@@ -535,7 +594,13 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
           {
             view: this.context.getCurrentTexture().createView(),
             loadOp: 'clear',
-            clearValue: { r: clear[0], g: clear[1], b: clear[2], a: clear[3] },
+            // Premultiplied: the canvas is, whenever this alpha is below 1.
+            clearValue: {
+              r: clear[0] * clear[3],
+              g: clear[1] * clear[3],
+              b: clear[2] * clear[3],
+              a: clear[3],
+            },
             storeOp: 'store',
           },
         ],
@@ -550,10 +615,17 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     // composites of the frame already matched rather than a re-upload of the same pixels.
     if (this.sourceDirty || (this.sourceLive && !this.frameLoop)) {
       this.prepareSource()
-      this.uploadSource()
-      this.matchDirty = true
-      this.sourceDirty = false
-      this.pendingRect = undefined
+      if (this.uploadSource()) {
+        this.matchDirty = true
+        this.sourceDirty = false
+        this.pendingRect = undefined
+      } else {
+        // No frame from the video yet. Keep showing what there is; with nothing matched
+        // so far there is nothing to show, and matching an empty texture would paint a
+        // black frame over the fallback underneath.
+        this.sourceDirty = true
+        if (!this.uploaded) return
+      }
     }
 
     // Matching and presentation are separate submits: an invalid canvas
@@ -569,7 +641,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       const rect = this.pendingRect
       this.pendingRect = undefined
       this.prepareSource()
-      this.uploadSource()
+      if (!this.uploadSource()) return
       const grid = this.stream.grid()!
       const c0 = Math.max(0, Math.floor((rect.x * grid.columns) / this.srcW))
       const r0 = Math.max(0, Math.floor((rect.y * grid.rows) / this.srcH))
@@ -628,8 +700,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.frameLoop = true
       const cb = (): void => {
         if (!this.running || generation !== this.loopGeneration) return
+        if (this.opts.adaptiveResolution) this.paceAdaptive()
         this.sourceDirty = true
         this.renderGuarded()
+        if (this.opts.adaptiveResolution) this.probeGpu()
         this.rvfcId = video.requestVideoFrameCallback(cb)
       }
       this.rvfcId = video.requestVideoFrameCallback(cb)
@@ -639,28 +713,47 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
         if (!this.running || generation !== this.loopGeneration) return
         if (this.opts.adaptiveResolution) this.paceAdaptive()
         this.renderGuarded()
+        if (this.opts.adaptiveResolution) this.probeGpu()
         this.rafId = requestAnimationFrame(tick)
       }
       this.rafId = requestAnimationFrame(tick)
     }
   }
 
-  /** Frame pacing with hysteresis (spec §46): step down fast, recover slowly. */
+  /**
+   * Frame pacing with hysteresis (spec §46): step down fast, recover slowly.
+   *
+   * Pressure is the renderer being the thing that is slow. In an animation loop that is
+   * frames arriving late *and* the GPU taking a real share of a frame to finish them: late
+   * frames with an idle GPU are the display's doing — a 30 Hz panel, a browser in low-power
+   * mode — and stepping the grid down for those gains nothing and, since the frames stay
+   * late, never recovers. In a video loop the frames arrive at the video's rate whatever
+   * happens, so the question is only whether the GPU finishes one before the next is due.
+   */
   private paceAdaptive(): void {
     const now = performance.now()
     if (this.lastTickAt > 0) {
       const interval = now - this.lastTickAt
       this.adaptiveEma = this.adaptiveEma * 0.9 + interval * 0.1
       const target = 1000 / 60
+      const gpu = this.adaptiveGpuMs
+      // The GPU figure is a round trip to the GPU process and reads several ms with nothing
+      // to do, so the thresholds sit well clear of that floor: busy is a whole 60 Hz frame.
+      const pressure = this.frameLoop
+        ? gpu > this.adaptiveEma * 0.8
+        : this.adaptiveEma > target * 1.6 && gpu > target
+      const healthy = this.frameLoop
+        ? gpu >= 0 && gpu < this.adaptiveEma * 0.4
+        : this.adaptiveEma < target * 1.08 || (gpu >= 0 && gpu < target * 0.6)
       if (this.adaptiveCooldown > 0) {
         this.adaptiveCooldown--
-      } else if (this.adaptiveEma > target * 1.6 && this.adaptiveScale > 0.35) {
+      } else if (pressure && this.adaptiveScale > 0.35) {
         this.adaptiveScale *= 0.85
         this.adaptiveCooldown = 30
         this.adaptiveHealthy = 0
         this.matchDirty = true
         if (this.srcTexture) this.reconfigureStream()
-      } else if (this.adaptiveEma < target * 1.08 && this.adaptiveScale < 1) {
+      } else if (healthy && this.adaptiveScale < 1) {
         this.adaptiveHealthy++
         if (this.adaptiveHealthy > 120) {
           this.adaptiveScale = Math.min(1, this.adaptiveScale / 0.85)
@@ -672,6 +765,25 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       }
     }
     this.lastTickAt = now
+  }
+
+  /** Time the work just submitted, one measurement at a time. */
+  private probeGpu(): void {
+    if (this.gpuProbePending || this.deviceLost) return
+    this.gpuProbePending = true
+    const device = this.device
+    const started = performance.now()
+    device.queue.onSubmittedWorkDone().then(
+      () => {
+        this.gpuProbePending = false
+        if (device !== this.device || this.destroyed) return
+        const ms = performance.now() - started
+        this.adaptiveGpuMs = this.adaptiveGpuMs < 0 ? ms : this.adaptiveGpuMs * 0.8 + ms * 0.2
+      },
+      () => {
+        this.gpuProbePending = false
+      },
+    )
   }
 
   stop(): void {

@@ -245,9 +245,12 @@ export interface AsciiRendererOptions {
    */
   temporal?: boolean
   /**
-   * Adapt columns downward under sustained frame pressure with hysteresis
-   * (spec §46). Continuous rendering only; the actual grid is reported by
-   * grid(). Explicit resolution stays the upper bound.
+   * Adapt the grid downward under sustained frame pressure, with hysteresis (spec §46).
+   * Continuous rendering only, video included; the actual grid is reported by grid().
+   * Explicit resolution stays the upper bound. WebGPU backend only.
+   *
+   * Pressure means the GPU is what is slow: frames arriving late with an idle GPU — a
+   * display throttled to 30 Hz, say — are not, and leave the grid alone.
    */
   adaptiveResolution?: boolean
   /**

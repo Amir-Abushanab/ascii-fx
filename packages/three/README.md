@@ -17,13 +17,13 @@ await pass.init() // compiles the pipelines, and initializes the renderer if you
 renderer.setAnimationLoop(() => pass.render(scene, camera))
 ```
 
-`pass.render()` replaces `renderer.render()`. The scene goes through three's own output pass first, so the renderer's `toneMapping`, `outputColorSpace` and antialiasing all apply and the glyphs are matched against the picture the canvas would have shown. The render target follows the renderer's drawing buffer, so `renderer.setSize()` on a window resize is all a resize takes; pass `width`/`height`, or call `pass.setSize()`, to pin it instead.
+`pass.render()` replaces `renderer.render()`. From three r178 the scene goes through three's own output pass first, so the renderer's `toneMapping`, `outputColorSpace` and antialiasing all apply and the glyphs are matched against the picture the canvas would have shown. On r170–r177 the pass renders straight into its target: correct colours, but no tone mapping and no antialiasing. The render target follows the renderer's drawing buffer, so `renderer.setSize()` on a window resize is all a resize takes; pass `width`/`height`, or call `pass.setSize()`, to pin it instead.
 
 ## Why WebGPURenderer only
 
 The pass runs the matcher **on Three's own `GPUDevice`** — the scene's render target is matched and composited in place, with no readback. That's what keeps it cheap enough to run every frame.
 
-A WebGL renderer can't do that. Matching a WebGL-rendered scene exactly would mean pulling every frame back to the CPU, matching there, and pushing the result up again — a GPU→CPU→GPU round trip per frame, which is slow enough to defeat the point. Rather than ship a "supported" path that's quietly 20× slower, this package requires `THREE.WebGPURenderer` and says so. It reaches the renderer's `GPUDevice` through `renderer.backend`, which three does not document; the test suite runs against r187.
+A WebGL renderer can't do that. Matching a WebGL-rendered scene exactly would mean pulling every frame back to the CPU, matching there, and pushing the result up again — a GPU→CPU→GPU round trip per frame, which is slow enough to defeat the point. Rather than ship a "supported" path that's quietly 20× slower, this package requires `THREE.WebGPURenderer` and says so. It reaches the renderer's `GPUDevice` through `renderer.backend`, which three does not document, so the suite is run against more than the one release it is developed on: r170, r174, r178 and r187 pass (`pnpm test:three-versions`).
 
 If you're on WebGL and want ASCII, render your scene to a canvas and feed that canvas to [`@ascii-fx/gpu`](../gpu) as a source — you'll pay the readback, but explicitly.
 

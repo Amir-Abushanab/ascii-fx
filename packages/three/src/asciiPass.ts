@@ -1,4 +1,4 @@
-import { RenderTarget, Vector2 } from 'three'
+import { REVISION, RenderTarget, Vector2 } from 'three'
 import type { Camera, Object3D } from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
 import type { AsciiFrame, AsciiProfile, PaletteOptions } from '@ascii-fx/core'
@@ -10,7 +10,7 @@ import type {
   PostOptions,
   StreamMatchOptions,
 } from '@ascii-fx/gpu'
-import { getCanvasContext, getDevice, getGpuTexture } from './internals.js'
+import { getCanvasContext, getDevice, getGpuTexture, isInitialized } from './internals.js'
 
 export interface AsciiPassOptions extends StreamMatchOptions {
   profile: AsciiProfile
@@ -37,6 +37,14 @@ type ViewOptions = {
   post: PostOptions | null
 }
 
+/**
+ * The first three revision whose output render target can be trusted. r174–r177 have the
+ * methods, but run the output pass from a buffer the size of the canvas rather than of the
+ * target, so a target of any other size comes out resampled and the match is no longer
+ * of the pixels that were rendered.
+ */
+const OUTPUT_PASS_FROM = 178
+
 /** The output-target half of Renderer, which older three releases do not have. */
 interface OutputTargetRenderer {
   setOutputRenderTarget?: (target: RenderTarget | null) => void
@@ -51,9 +59,9 @@ interface OutputTargetRenderer {
  * The scene is matched as it would have been displayed. The render target is set as the
  * renderer's *output* target, so three runs its own output pass into it — the renderer's
  * `toneMapping` and `outputColorSpace`, and its antialiasing — and what is matched is the
- * picture the canvas would have shown. A three release without output targets renders
- * straight into the target instead: linear light, no tone mapping, sRGB-encoded here before
- * matching (§28). Usage:
+ * picture the canvas would have shown. Before three r178 the pass renders straight into
+ * the target instead: linear light, no tone mapping, sRGB-encoded here before matching
+ * (§28). Usage:
  *
  * ```ts
  * const pass = new AsciiPass({ profile, renderer, columns: 160 })
@@ -128,13 +136,15 @@ export class AsciiPass {
 
   /**
    * Compile pipelines on the renderer's device. Call once, and await it before the first
-   * `render()`. Initializes the renderer too if nothing has yet — three hands back the same
-   * promise to every caller, so an `await renderer.init()` of your own is harmless.
+   * `render()`. Initializes the renderer too if nothing has yet, so an
+   * `await renderer.init()` of your own is optional and harmless.
    */
   async init(): Promise<void> {
     if (this.disposed) throw new Error('AsciiPass.init() called after dispose().')
     if (this.stream) return
-    await this.rendererRef.init()
+    // Only if nothing has: newer three hands every caller the same promise, but r170–r173
+    // throw from a second init().
+    if (!isInitialized(this.rendererRef)) await this.rendererRef.init()
     if (this.disposed) return
     const device = getDevice(this.rendererRef)
     const engine = await AsciiEngine.create(device, this.profile)
@@ -204,6 +214,7 @@ export class AsciiPass {
 
     const output = renderer as unknown as OutputTargetRenderer
     const viaOutputPass =
+      OUTPUT_PASS_FROM <= Number(REVISION) &&
       typeof output.setOutputRenderTarget === 'function' &&
       typeof output.getOutputRenderTarget === 'function'
     const prev = renderer.getRenderTarget()

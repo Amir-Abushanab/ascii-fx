@@ -590,6 +590,12 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
     }
     const attachSource = (): void => {
       if (!live || img.naturalWidth === 0) return
+      // `load` can fire again for the same element (a responsive image picking another
+      // candidate), and each attach builds its own buffer and loop: drop the last one's.
+      if (raf) cancelAnimationFrame(raf)
+      raf = 0
+      stopGate?.()
+      stopGate = undefined
       const buffer = drawn ? document.createElement('canvas') : undefined
       if (buffer) {
         buffer.width = img.naturalWidth

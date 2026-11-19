@@ -115,6 +115,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private fxLayer?: HTMLCanvasElement | OffscreenCanvas
   private srcFxCanvas?: HTMLCanvasElement | OffscreenCanvas
   private srcFxFor?: RenderSource
+  private srcFxEpoch = -1
 
   private interaction: InteractionOptions | null = null
   private pointerX = 0.5
@@ -148,6 +149,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   /** Bumped by every render(), so the adoption fallback can tell whether anyone is calling it. */
   private renderSeq = 0
   private fullRenderScheduled = false
+  /** Bumped whenever the source's pixels may have changed; see GlFxParams.sourceEpoch. */
+  private sourceEpoch = 0
   /** A throw from the loop has been logged and not yet followed by a good frame. */
   private loopFaulted = false
 
@@ -250,6 +253,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     this.matchDirty = true
     this.hysteresisPrimed = false
     this.srcFxFor = undefined
+    this.sourceEpoch++
     this.pool?.abandon()
     this.pending = undefined
     if (restart) this.start()
@@ -416,6 +420,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
 
   private extract(): RawImage {
     const source = this.source!
+    // Read for a new match, so whatever it shows now is what the composite should sample.
+    this.sourceEpoch++
     if (isRawImage(source)) return source
     const [w, h] = sourceDims(source)
     if (!(w > 0) || !(h > 0)) throw new Error('Source has zero dimensions; is it loaded yet?')
@@ -479,7 +485,9 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     const source = this.source
     if (!source) return null
     if (!isRawImage(source)) return source as CanvasImageSource
-    if (this.srcFxFor !== source) {
+    // By epoch as well as identity: a RawImage edited in place and invalidated is the same
+    // object holding a different picture.
+    if (this.srcFxFor !== source || this.srcFxEpoch !== this.sourceEpoch) {
       if (
         !this.srcFxCanvas ||
         this.srcFxCanvas.width !== source.width ||
@@ -498,6 +506,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
         0,
       )
       this.srcFxFor = source
+      this.srcFxEpoch = this.sourceEpoch
     }
     return this.srcFxCanvas as CanvasImageSource
   }
@@ -570,6 +579,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       intensity: interaction?.intensity ?? 1,
       time: (performance.now() - this.t0) / 1000,
       source: kind === 1 || kind === 8 ? this.sourceTexture() : undefined,
+      sourceEpoch: this.sourceEpoch,
       sourceKind: this.motionWanted ? 1 : 0,
       motion:
         this.motionWanted && this.lastMotion?.length === frame.columns * frame.rows

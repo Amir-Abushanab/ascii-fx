@@ -32,7 +32,8 @@ That matters because a profile's fingerprint is what a `.asciif` frame is valida
 ```ts
 import { buildChromaticProfile } from '@ascii-fx/compiler'
 
-const { binary } = buildChromaticProfile({ glyphs: [{ char: '🌊', image }, ...] })
+// One entry per glyph: the character, and its decoded image.
+const { binary } = buildChromaticProfile({ glyphs: [{ char: '🌊', image }] })
 ```
 
 ## Static frames

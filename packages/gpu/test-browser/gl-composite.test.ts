@@ -162,6 +162,56 @@ describe('webgl2 compositor', () => {
     renderer.destroy()
   })
 
+  // Most presents are of a frame already on the GPU: a pointer move, a tick of a time-based
+  // effect. Each used to repack every cell and push the whole source image up again.
+  it('uploads nothing for a pointer move over an unchanged frame', async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 320
+    canvas.height = 192
+    const renderer = await createAsciiRenderer({
+      canvas,
+      profile: makeProfile(STANDARD_SIX),
+      backend: 'cpu',
+      columns: 20,
+      color: 'full',
+      workers: false,
+      interaction: { type: 'reveal', radius: 0.3 },
+    })
+    renderer.setSource(source)
+    renderer.render()
+
+    const proto = WebGL2RenderingContext.prototype
+    const originals = { texImage2D: proto.texImage2D, texSubImage2D: proto.texSubImage2D }
+    let uploads = 0
+    proto.texImage2D = function (this: WebGL2RenderingContext, ...args: unknown[]) {
+      uploads++
+      return (originals.texImage2D as (...a: unknown[]) => void).apply(this, args)
+    } as typeof proto.texImage2D
+    proto.texSubImage2D = function (this: WebGL2RenderingContext, ...args: unknown[]) {
+      uploads++
+      return (originals.texSubImage2D as (...a: unknown[]) => void).apply(this, args)
+    } as typeof proto.texSubImage2D
+    try {
+      renderer.pointer.set(0.2, 0.5)
+      await settle()
+      const left = readPixels(canvas)
+      renderer.pointer.set(0.8, 0.5)
+      await settle()
+      // It did repaint — the revealed disc moved — without sending anything up.
+      expect(meanAbsDiff(readPixels(canvas), left)).toBeGreaterThan(1)
+      expect(uploads).toBe(0)
+
+      // A new source is new pixels and a new frame: both go up.
+      renderer.setSource(randomImage(160, 96, 32))
+      renderer.render()
+      expect(uploads).toBeGreaterThanOrEqual(2)
+    } finally {
+      proto.texImage2D = originals.texImage2D
+      proto.texSubImage2D = originals.texSubImage2D
+      renderer.destroy()
+    }
+  })
+
   it('reports unavailable after the context is lost', async () => {
     const canvas = document.createElement('canvas')
     canvas.width = 64

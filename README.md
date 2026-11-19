@@ -223,7 +223,7 @@ pnpm assets           # re-render the hero image and social card with the librar
 
 The GPU matcher has to agree with the CPU reference bit for bit: glyphs, colours, and flags, across colour modes, palettes, alpha modes, uneven reductions, temporal reuse, and dirty-region rematches. `pnpm test:gpu` checks this, and it needs a real adapter. GitHub runners report a software adapter that passes every availability check and then dies partway through the workload, so CI runs the GPU-free half and the pre-push hook runs the rest on any push that touches `packages/`. See [`RELEASING.md`](./RELEASING.md).
 
-Other checks: `pnpm lint` (oxlint), `pnpm format` (oxfmt), `pnpm knip`, `pnpm depcruise`, and `pnpm package:check` (publint, are-the-types-wrong, and a tarball install into a throwaway npm project). Installs enforce a 7-day `minimumReleaseAge` on every dependency, transitive ones included.
+Other checks: `pnpm lint` (oxlint), `pnpm format` (oxfmt), `pnpm docs:snippets` (every TypeScript fence in the READMEs, compiled against the packages), `pnpm knip`, `pnpm depcruise`, and `pnpm package:check` (publint, are-the-types-wrong, and a tarball install into a throwaway npm project). Installs enforce a 7-day `minimumReleaseAge` on every dependency, transitive ones included.
 
 `pnpm assets` renders the hero above and `assets/og.png` through the CPU matcher, so they always reflect the current output. `apps/docs/prep.mjs` copies the card into the site as its `og:image`. GitHub's repository social preview has no API, so that one is uploaded by hand under Settings → General.
 

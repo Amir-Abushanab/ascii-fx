@@ -132,6 +132,19 @@ function transparentClearSuite(backend: 'webgpu' | 'cpu'): void {
     expect(p.minAlpha).toBe(0)
   })
 
+  // `clearColor` is straight rgba. The shader compositors write premultiplied output and
+  // passed it through raw, so a dim tint at half alpha presented at full strength.
+  it('a tinted see-through ground presents at the strength it was given', async () => {
+    const tint = [0.5, 0, 0, 0.5] as const
+    // Half of a half-strength red over the page: 0.5·(0.5·255) + 0.5·page.
+    const want = [0.25 * 255 + 0.5 * PAGE[0], 0.5 * PAGE[1], 0.5 * PAGE[2]]
+    for (const compositor of backend === 'cpu' ? (['auto', 'canvas2d'] as const) : [undefined]) {
+      const p = await present({ backend, color: 'full', clearColor: tint, compositor }, 0)
+      expectNear(p.overPage(...LETTERBOX), want, 2, `letterbox over page (${compositor ?? 'gpu'})`)
+      expect(Math.abs(p.alpha(...LETTERBOX) - 128)).toBeLessThanOrEqual(1)
+    }
+  })
+
   it('mono: no clearColor keeps the fully opaque canvas (the fast path)', async () => {
     const p = await present({ backend, color: 'mono' }, 0)
     expect(p.minAlpha, 'no pixel may present transparent').toBe(255)

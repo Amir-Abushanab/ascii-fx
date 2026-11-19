@@ -448,7 +448,6 @@ export class AsciiStream {
   }
   private featuresBuf?: GPUBuffer
   private cellsBuf?: GPUBuffer
-  private stagingBuf?: GPUBuffer
   private temporalPrimed = false
   /**
    * §21 field, one u32 per cell: trail in bits 8..15, previous mean luma in
@@ -607,7 +606,6 @@ export class AsciiStream {
       this.prevReducedBuf = undefined
       this.featuresBuf?.destroy()
       this.cellsBuf?.destroy()
-      this.stagingBuf?.destroy()
       this.motionBuf?.destroy()
       this.motionBuf = undefined
       this.qcellsBuf?.destroy()
@@ -625,10 +623,6 @@ export class AsciiStream {
       this.cellsBuf = d.createBuffer({
         size: n * 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      })
-      this.stagingBuf = d.createBuffer({
-        size: n * 16,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       })
     }
     let temporalAllocated = false
@@ -1064,9 +1058,12 @@ export class AsciiStream {
     f(17, cellScreenH)
     f(18, lod)
     f(19, 0)
-    dv.setFloat32(80, clear[0], true)
-    dv.setFloat32(84, clear[1], true)
-    dv.setFloat32(88, clear[2], true)
+    // Premultiplied, like everything else the composite writes: `clearColor` is given as
+    // straight rgba, and passing it through raw made a see-through ground brighter than it
+    // was asked to be ([0.5, 0, 0, 0.5] came out as full red at half alpha).
+    dv.setFloat32(80, clear[0] * clear[3], true)
+    dv.setFloat32(84, clear[1] * clear[3], true)
+    dv.setFloat32(88, clear[2] * clear[3], true)
     dv.setFloat32(92, clear[3], true)
     const post = resolvePost(view.post)
     f(24, cw)
@@ -1152,10 +1149,22 @@ export class AsciiStream {
     // With a palette, the export is the snapped frame — what is on screen. Snapped here rather
     // than trusted from the last composite, which may predate a palette change.
     this.encodeQuantize(enc)
-    enc.copyBufferToBuffer(this.displayCells, 0, this.stagingBuf!, 0, n * 16)
+    // A buffer of its own per call. One shared buffer meant a second capture started while
+    // the first was still mapped — two awaits in a Promise.all, a capture during an export —
+    // failed on the copy, and a grid change mid-await destroyed the buffer under the first.
+    const staging = d.createBuffer({
+      size: n * 16,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    })
+    enc.copyBufferToBuffer(this.displayCells, 0, staging, 0, n * 16)
     d.queue.submit([enc.finish()])
-    await this.stagingBuf!.mapAsync(GPUMapMode.READ)
-    const words = new Uint32Array(this.stagingBuf!.getMappedRange())
+    try {
+      await staging.mapAsync(GPUMapMode.READ)
+    } catch (err) {
+      staging.destroy()
+      throw err
+    }
+    const words = new Uint32Array(staging.getMappedRange())
     const color = this.colorMode()
     const glyphIds = new Uint16Array(n)
     const flags = new Uint16Array(n)
@@ -1175,7 +1184,7 @@ export class AsciiStream {
       if (needFg) fg![i] = transparent ? 0 : ((words[i * 4 + 1] & 0xffffff) | 0xff000000) >>> 0
       if (needBg) bg![i] = transparent ? 0 : ((words[i * 4 + 2] & 0xffffff) | 0xff000000) >>> 0
     }
-    this.stagingBuf!.unmap()
+    staging.destroy()
     return new AsciiFrame({
       columns,
       rows,
@@ -1193,7 +1202,6 @@ export class AsciiStream {
     this.prevReducedBuf?.destroy()
     this.featuresBuf?.destroy()
     this.cellsBuf?.destroy()
-    this.stagingBuf?.destroy()
     this.paramsBuf.destroy()
     this.motionBuf?.destroy()
     this.motionPlaceholder.destroy()

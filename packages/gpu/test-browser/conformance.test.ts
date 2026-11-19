@@ -425,6 +425,32 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
     }
   })
 
+  // One staging buffer was shared by every capture, so a second one started before the
+  // first had been read back failed on a buffer that was still mapped.
+  it('captures overlapping one another', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+      columns: 12,
+      color: 'full',
+    })
+    try {
+      const image = randomImage(96, 56, 71)
+      renderer.setSource(image)
+      const cpu = matchFrame(image, { profile, columns: 12, color: 'full' })
+      const frames = await Promise.all([
+        renderer.captureFrame(),
+        renderer.captureFrame(),
+        renderer.captureFrame(),
+      ])
+      for (const frame of frames) expectFramesEqual(frame, cpu, 'overlapping capture')
+    } finally {
+      renderer.destroy()
+    }
+  })
+
   it('invalidate(rect) rematches only the region yet lands on the exact full result', async () => {
     const profile = makeProfile(STANDARD_SIX)
     const renderer = await createAsciiRenderer({
@@ -525,13 +551,16 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
       const internals = renderer as unknown as {
         adaptiveScale: number
         adaptiveEma: number
+        adaptiveGpuMs: number
         lastTickAt: number
         paceAdaptive(): void
       }
       // The EMA needs several slow frames to cross the step-down threshold;
       // this is the counterpart to the paused-loop test, proving that guard
-      // suppresses only the pause and not real frame pressure.
+      // suppresses only the pause and not real frame pressure. The GPU is the
+      // slow part here: most of each 100 ms frame is its work.
       internals.adaptiveEma = 1000 / 60
+      internals.adaptiveGpuMs = 80
       for (let i = 0; i < 12; i++) {
         internals.lastTickAt = performance.now() - 100
         internals.paceAdaptive()
@@ -540,6 +569,116 @@ describe.runIf(gpuAvailable)('GPU ↔ CPU conformance', () => {
       // Pressure only ever lowers the grid. 16 columns is under the 40-column floor, which
       // used to pull it *up* to 40.
       expect(renderer.grid()!.columns).toBeLessThanOrEqual(16)
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  // Frame intervals alone cannot tell a slow renderer from a slow display. A panel
+  // throttled to 30 Hz used to read as sustained pressure: the grid stepped down to a
+  // third of what was asked for and stayed there, since a smaller grid cannot make the
+  // display any faster.
+  it('does not mistake a throttled display for frame pressure', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+      columns: 16,
+      adaptiveResolution: true,
+    })
+    try {
+      renderer.setSource(randomImage(128, 72, 65))
+      renderer.render()
+      const internals = renderer as unknown as {
+        adaptiveScale: number
+        adaptiveEma: number
+        adaptiveGpuMs: number
+        adaptiveHealthy: number
+        adaptiveCooldown: number
+        lastTickAt: number
+        paceAdaptive(): void
+      }
+      const tick = (intervalMs: number): void => {
+        internals.lastTickAt = performance.now() - intervalMs
+        internals.paceAdaptive()
+      }
+      // 33 ms frames, 2 ms of GPU work in each.
+      internals.adaptiveGpuMs = 2
+      for (let i = 0; i < 60; i++) tick(1000 / 30)
+      expect(internals.adaptiveScale).toBe(1)
+
+      // And a grid that was stepped down for good reason comes back on that display
+      // once the GPU is idle again, though its frames never get any shorter.
+      internals.adaptiveScale = 0.85
+      internals.adaptiveCooldown = 0
+      for (let i = 0; i < 130; i++) tick(1000 / 30)
+      expect(internals.adaptiveScale).toBe(1)
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  it('times the GPU while a loop runs', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const live = document.createElement('canvas')
+    live.width = 128
+    live.height = 72
+    live.getContext('2d')!.fillRect(0, 0, 64, 72)
+    const renderer = await createAsciiRenderer({
+      canvas: document.createElement('canvas'),
+      profile,
+      backend: 'webgpu',
+      columns: 16,
+      adaptiveResolution: true,
+    })
+    try {
+      renderer.setSource(live)
+      renderer.start()
+      const internals = renderer as unknown as { adaptiveGpuMs: number }
+      const deadline = performance.now() + 3000
+      while (internals.adaptiveGpuMs < 0 && performance.now() < deadline) {
+        await new Promise((r) => requestAnimationFrame(r))
+      }
+      expect(internals.adaptiveGpuMs).toBeGreaterThanOrEqual(0)
+    } finally {
+      renderer.destroy()
+    }
+  })
+
+  // A video loop is called at the video's frame rate whatever the renderer costs, so
+  // the interval says nothing. It used not to be paced at all.
+  it('paces a video loop on whether the GPU keeps up with the frames', async () => {
+    const profile = makeProfile(STANDARD_SIX)
+    const renderer = await createAsciiRenderer({
+      canvas: new OffscreenCanvas(64, 64),
+      profile,
+      backend: 'webgpu',
+      columns: 16,
+      adaptiveResolution: true,
+    })
+    try {
+      renderer.setSource(randomImage(128, 72, 66))
+      renderer.render()
+      const internals = renderer as unknown as {
+        adaptiveScale: number
+        adaptiveEma: number
+        adaptiveGpuMs: number
+        frameLoop: boolean
+        lastTickAt: number
+        paceAdaptive(): void
+      }
+      internals.frameLoop = true
+      const tick = (): void => {
+        internals.lastTickAt = performance.now() - 1000 / 24
+        internals.paceAdaptive()
+      }
+      internals.adaptiveGpuMs = 3
+      for (let i = 0; i < 40; i++) tick()
+      expect(internals.adaptiveScale).toBe(1)
+      internals.adaptiveGpuMs = 50 // longer than the 42 ms between frames
+      for (let i = 0; i < 40; i++) tick()
+      expect(internals.adaptiveScale).toBeLessThan(1)
     } finally {
       renderer.destroy()
     }
