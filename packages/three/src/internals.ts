@@ -19,14 +19,18 @@ const FLOOR = 170
 const TESTED = `this is three r${REVISION}; tested on r170, r174, r178 and r187`
 
 let warnedTooOld = false
-/** Once per page: three below the peer range is not something this package was built for. */
-export function warnIfTooOld(): void {
-  if (warnedTooOld || !(Number(REVISION) < FLOOR)) return
+/**
+ * Once per page: three below the peer range is not something this package was built for.
+ * `revision` is three's own `REVISION` unless a test says otherwise; returns whether it warned.
+ */
+export function warnIfTooOld(revision: string = REVISION): boolean {
+  if (warnedTooOld || !(Number(revision) < FLOOR)) return false
   warnedTooOld = true
   console.warn(
-    `[ascii-fx] three r${REVISION} is older than @ascii-fx/three supports (r${FLOOR} and up); ` +
+    `[ascii-fx] three r${revision} is older than @ascii-fx/three supports (r${FLOOR} and up); ` +
       'AsciiPass reads renderer internals that may not exist yet in this release.',
   )
+  return true
 }
 
 interface BackendLike {
