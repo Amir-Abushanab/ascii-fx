@@ -88,7 +88,9 @@ function Walkthrough() {
 }
 ```
 
-A `<video>` has no `alt`, so give `<AsciiVideo>` an `aria-label` (or `aria-labelledby`). `<AsciiCanvas>` takes the same two props: its canvas is hidden from assistive technology, so without a label or children that describe it there is nothing to read.
+All three components pass anything a `<div>` takes — `id`, `data-*`, `aria-*`, `role`, `title`, `tabIndex`, event handlers — to their wrapper element. (`onError` is the exception: it reports the renderer failing, as above, not the DOM event.)
+
+A `<video>` has no `alt`, so give `<AsciiVideo>` an `aria-label` (or `aria-labelledby`), which goes on the video itself. `<AsciiCanvas>` takes the same two props: its canvas is hidden from assistive technology, so without a label or children that describe it there is nothing to read.
 
 ## Motion and cost
 

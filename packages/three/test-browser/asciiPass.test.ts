@@ -182,6 +182,24 @@ describe.runIf(gpuAvailable)('AsciiPass (three WebGPURenderer)', () => {
     renderer.dispose()
   })
 
+  // The gpu renderer refuses these; the pass used to take them and do nothing.
+  it('refuses the options the renderer refuses', async () => {
+    const THREE = await import('three/webgpu')
+    const { AsciiPass } = await import('@ascii-fx/three')
+    const { makeProfile, STANDARD_SIX } = await import('../../core/test/synthetic.js')
+    const renderer = new THREE.WebGPURenderer({ canvas: document.createElement('canvas') })
+    const profile = makeProfile(STANDARD_SIX)
+    expect(
+      () => new AsciiPass({ profile, renderer, interaction: { type: 'wave', source: 'motion' } }),
+    ).toThrow(/single origin/)
+    const pass = new AsciiPass({ profile, renderer })
+    expect(() => pass.setInteraction({ type: 'push', source: 'motion' })).toThrow(/single origin/)
+    expect(() => pass.set({ jitter: 999 })).toThrow(/0\.\.255/)
+    pass.setInteraction({ type: 'reveal', source: 'motion' })
+    pass.dispose()
+    // The renderer was never initialized, and older three cannot dispose one that was not.
+  })
+
   it('AsciiGlyphs builds an instanced grid from a frame', async () => {
     const { AsciiGlyphs } = await import('@ascii-fx/three')
     const { makeProfile, STANDARD_SIX, makeCell } = await import('../../core/test/synthetic.js')

@@ -203,7 +203,8 @@ export function frameToSVG(frame: AsciiFrame, options: SvgExportOptions = {}): s
   const height = frame.rows * cellH
   const family =
     options.fontFamily ??
-    (frame.profile.metadata.fontFamily
+    // A profile built in memory skips the decoder's check, so the type is asked for here too.
+    (typeof frame.profile.metadata.fontFamily === 'string' && frame.profile.metadata.fontFamily
       ? `'${frame.profile.metadata.fontFamily.replaceAll("'", '')}', monospace`
       : 'monospace')
   const perCell = frame.colorMode !== 'mono' && frame.colorMode !== 'glyph' && !!frame.foreground

@@ -42,6 +42,8 @@ export interface GlViewParams {
   post: Required<PostOptions>
   /** Bloom field (glow.ts), `columns · rows` RGBA floats. Bloom is skipped without it. */
   glow?: Float32Array
+  /** Changes when `glow`'s contents do; the array itself is reused from frame to frame. */
+  glowEpoch: number
 }
 
 export interface GlFxParams {
@@ -138,6 +140,9 @@ export class GlCompositor {
   /** What the cells texture currently holds, so an unchanged frame is not packed again. */
   private cellsFor?: { frame: AsciiFrame; fg: number; bg: number }
   private srcEpoch = -1
+  private glowEpoch = -1
+  /** The motion plane last uploaded. A new one is a new array, so identity is enough. */
+  private motionFor?: Uint8Array
   private lost = false
   private destroyed = false
 
@@ -207,6 +212,8 @@ export class GlCompositor {
     this.cellDims = { columns: 0, rows: 0 }
     this.cellsFor = undefined
     this.srcEpoch = -1
+    this.glowEpoch = -1
+    this.motionFor = undefined
     try {
       this.build()
       this.lost = false
@@ -401,7 +408,8 @@ export class GlCompositor {
     gl.activeTexture(gl.TEXTURE2)
     gl.bindTexture(gl.TEXTURE_2D, this.atlasRgbaTex)
     gl.uniform1i(u('uAtlasRgba'), 2)
-    if (fx.motion) {
+    if (fx.motion && fx.motion !== this.motionFor) {
+      this.motionFor = fx.motion
       // Its own unit: binding it while unit 2 is active would replace the RGBA atlas there.
       gl.activeTexture(gl.TEXTURE4)
       gl.bindTexture(gl.TEXTURE_2D, this.motionTex)
@@ -429,7 +437,8 @@ export class GlCompositor {
     gl.uniform1i(u('uMotion'), 4)
     gl.activeTexture(gl.TEXTURE5)
     gl.bindTexture(gl.TEXTURE_2D, this.glowTex)
-    if (view.glow) {
+    if (view.glow && view.glowEpoch !== this.glowEpoch) {
+      this.glowEpoch = view.glowEpoch
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,

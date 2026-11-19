@@ -188,4 +188,40 @@ describe('accessible names', () => {
     // The label must not have gone to the renderer as an option.
     expect(host.querySelector('canvas')?.getAttribute('aria-hidden')).toBe('true')
   })
+
+  // Anything a <div> takes goes on the wrapper, and none of it to the renderer as an option.
+  it('passes DOM attributes and handlers to the wrapper', async () => {
+    const errors: Error[] = []
+    let clicks = 0
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+    root.render(
+      <AsciiImage
+        src="/nonexistent.png"
+        alt="probe"
+        profile={makeProfile(STANDARD_SIX)}
+        backend="cpu"
+        columns={8}
+        id="hero"
+        data-testid="ascii"
+        title="An image"
+        aria-describedby="caption"
+        onClick={() => clicks++}
+        onError={(e) => errors.push(e)}
+      />,
+    )
+    expect(await until(() => host!.querySelector('canvas') !== null)).toBe(true)
+    const wrapper = host.firstElementChild as HTMLElement
+    expect(wrapper.id).toBe('hero')
+    expect(wrapper.dataset.testid).toBe('ascii')
+    expect(wrapper.title).toBe('An image')
+    expect(wrapper.getAttribute('aria-describedby')).toBe('caption')
+    // The renderer option that shares the prop list stayed an option, not an attribute.
+    expect(wrapper.hasAttribute('columns')).toBe(false)
+    wrapper.click()
+    expect(clicks).toBe(1)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(errors).toEqual([])
+  })
 })

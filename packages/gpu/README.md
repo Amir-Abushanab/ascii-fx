@@ -49,6 +49,10 @@ A live source pays one frame of latency for the matcher: the renderer presents a
 
 A GPU device can vanish — driver reset, tab backgrounded too long, laptop switching GPUs. The renderer rebuilds on a fresh device by itself. For the case it can't recover from, `onDeviceLost` fires and you remount the canvas: a canvas is bound to its first context type for good, so one that has held a `'webgpu'` context can never be given a 2D one, and starting over needs a _new element_. `@ascii-fx/react` does this for you via `canvasKey`.
 
+## One device for the page
+
+Every WebGPU renderer on a page shares one `GPUDevice`, and renderers with the same profile share one engine on it: the compute pipelines and the glyph atlas are built once, and each renderer adds only the buffers for its own canvas. A gallery of thirty images is one device, not thirty — browsers budget devices, and can refuse the next one. The device goes when the last renderer is destroyed. If it is lost, it is replaced once and every renderer moves to the replacement. There is nothing to configure, and `onError` for a GPU validation error may be called on every renderer, since a shared device cannot say whose work failed.
+
 ## Interactions
 
 Pointer-driven effects run in the composite stage, after matching, so they cost nothing extra per glyph:

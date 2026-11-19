@@ -2,7 +2,7 @@ import { REVISION, RenderTarget, Vector2 } from 'three'
 import type { Camera, Object3D } from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
 import type { AsciiFrame, AsciiProfile, PaletteOptions } from '@ascii-fx/core'
-import { AsciiEngine, AsciiStream } from '@ascii-fx/gpu/webgpu'
+import { AsciiEngine, AsciiStream, assertInteraction, assertJitter } from '@ascii-fx/gpu/webgpu'
 import type {
   AsciiPointer,
   FitMode,
@@ -10,7 +10,13 @@ import type {
   PostOptions,
   StreamMatchOptions,
 } from '@ascii-fx/gpu'
-import { getCanvasContext, getDevice, getGpuTexture, isInitialized } from './internals.js'
+import {
+  getCanvasContext,
+  getDevice,
+  getGpuTexture,
+  isInitialized,
+  warnIfTooOld,
+} from './internals.js'
 
 export interface AsciiPassOptions extends StreamMatchOptions {
   profile: AsciiProfile
@@ -108,6 +114,10 @@ export class AsciiPass {
       post,
       ...match
     } = options
+    warnIfTooOld()
+    // The renderer's own checks: a shader cannot refuse an option, it just does nothing.
+    assertInteraction(interaction ?? null)
+    assertJitter(match)
     this.profile = profile
     this.rendererRef = renderer
     this.matchOpts = match
@@ -175,10 +185,12 @@ export class AsciiPass {
     if (clearColor !== undefined) this.clearColor = clearColor
     if (palette !== undefined) this.palette = palette
     if (post !== undefined) this.post = post
+    assertJitter({ ...this.matchOpts, ...match })
     this.matchOpts = { ...this.matchOpts, ...match }
   }
 
   setInteraction(interaction: InteractionOptions | null): void {
+    assertInteraction(interaction)
     this.interaction = interaction
   }
 

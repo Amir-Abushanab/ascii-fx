@@ -1,12 +1,15 @@
 import type { AsciiFrame, AsciiProfile } from '@ascii-fx/core'
 import { deriveGrid } from '@ascii-fx/core'
-import { AsciiEngine, AsciiStream } from './engine.js'
+import type { AsciiEngine, AsciiStream } from './engine.js'
+import { type GpuLease, leaseGpu } from './sharedDevice.js'
 import { MAX_GPU_GLYPHS } from './limits.js'
 import type {
   AsciiPointer,
   AsciiRenderer,
   AsciiRendererOptions,
   AsciiRendererRuntimeOptions,
+  DeviceLostInfo,
+  GpuError,
   InteractionOptions,
   RenderSource,
 } from './types.js'
@@ -28,7 +31,11 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   readonly profile: AsciiProfile
   readonly pointer: AsciiPointer
 
-  // Swapped wholesale when a lost device is rebuilt, so none of these are readonly.
+  // Swapped wholesale when a lost device is rebuilt, so none of these are readonly. The
+  // device and engine are shared with every other renderer on the page (sharedDevice.ts);
+  // the stream is this renderer's own.
+  private lease: GpuLease
+  private unwatch?: () => void
   private device: GPUDevice
   private readonly context: GPUCanvasContext
   private readonly format: GPUTextureFormat
@@ -99,16 +106,14 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   /** Consecutive recovery attempts inside one incident window (see recover). */
   private recoverAttempts = 0
   private lastRecoverAt = 0
-  private readonly onDeviceLost?: (info: GPUDeviceLostInfo) => void
-  private readonly onError?: (error: GPUError) => void
+  private readonly onDeviceLost?: (info: DeviceLostInfo) => void
+  private readonly onError?: (error: GpuError) => void
 
   private constructor(init: {
     options: AsciiRendererOptions
-    device: GPUDevice
+    lease: GpuLease
     context: GPUCanvasContext
     format: GPUTextureFormat
-    engine: AsciiEngine
-    stream: AsciiStream
   }) {
     const { options } = init
     this.profile = options.profile
@@ -128,11 +133,12 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     this.interaction = interaction ?? null
     this.onDeviceLost = onDeviceLost
     this.onError = onError
-    this.device = init.device
+    this.lease = init.lease
+    this.device = init.lease.device
     this.context = init.context
     this.format = init.format
-    this.engine = init.engine
-    this.stream = init.stream
+    this.engine = init.lease.engine
+    this.stream = init.lease.stream
     this.pointer = {
       set: (x: number, y: number) => {
         this.pointerX = x
@@ -145,7 +151,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       },
     }
     this.configureContext()
-    this.watchDevice(init.device)
+    this.watchDevice(this.device)
   }
 
   static async create(options: AsciiRendererOptions): Promise<WebGpuAsciiRenderer> {
@@ -164,42 +170,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
           'Use the CPU backend for larger charsets.',
       )
     }
-    const adapter = await navigator.gpu.requestAdapter()
-    if (!adapter) throw new Error('WebGPU is present but no adapter is available on this device.')
-    const device = await adapter.requestDevice()
-    // WebGPU reports most failures through error scopes, not exceptions.
-    // createBuffer, createTexture and createBindGroup all validate silently, so a
-    // browser whose limits or WGSL support differ from the one this was developed
-    // on can accept every setup call and then render nothing — indistinguishable
-    // from a working renderer unless we ask. Asking is what makes 'auto' able to
-    // fall back instead of sitting on a GPU path that produces no pixels.
-    device.pushErrorScope('validation')
-    device.pushErrorScope('internal')
+    const format = navigator.gpu.getPreferredCanvasFormat()
+    // Setup, its error scopes and the lost-during-setup check all live with the lease.
+    const lease = await leaseGpu(options.profile, format)
     try {
-      const format = navigator.gpu.getPreferredCanvasFormat()
-      const engine = await AsciiEngine.create(device, options.profile)
-      const stream = await engine.createStream(format)
-      const internal = await device.popErrorScope()
-      const validation = await device.popErrorScope()
-      const failure = internal ?? validation
-      if (failure) {
-        throw new Error(
-          `WebGPU accepted the renderer setup and then reported an error, so it would render nothing: ${failure.message}`,
-        )
-      }
-      // A device can be handed out already lost (stale adapter) or die during
-      // setup. Every call above then no-ops and BOTH error scopes resolve
-      // null, so without this check a dead renderer passes setup, binds the
-      // canvas, and forecloses the CPU fallback. One macrotask lets the lost
-      // promise's reaction run if it has already resolved.
-      let lostDuringSetup: GPUDeviceLostInfo | undefined
-      void device.lost.then((lost) => {
-        lostDuringSetup = lost
-      })
-      await new Promise((r) => setTimeout(r, 0))
-      if (lostDuringSetup) {
-        throw new Error(`WebGPU device was lost during renderer setup (${lostDuringSetup.reason}).`)
-      }
       // Touch the canvas last. Everything above can fail on a browser with a
       // partial WebGPU implementation, and 'auto' has to be able to fall back to
       // the CPU backend afterwards — which it cannot once this call has bound the
@@ -211,9 +185,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
             'if this canvas previously ran the CPU backend, create a fresh <canvas> element to switch backends.',
         )
       }
-      return new WebGpuAsciiRenderer({ options, device, context, format, engine, stream })
+      return new WebGpuAsciiRenderer({ options, lease, context, format })
     } catch (err) {
-      device.destroy()
+      lease.stream.destroy()
+      lease.release()
       throw err
     }
   }
@@ -249,13 +224,17 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
    */
   private watchDevice(device: GPUDevice): void {
     // Errors outside an explicit scope surface here and nowhere else. Ignoring
-    // them is how a renderer ends up submitting work that is silently dropped.
-    device.addEventListener('uncapturederror', (event) => {
+    // them is how a renderer ends up submitting work that is silently dropped. The device
+    // is shared, so this hears every renderer's errors and cannot tell whose they are.
+    const onUncaptured = (event: Event): void => {
       if (this.destroyed || device !== this.device) return
       const { error } = event as GPUUncapturedErrorEvent
       if (this.onError) this.onError(error)
       else console.error('[ascii-fx] WebGPU error:', error.message)
-    })
+    }
+    this.unwatch?.()
+    device.addEventListener('uncapturederror', onUncaptured)
+    this.unwatch = () => device.removeEventListener('uncapturederror', onUncaptured)
     void device.lost.then((info) => {
       // destroy() resolves this too, and an already-replaced device resolves it
       // late; neither is a failure.
@@ -295,32 +274,29 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       }
       if (typeof navigator === 'undefined' || !navigator.gpu)
         throw new Error('navigator.gpu went away')
-      const adapter = await navigator.gpu.requestAdapter()
-      if (this.destroyed) return
-      if (!adapter) throw new Error('no adapter available after device loss')
-      const device = await adapter.requestDevice()
+      // The old lease is on a dead device. Releasing it first is what lets the next lease —
+      // this renderer's, or another's recovering from the same loss — open a fresh one.
+      this.stream.destroy()
+      this.lease.release()
+      const lease = await leaseGpu(this.profile, this.format)
+      // destroy() may have raced the await above; a destroyed renderer must
+      // not re-bind its canvas or keep a share of the replacement device.
       if (this.destroyed) {
-        device.destroy()
-        return
-      }
-      const engine = await AsciiEngine.create(device, this.profile)
-      const stream = await engine.createStream(this.format)
-      // destroy() may have raced the awaits above; a destroyed renderer must
-      // not re-bind its canvas or keep a live replacement device for GC.
-      if (this.destroyed) {
-        device.destroy()
+        lease.stream.destroy()
+        lease.release()
         return
       }
       // Everything below is device-owned and died with it.
       this.srcTexture = undefined
       this.srcW = 0
       this.srcH = 0
-      this.device = device
-      this.engine = engine
-      this.stream = stream
+      this.lease = lease
+      this.device = lease.device
+      this.engine = lease.engine
+      this.stream = lease.stream
       this.deviceLost = false
       this.configureContext()
-      this.watchDevice(device)
+      this.watchDevice(lease.device)
       // The new stream has no history, so the next frame must be a full match.
       this.sourceDirty = true
       this.matchDirty = true
@@ -841,8 +817,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     this.destroyed = true
     this.srcTexture?.destroy()
     this.stream.destroy()
-    this.engine.destroy()
+    this.unwatch?.()
     this.context.unconfigure()
-    this.device.destroy()
+    // The engine and the device go when the last renderer using them does.
+    this.lease.release()
   }
 }

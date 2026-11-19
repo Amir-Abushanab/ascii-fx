@@ -124,6 +124,7 @@ export function useAsciiEffect(options: UseAsciiEffectOptions): AsciiPass | null
     match.hysteresis,
     match.jitter,
     match.jitterSeed,
+    match.motion,
     fit,
     clearColor,
     palette,

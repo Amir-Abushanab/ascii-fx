@@ -1,12 +1,4 @@
-import type {
-  AlphaMode,
-  AsciiProfile,
-  ColorMode,
-  MotionOptions,
-  PaletteOptions,
-  RGB,
-  ResolvedPalette,
-} from '@ascii-fx/core'
+import type { AsciiProfile, ColorMode, MotionOptions, ResolvedPalette } from '@ascii-fx/core'
 import {
   AsciiFrame,
   FLAG_TRANSPARENT,
@@ -27,7 +19,16 @@ import {
   REDUCE_WGSL,
 } from './shaders.js'
 import { MAX_GPU_GLYPHS } from './limits.js'
-import type { FitMode, InteractionOptions, InteractionType, PostOptions } from './types.js'
+import type {
+  InteractionType,
+  StreamFxState,
+  StreamMatchOptions,
+  StreamViewOptions,
+} from './types.js'
+
+// Declared in types.ts, so the main entry's declarations do not have to load this module's:
+// everything here is written in terms of WebGPU's global types, and the main entry's are not.
+export type { StreamFxState, StreamMatchOptions, StreamViewOptions }
 import { outputCanBeTransparent, resolvePost } from './types.js'
 
 /** §21 option (0..1) to the 0..255 the field is actually defined on. */
@@ -64,60 +65,8 @@ const FX_KIND: Record<InteractionType, number> = {
 const pack24 = (rgb: readonly [number, number, number]): number =>
   (rgb[0] | (rgb[1] << 8) | (rgb[2] << 16)) >>> 0
 
-export interface StreamMatchOptions {
-  columns?: number
-  rows?: number
-  color?: ColorMode
-  /** Default 'structural'. 'chromatic' implies colorMode 'glyph' (ALGORITHM.md §C). */
-  matcher?: 'structural' | 'chromatic'
-  alpha?: AlphaMode
-  foreground?: RGB
-  background?: RGB
-  flatThreshold?: number
-  /** Source texels are linear-light; encode to sRGB before quantization (§28, Three render targets). */
-  srgbEncode?: boolean
-  /** Exact temporal reuse (spec §21): unchanged cells skip matching. Costs one reduced-buffer copy per frame. */
-  temporal?: boolean
-  /**
-   * Compute the per-cell motion field (ALGORITHM.md §21) for the composite to
-   * drive an effect with. Absent means no field and no buffer for one.
-   */
-  motion?: MotionOptions
-  /**
-   * chromatic-v1 only (ALGORITHM.md §C5): keep the previous glyph unless a
-   * challenger beats it by this fraction. Default 0 (off). The previous frame
-   * is whatever the cells buffer already holds, so no extra state is needed.
-   */
-  hysteresis?: number
-  /** jitter-v1 (ALGORITHM.md §20): 0..255, default 0 (off). Structural matcher only. */
-  jitter?: number
-  /** jitter-v1 seed, default 0. */
-  jitterSeed?: number
-}
-
-export interface StreamViewOptions {
-  width: number
-  height: number
-  fit?: FitMode
-  clearColor?: readonly [number, number, number, number]
-  /** palette-v1 (ALGORITHM.md §22), applied between the matcher's cells and the composite. */
-  palette?: PaletteOptions | null
-  post?: PostOptions | null
-}
-
 /** QParams in QUANTIZE_WGSL: 8 u32, then 16 vec4<i32> of offsets and 64 vec4<u32> of colours. */
 const QPARAMS_BYTES = 32 + 16 * 16 + 64 * 16
-
-export interface StreamFxState {
-  interaction: InteractionOptions | null
-  /** Device pixels. */
-  pointerX: number
-  pointerY: number
-  velX: number
-  velY: number
-  /** Seconds. */
-  time: number
-}
 
 /**
  * Static per-(device, profile) GPU resources: pipelines, atlas + mips, glyph

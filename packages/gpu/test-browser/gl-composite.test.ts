@@ -176,6 +176,8 @@ describe('webgl2 compositor', () => {
       color: 'full',
       workers: false,
       interaction: { type: 'reveal', radius: 0.3 },
+      // Bloom has a texture of its own, recomputed per frame and not per present.
+      post: { bloom: 1 },
     })
     renderer.setSource(source)
     renderer.render()
@@ -201,10 +203,10 @@ describe('webgl2 compositor', () => {
       expect(meanAbsDiff(readPixels(canvas), left)).toBeGreaterThan(1)
       expect(uploads).toBe(0)
 
-      // A new source is new pixels and a new frame: both go up.
+      // A new source is new pixels, a new frame and a new bloom field: all three go up.
       renderer.setSource(randomImage(160, 96, 32))
       renderer.render()
-      expect(uploads).toBeGreaterThanOrEqual(2)
+      expect(uploads).toBeGreaterThanOrEqual(3)
     } finally {
       proto.texImage2D = originals.texImage2D
       proto.texSubImage2D = originals.texSubImage2D

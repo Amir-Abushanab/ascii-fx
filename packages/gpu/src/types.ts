@@ -140,6 +140,77 @@ export function resolvePost(post: PostOptions | null | undefined): Required<Post
   return out
 }
 
+/**
+ * `GPUDeviceLostInfo` and `GPUError` where the WebGPU types exist — TypeScript's own DOM
+ * library from 6.0, or `@webgpu/types` before that — and their shape where they do not. The
+ * declarations a consumer loads from the main entry name no WebGPU global outright, so a
+ * project on TypeScript 5 that never touches the GPU types does not need them installed to
+ * compile against this package.
+ */
+type GlobalInstance<Name extends string, Fallback> = typeof globalThis extends {
+  [K in Name]: { prototype: infer T }
+}
+  ? T
+  : Fallback
+export type DeviceLostInfo = GlobalInstance<
+  'GPUDeviceLostInfo',
+  { readonly reason: 'unknown' | 'destroyed'; readonly message: string }
+>
+export type GpuError = GlobalInstance<'GPUError', { readonly message: string }>
+
+/** What `AsciiStream.configure` matches with (the WebGPU backend's half of the options). */
+export interface StreamMatchOptions {
+  columns?: number
+  rows?: number
+  color?: ColorMode
+  /** Default 'structural'. 'chromatic' implies colorMode 'glyph' (ALGORITHM.md §C). */
+  matcher?: 'structural' | 'chromatic'
+  alpha?: AlphaMode
+  foreground?: RGB
+  background?: RGB
+  flatThreshold?: number
+  /** Source texels are linear-light; encode to sRGB before quantization (§28, Three render targets). */
+  srgbEncode?: boolean
+  /** Exact temporal reuse (spec §21): unchanged cells skip matching. Costs one reduced-buffer copy per frame. */
+  temporal?: boolean
+  /**
+   * Compute the per-cell motion field (ALGORITHM.md §21) for the composite to
+   * drive an effect with. Absent means no field and no buffer for one.
+   */
+  motion?: MotionOptions
+  /**
+   * chromatic-v1 only (ALGORITHM.md §C5): keep the previous glyph unless a
+   * challenger beats it by this fraction. Default 0 (off). The previous frame
+   * is whatever the cells buffer already holds, so no extra state is needed.
+   */
+  hysteresis?: number
+  /** jitter-v1 (ALGORITHM.md §20): 0..255, default 0 (off). Structural matcher only. */
+  jitter?: number
+  /** jitter-v1 seed, default 0. */
+  jitterSeed?: number
+}
+
+export interface StreamViewOptions {
+  width: number
+  height: number
+  fit?: FitMode
+  clearColor?: readonly [number, number, number, number]
+  /** palette-v1 (ALGORITHM.md §22), applied between the matcher's cells and the composite. */
+  palette?: PaletteOptions | null
+  post?: PostOptions | null
+}
+
+export interface StreamFxState {
+  interaction: InteractionOptions | null
+  /** Device pixels. */
+  pointerX: number
+  pointerY: number
+  velX: number
+  velY: number
+  /** Seconds. */
+  time: number
+}
+
 export interface AsciiPointer {
   /** Normalized canvas coordinates (0..1, top-left origin). */
   set(x: number, y: number): void
@@ -265,7 +336,7 @@ export interface AsciiRendererOptions {
    * context for good, so falling back to the CPU matcher needs a fresh <canvas>
    * element, which only the caller can swap in. WebGPU backend only.
    */
-  onDeviceLost?: (info: GPUDeviceLostInfo) => void
+  onDeviceLost?: (info: DeviceLostInfo) => void
   /**
    * Called when the GPU reports an error the renderer did not catch — a resource
    * or dispatch that failed validation at run time. WebGPU never throws for
@@ -273,7 +344,7 @@ export interface AsciiRendererOptions {
    * being correct and there is no signal anywhere that anything went wrong.
    * Defaults to logging. WebGPU backend only.
    */
-  onError?: (error: GPUError) => void
+  onError?: (error: GpuError) => void
 }
 
 export type AsciiRendererRuntimeOptions = Partial<

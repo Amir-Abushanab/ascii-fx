@@ -129,6 +129,8 @@ export class CpuAsciiRenderer implements AsciiRenderer {
   private displayed?: { from: AsciiFrame; key: string; frame: AsciiFrame }
   /** Bloom field for the displayed frame, cached the same way. */
   private glow?: { from: AsciiFrame; key: string; field: Float32Array }
+  /** Bumped when the field is recomputed: its buffer is reused, so identity says nothing. */
+  private glowEpoch = 0
   private glowCanvas?: HTMLCanvasElement | OffscreenCanvas
   private scanStrip?: { key: string; canvas: HTMLCanvasElement | OffscreenCanvas }
   /**
@@ -331,6 +333,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
     if (g && g.from === frame && g.key === key) return g.field
     const field = glowField(frame, { foreground: fg, background: bg }, g?.field)
     this.glow = { from: frame, key, field }
+    this.glowEpoch++
     return field
   }
 
@@ -565,6 +568,7 @@ export class CpuAsciiRenderer implements AsciiRenderer {
       background: bd,
       post: resolvePost(this.opts.post),
       glow: this.glowFor(frame),
+      glowEpoch: this.glowEpoch,
     }
 
     const interaction = this.interaction
