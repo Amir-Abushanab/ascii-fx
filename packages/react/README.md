@@ -38,8 +38,10 @@ It fires once per distinct failure: a profile that couldn't be loaded, a failed 
 The source case is the one to know about. Rendering reads the image's or video's pixels, and the browser refuses that for media from another origin unless it was loaded with CORS. Pass `crossOrigin` (the server has to send the headers too), or the ASCII render never appears and `onError` gets a `SecurityError`:
 
 ```tsx
-<AsciiImage src="https://cdn.example.com/cat.jpg" alt="Cat" crossOrigin="anonymous" />
-<AsciiVideo src="https://cdn.example.com/clip.mp4" crossOrigin="anonymous" autoPlay muted loop />
+<>
+  <AsciiImage src="https://cdn.example.com/cat.jpg" alt="Cat" crossOrigin="anonymous" />
+  <AsciiVideo src="https://cdn.example.com/clip.mp4" crossOrigin="anonymous" autoPlay muted loop />
+</>
 ```
 
 ## Painting the source
@@ -70,13 +72,25 @@ nothing per frame.
 `<AsciiVideo>` autoplays by default. With `autoPlay={false}` nothing plays until you say so: `videoRef` hands you the `<video>` underneath, and the ASCII render follows it whether it is playing, paused or scrubbed.
 
 ```tsx
-const video = useRef<HTMLVideoElement>(null)
-
-<AsciiVideo src="/clip.mp4" autoPlay={false} videoRef={video} aria-label="Product walkthrough" />
-<button onClick={() => video.current?.play()}>Play</button>
+function Walkthrough() {
+  const video = useRef<HTMLVideoElement>(null)
+  return (
+    <>
+      <AsciiVideo
+        src="/clip.mp4"
+        autoPlay={false}
+        videoRef={video}
+        aria-label="Product walkthrough"
+      />
+      <button onClick={() => video.current?.play()}>Play</button>
+    </>
+  )
+}
 ```
 
-A `<video>` has no `alt`, so give `<AsciiVideo>` an `aria-label` (or `aria-labelledby`). `<AsciiCanvas>` takes the same two props: its canvas is hidden from assistive technology, so without a label or children that describe it there is nothing to read.
+All three components pass anything a `<div>` takes — `id`, `data-*`, `aria-*`, `role`, `title`, `tabIndex`, event handlers — to their wrapper element. (`onError` is the exception: it reports the renderer failing, as above, not the DOM event.)
+
+A `<video>` has no `alt`, so give `<AsciiVideo>` an `aria-label` (or `aria-labelledby`), which goes on the video itself. `<AsciiCanvas>` takes the same two props: its canvas is hidden from assistive technology, so without a label or children that describe it there is nothing to read.
 
 ## Motion and cost
 
@@ -85,7 +99,10 @@ A `<video>` has no `alt`, so give `<AsciiVideo>` an `aria-label` (or `aria-label
 ## Hooks
 
 ```tsx
-const { renderer, profile, error, canvasKey } = useAscii(canvasRef, { profile, columns: 120 })
+const { renderer, profile, error, canvasKey } = useAscii(canvasRef, {
+  profile: '/default.asciip',
+  columns: 120,
+})
 ```
 
 `canvasKey` is the important one: put it on your `<canvas key={canvasKey}>`. It changes when the canvas has to be thrown away and remade — a backend switch, or a device loss the renderer couldn't recover from — because a canvas is bound to its first context type for good, so one that ran WebGPU can never fall back to 2D.

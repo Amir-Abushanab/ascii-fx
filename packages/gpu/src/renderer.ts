@@ -1,12 +1,15 @@
 import type { AsciiFrame, AsciiProfile } from '@ascii-fx/core'
 import { deriveGrid } from '@ascii-fx/core'
-import { AsciiEngine, AsciiStream } from './engine.js'
+import type { AsciiEngine, AsciiStream } from './engine.js'
+import { type GpuLease, leaseGpu } from './sharedDevice.js'
 import { MAX_GPU_GLYPHS } from './limits.js'
 import type {
   AsciiPointer,
   AsciiRenderer,
   AsciiRendererOptions,
   AsciiRendererRuntimeOptions,
+  DeviceLostInfo,
+  GpuError,
   InteractionOptions,
   RenderSource,
 } from './types.js'
@@ -28,7 +31,11 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   readonly profile: AsciiProfile
   readonly pointer: AsciiPointer
 
-  // Swapped wholesale when a lost device is rebuilt, so none of these are readonly.
+  // Swapped wholesale when a lost device is rebuilt, so none of these are readonly. The
+  // device and engine are shared with every other renderer on the page (sharedDevice.ts);
+  // the stream is this renderer's own.
+  private lease: GpuLease
+  private unwatch?: () => void
   private device: GPUDevice
   private readonly context: GPUCanvasContext
   private readonly format: GPUTextureFormat
@@ -52,6 +59,14 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   private adaptiveEma = 1000 / 60
   private adaptiveHealthy = 0
   private adaptiveCooldown = 0
+  /**
+   * How long the GPU takes to finish a frame's work, smoothed, in ms; negative until
+   * measured. Frame intervals alone cannot tell a slow renderer from a slow display — a
+   * screen throttled to 30 Hz delivers 33 ms frames however little work each one is — so
+   * pacing asks both.
+   */
+  private adaptiveGpuMs = -1
+  private gpuProbePending = false
   private lastTickAt = 0
 
   private interaction: InteractionOptions | null = null
@@ -73,6 +88,11 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   private wantRunning = false
   /** A throw from the loop has been logged and not yet followed by a good frame. */
   private loopFaulted = false
+  /** Whether srcTexture holds a frame of the current source yet. */
+  private uploaded = false
+  /** Bumped per wait for a video's first frame, so only the latest wait's wake-up counts. */
+  private frameWait = 0
+  private frameWaitTries = 0
 
   private running = false
   private loopGeneration = 0
@@ -86,16 +106,14 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
   /** Consecutive recovery attempts inside one incident window (see recover). */
   private recoverAttempts = 0
   private lastRecoverAt = 0
-  private readonly onDeviceLost?: (info: GPUDeviceLostInfo) => void
-  private readonly onError?: (error: GPUError) => void
+  private readonly onDeviceLost?: (info: DeviceLostInfo) => void
+  private readonly onError?: (error: GpuError) => void
 
   private constructor(init: {
     options: AsciiRendererOptions
-    device: GPUDevice
+    lease: GpuLease
     context: GPUCanvasContext
     format: GPUTextureFormat
-    engine: AsciiEngine
-    stream: AsciiStream
   }) {
     const { options } = init
     this.profile = options.profile
@@ -115,11 +133,12 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     this.interaction = interaction ?? null
     this.onDeviceLost = onDeviceLost
     this.onError = onError
-    this.device = init.device
+    this.lease = init.lease
+    this.device = init.lease.device
     this.context = init.context
     this.format = init.format
-    this.engine = init.engine
-    this.stream = init.stream
+    this.engine = init.lease.engine
+    this.stream = init.lease.stream
     this.pointer = {
       set: (x: number, y: number) => {
         this.pointerX = x
@@ -132,7 +151,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       },
     }
     this.configureContext()
-    this.watchDevice(init.device)
+    this.watchDevice(this.device)
   }
 
   static async create(options: AsciiRendererOptions): Promise<WebGpuAsciiRenderer> {
@@ -151,42 +170,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
           'Use the CPU backend for larger charsets.',
       )
     }
-    const adapter = await navigator.gpu.requestAdapter()
-    if (!adapter) throw new Error('WebGPU is present but no adapter is available on this device.')
-    const device = await adapter.requestDevice()
-    // WebGPU reports most failures through error scopes, not exceptions.
-    // createBuffer, createTexture and createBindGroup all validate silently, so a
-    // browser whose limits or WGSL support differ from the one this was developed
-    // on can accept every setup call and then render nothing — indistinguishable
-    // from a working renderer unless we ask. Asking is what makes 'auto' able to
-    // fall back instead of sitting on a GPU path that produces no pixels.
-    device.pushErrorScope('validation')
-    device.pushErrorScope('internal')
+    const format = navigator.gpu.getPreferredCanvasFormat()
+    // Setup, its error scopes and the lost-during-setup check all live with the lease.
+    const lease = await leaseGpu(options.profile, format)
     try {
-      const format = navigator.gpu.getPreferredCanvasFormat()
-      const engine = await AsciiEngine.create(device, options.profile)
-      const stream = await engine.createStream(format)
-      const internal = await device.popErrorScope()
-      const validation = await device.popErrorScope()
-      const failure = internal ?? validation
-      if (failure) {
-        throw new Error(
-          `WebGPU accepted the renderer setup and then reported an error, so it would render nothing: ${failure.message}`,
-        )
-      }
-      // A device can be handed out already lost (stale adapter) or die during
-      // setup. Every call above then no-ops and BOTH error scopes resolve
-      // null, so without this check a dead renderer passes setup, binds the
-      // canvas, and forecloses the CPU fallback. One macrotask lets the lost
-      // promise's reaction run if it has already resolved.
-      let lostDuringSetup: GPUDeviceLostInfo | undefined
-      void device.lost.then((lost) => {
-        lostDuringSetup = lost
-      })
-      await new Promise((r) => setTimeout(r, 0))
-      if (lostDuringSetup) {
-        throw new Error(`WebGPU device was lost during renderer setup (${lostDuringSetup.reason}).`)
-      }
       // Touch the canvas last. Everything above can fail on a browser with a
       // partial WebGPU implementation, and 'auto' has to be able to fall back to
       // the CPU backend afterwards — which it cannot once this call has bound the
@@ -198,9 +185,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
             'if this canvas previously ran the CPU backend, create a fresh <canvas> element to switch backends.',
         )
       }
-      return new WebGpuAsciiRenderer({ options, device, context, format, engine, stream })
+      return new WebGpuAsciiRenderer({ options, lease, context, format })
     } catch (err) {
-      device.destroy()
+      lease.stream.destroy()
+      lease.release()
       throw err
     }
   }
@@ -235,14 +223,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
    * whatever was last presented. The only way to notice is to watch for it.
    */
   private watchDevice(device: GPUDevice): void {
-    // Errors outside an explicit scope surface here and nowhere else. Ignoring
-    // them is how a renderer ends up submitting work that is silently dropped.
-    device.addEventListener('uncapturederror', (event) => {
-      if (this.destroyed || device !== this.device) return
-      const { error } = event as GPUUncapturedErrorEvent
-      if (this.onError) this.onError(error)
-      else console.error('[ascii-fx] WebGPU error:', error.message)
-    })
+    // Uncaught GPU errors are raised on the device, and the device is shared: the lease
+    // reports each one once across every renderer on it (sharedDevice.ts).
+    this.unwatch?.()
+    this.unwatch = this.lease.watchErrors(this.onError)
     void device.lost.then((info) => {
       // destroy() resolves this too, and an already-replaced device resolves it
       // late; neither is a failure.
@@ -282,32 +266,29 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       }
       if (typeof navigator === 'undefined' || !navigator.gpu)
         throw new Error('navigator.gpu went away')
-      const adapter = await navigator.gpu.requestAdapter()
-      if (this.destroyed) return
-      if (!adapter) throw new Error('no adapter available after device loss')
-      const device = await adapter.requestDevice()
+      // The old lease is on a dead device. Releasing it first is what lets the next lease —
+      // this renderer's, or another's recovering from the same loss — open a fresh one.
+      this.stream.destroy()
+      this.lease.release()
+      const lease = await leaseGpu(this.profile, this.format)
+      // destroy() may have raced the await above; a destroyed renderer must
+      // not re-bind its canvas or keep a share of the replacement device.
       if (this.destroyed) {
-        device.destroy()
-        return
-      }
-      const engine = await AsciiEngine.create(device, this.profile)
-      const stream = await engine.createStream(this.format)
-      // destroy() may have raced the awaits above; a destroyed renderer must
-      // not re-bind its canvas or keep a live replacement device for GC.
-      if (this.destroyed) {
-        device.destroy()
+        lease.stream.destroy()
+        lease.release()
         return
       }
       // Everything below is device-owned and died with it.
       this.srcTexture = undefined
       this.srcW = 0
       this.srcH = 0
-      this.device = device
-      this.engine = engine
-      this.stream = stream
+      this.lease = lease
+      this.device = lease.device
+      this.engine = lease.engine
+      this.stream = lease.stream
       this.deviceLost = false
       this.configureContext()
-      this.watchDevice(device)
+      this.watchDevice(lease.device)
       // The new stream has no history, so the next frame must be a full match.
       this.sourceDirty = true
       this.matchDirty = true
@@ -393,6 +374,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.adaptiveEma = 1000 / 60
       this.adaptiveHealthy = 0
       this.adaptiveCooldown = 0
+      this.adaptiveGpuMs = -1
       this.lastTickAt = 0
     }
     if (matchChanged || adaptiveChanged) {
@@ -411,9 +393,15 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
 
   setInteraction(interaction: InteractionOptions | null): void {
     assertInteraction(interaction)
-    // The field is allocated by configure(), which reads this.
-    if (interaction?.source !== this.interaction?.source) this.matchDirty = true
+    // The field is allocated by configure(), which reads this — and which a still never
+    // reaches again by itself, so a motion source asked for after the first frame used to
+    // stay pointer-driven.
+    const sourceChanged = interaction?.source !== this.interaction?.source
     this.interaction = interaction
+    if (sourceChanged) {
+      this.matchDirty = true
+      if (this.srcTexture) this.reconfigureStream()
+    }
     this.scheduleRender()
   }
 
@@ -503,11 +491,18 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       })
       this.srcW = w
       this.srcH = h
+      this.uploaded = false
     }
     this.reconfigureStream()
   }
 
-  private uploadSource(): void {
+  /**
+   * Copy the source into srcTexture. False when the source is a video with no frame to give
+   * yet, which is not a failure: a video reports itself loaded a moment before the browser
+   * has a decoded frame it can hand over, and the copy throws in that window. The texture
+   * keeps what it had and the copy is retried when the frame arrives.
+   */
+  private uploadSource(): boolean {
     const source = this.source!
     if (isRawImage(source)) {
       this.device.queue.writeTexture(
@@ -517,12 +512,44 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
         [this.srcW, this.srcH],
       )
     } else {
-      this.device.queue.copyExternalImageToTexture(
-        { source: source as GPUCopyExternalImageSource },
-        { texture: this.srcTexture!, premultipliedAlpha: false, colorSpace: 'srgb' },
-        [this.srcW, this.srcH],
-      )
+      try {
+        this.device.queue.copyExternalImageToTexture(
+          { source: source as GPUCopyExternalImageSource },
+          { texture: this.srcTexture!, premultipliedAlpha: false, colorSpace: 'srgb' },
+          [this.srcW, this.srcH],
+        )
+      } catch (err) {
+        const video =
+          typeof HTMLVideoElement !== 'undefined' && source instanceof HTMLVideoElement
+            ? source
+            : null
+        // A cross-origin video without CORS is a SecurityError, and that one is real.
+        const name = err instanceof Error ? err.name : ''
+        if (!video || (name !== 'OperationError' && name !== 'InvalidStateError')) throw err
+        this.awaitVideoFrame(video)
+        return false
+      }
     }
+    this.uploaded = true
+    this.frameWaitTries = 0
+    return true
+  }
+
+  /** Render again once `video` has a frame, by whichever of the two signals comes first. */
+  private awaitVideoFrame(video: HTMLVideoElement): void {
+    // A video that never produces a frame is not polled for ever.
+    if (this.frameWaitTries++ > 40) return
+    const wait = ++this.frameWait
+    const wake = (): void => {
+      if (wait !== this.frameWait || this.destroyed || this.source !== video) return
+      this.frameWait++
+      this.sourceDirty = true
+      this.scheduleRender()
+    }
+    // The frame callback is the precise signal, but it only comes for a video the browser
+    // is compositing; the timer covers one that is not on the page.
+    if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(wake)
+    setTimeout(wake, 120)
   }
 
   render(): void {
@@ -535,7 +562,13 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
           {
             view: this.context.getCurrentTexture().createView(),
             loadOp: 'clear',
-            clearValue: { r: clear[0], g: clear[1], b: clear[2], a: clear[3] },
+            // Premultiplied: the canvas is, whenever this alpha is below 1.
+            clearValue: {
+              r: clear[0] * clear[3],
+              g: clear[1] * clear[3],
+              b: clear[2] * clear[3],
+              a: clear[3],
+            },
             storeOp: 'store',
           },
         ],
@@ -550,10 +583,17 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     // composites of the frame already matched rather than a re-upload of the same pixels.
     if (this.sourceDirty || (this.sourceLive && !this.frameLoop)) {
       this.prepareSource()
-      this.uploadSource()
-      this.matchDirty = true
-      this.sourceDirty = false
-      this.pendingRect = undefined
+      if (this.uploadSource()) {
+        this.matchDirty = true
+        this.sourceDirty = false
+        this.pendingRect = undefined
+      } else {
+        // No frame from the video yet. Keep showing what there is; with nothing matched
+        // so far there is nothing to show, and matching an empty texture would paint a
+        // black frame over the fallback underneath.
+        this.sourceDirty = true
+        if (!this.uploaded) return
+      }
     }
 
     // Matching and presentation are separate submits: an invalid canvas
@@ -569,7 +609,7 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       const rect = this.pendingRect
       this.pendingRect = undefined
       this.prepareSource()
-      this.uploadSource()
+      if (!this.uploadSource()) return
       const grid = this.stream.grid()!
       const c0 = Math.max(0, Math.floor((rect.x * grid.columns) / this.srcW))
       const r0 = Math.max(0, Math.floor((rect.y * grid.rows) / this.srcH))
@@ -628,8 +668,10 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       this.frameLoop = true
       const cb = (): void => {
         if (!this.running || generation !== this.loopGeneration) return
+        if (this.opts.adaptiveResolution) this.paceAdaptive()
         this.sourceDirty = true
         this.renderGuarded()
+        if (this.opts.adaptiveResolution) this.probeGpu()
         this.rvfcId = video.requestVideoFrameCallback(cb)
       }
       this.rvfcId = video.requestVideoFrameCallback(cb)
@@ -639,28 +681,47 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
         if (!this.running || generation !== this.loopGeneration) return
         if (this.opts.adaptiveResolution) this.paceAdaptive()
         this.renderGuarded()
+        if (this.opts.adaptiveResolution) this.probeGpu()
         this.rafId = requestAnimationFrame(tick)
       }
       this.rafId = requestAnimationFrame(tick)
     }
   }
 
-  /** Frame pacing with hysteresis (spec §46): step down fast, recover slowly. */
+  /**
+   * Frame pacing with hysteresis (spec §46): step down fast, recover slowly.
+   *
+   * Pressure is the renderer being the thing that is slow. In an animation loop that is
+   * frames arriving late *and* the GPU taking a real share of a frame to finish them: late
+   * frames with an idle GPU are the display's doing — a 30 Hz panel, a browser in low-power
+   * mode — and stepping the grid down for those gains nothing and, since the frames stay
+   * late, never recovers. In a video loop the frames arrive at the video's rate whatever
+   * happens, so the question is only whether the GPU finishes one before the next is due.
+   */
   private paceAdaptive(): void {
     const now = performance.now()
     if (this.lastTickAt > 0) {
       const interval = now - this.lastTickAt
       this.adaptiveEma = this.adaptiveEma * 0.9 + interval * 0.1
       const target = 1000 / 60
+      const gpu = this.adaptiveGpuMs
+      // The GPU figure is a round trip to the GPU process and reads several ms with nothing
+      // to do, so the thresholds sit well clear of that floor: busy is a whole 60 Hz frame.
+      const pressure = this.frameLoop
+        ? gpu > this.adaptiveEma * 0.8
+        : this.adaptiveEma > target * 1.6 && gpu > target
+      const healthy = this.frameLoop
+        ? gpu >= 0 && gpu < this.adaptiveEma * 0.4
+        : this.adaptiveEma < target * 1.08 || (gpu >= 0 && gpu < target * 0.6)
       if (this.adaptiveCooldown > 0) {
         this.adaptiveCooldown--
-      } else if (this.adaptiveEma > target * 1.6 && this.adaptiveScale > 0.35) {
+      } else if (pressure && this.adaptiveScale > 0.35) {
         this.adaptiveScale *= 0.85
         this.adaptiveCooldown = 30
         this.adaptiveHealthy = 0
         this.matchDirty = true
         if (this.srcTexture) this.reconfigureStream()
-      } else if (this.adaptiveEma < target * 1.08 && this.adaptiveScale < 1) {
+      } else if (healthy && this.adaptiveScale < 1) {
         this.adaptiveHealthy++
         if (this.adaptiveHealthy > 120) {
           this.adaptiveScale = Math.min(1, this.adaptiveScale / 0.85)
@@ -672,6 +733,25 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
       }
     }
     this.lastTickAt = now
+  }
+
+  /** Time the work just submitted, one measurement at a time. */
+  private probeGpu(): void {
+    if (this.gpuProbePending || this.deviceLost) return
+    this.gpuProbePending = true
+    const device = this.device
+    const started = performance.now()
+    device.queue.onSubmittedWorkDone().then(
+      () => {
+        this.gpuProbePending = false
+        if (device !== this.device || this.destroyed) return
+        const ms = performance.now() - started
+        this.adaptiveGpuMs = this.adaptiveGpuMs < 0 ? ms : this.adaptiveGpuMs * 0.8 + ms * 0.2
+      },
+      () => {
+        this.gpuProbePending = false
+      },
+    )
   }
 
   stop(): void {
@@ -729,8 +809,9 @@ export class WebGpuAsciiRenderer implements AsciiRenderer {
     this.destroyed = true
     this.srcTexture?.destroy()
     this.stream.destroy()
-    this.engine.destroy()
+    this.unwatch?.()
     this.context.unconfigure()
-    this.device.destroy()
+    // The engine and the device go when the last renderer using them does.
+    this.lease.release()
   }
 }

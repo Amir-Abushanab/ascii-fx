@@ -66,6 +66,12 @@ describe('AsciiFrame exports', () => {
     }
   })
 
+  it('toSVG falls back to monospace for a font family that is not text', () => {
+    const odd = { ...profile, metadata: { ...profile.metadata, fontFamily: 42 as never } }
+    const frame = matchFrame(topDark, { profile: odd, columns: 1, rows: 1, color: 'mono' })
+    expect(frameToSVG(frame)).toContain('font-family="monospace"')
+  })
+
   it('toSVG skips blank cells instead of emitting them', () => {
     const blank = matchFrame(
       makeCell(() => [0, 0, 0]),

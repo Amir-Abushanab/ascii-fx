@@ -73,7 +73,7 @@ the `NODE_AUTH_TOKEN` line in the `env` of `release.yml`'s Publish step.
 
 | Script               | What it does                                                                                                                                                                                                                                                                                                      |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm check`         | The gate: build, format, lint, typecheck, node tests, browser-cpu tests, knip, depcruise, skill validation + staleness. Also the pre-commit hook.                                                                                                                                                                 |
+| `pnpm check`         | The gate: build, format, lint, typecheck, README snippets compiled against the packages, node tests, browser-cpu tests, knip, depcruise, skill validation + staleness. Also the pre-commit hook.                                                                                                                  |
 | `pnpm quality`       | `check` plus `pnpm audit --audit-level low`. Local only — CI audits at `high` in a job that gates nothing, because an advisory lands with no change on our side and should not red-light an unrelated PR.                                                                                                         |
 | `pnpm run version`   | `changeset version` + sync the skill version. Needs `run` — bare `pnpm version` is pnpm's own built-in. Needs `GITHUB_TOKEN` too (the changelog plugin resolves commits and authors via the API); `GITHUB_TOKEN=$(gh auth token) pnpm run version` works locally. Normally the version workflow's job, not yours. |
 | `pnpm package:check` | publint + are-the-types-wrong + smoke, on every packed tarball (see below). Needs a build first.                                                                                                                                                                                                                  |
@@ -119,6 +119,13 @@ release directly — release.yml publishes from a runner, not from a laptop — 
 not need to: the changesets "Version Packages" PR only touches `package.json`,
 `CHANGELOG.md` and `.changeset/`, so matcher code reaches main only through a push that
 went through the hook.
+
+A release that touches `packages/three`, or moves its `three` peer range, wants one more
+run by hand, for the same reason: `pnpm test:three-versions` runs that package's suites
+against the peer floor and the two releases either side of the output-pass change
+(r170, r174, r178) instead of only the version the devDependency pins. The package reaches
+three's `GPUDevice` through `renderer.backend`, which three does not document, so an old
+release is exactly where it would break unnoticed.
 
 It fails rather than passes when the machine has no real adapter. `describe.runIf` means
 an adapterless run executes none of the suite and still exits 0 — 15 passed, 50 skipped,

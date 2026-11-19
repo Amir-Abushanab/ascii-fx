@@ -71,6 +71,12 @@ describe('asciip/1 codec', () => {
     expect(() => decodeProfile(overlap)).toThrow(/overlaps section/)
   })
 
+  it('rejects metadata whose optional fields are the wrong type', () => {
+    const profile = decodeProfile(encodeProfile(makeProfile(STANDARD_SIX)))
+    const odd = { ...profile, metadata: { ...profile.metadata, fontFamily: 42 as never } }
+    expect(() => decodeProfile(encodeProfile(odd))).toThrow(/fontFamily or fontWeight/)
+  })
+
   it('rejects inconsistent glyph counts', () => {
     const bytes = encodeProfile(makeProfile(STANDARD_SIX))
     const view = new DataView(bytes.buffer)

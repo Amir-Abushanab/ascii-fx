@@ -5,7 +5,6 @@ export { forwardTiltToPointer, TiltSource, type TiltOptions, type TiltStatus } f
 export { MAX_GPU_GLYPHS } from './limits.js'
 // Types only: erased at build, so they cost the main entry nothing. The classes behind them
 // live on `./webgpu` and `./cpu`, which createAsciiRenderer loads lazily.
-export type { StreamFxState, StreamMatchOptions, StreamViewOptions } from './engine.js'
 export type {
   AsciiPipeline,
   AsciiPointer,
@@ -13,11 +12,16 @@ export type {
   AsciiRendererOptions,
   AsciiRendererRuntimeOptions,
   BackendChoice,
+  DeviceLostInfo,
   FitMode,
+  GpuError,
   InteractionOptions,
   InteractionType,
   PostOptions,
   RenderSource,
+  StreamFxState,
+  StreamMatchOptions,
+  StreamViewOptions,
 } from './types.js'
 
 /**

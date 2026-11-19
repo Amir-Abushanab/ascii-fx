@@ -399,6 +399,14 @@ export function decodeProfile(bytes: Uint8Array): AsciiProfile {
         ) {
           throw corruptProfile('metadata is missing required string fields.')
         }
+        // Optional, but typed: these are written into exports as text, and a profile is a
+        // file someone else may have built.
+        if (
+          (metadata.fontFamily !== undefined && typeof metadata.fontFamily !== 'string') ||
+          (metadata.fontWeight !== undefined && typeof metadata.fontWeight !== 'number')
+        ) {
+          throw corruptProfile('metadata fontFamily or fontWeight has the wrong type.')
+        }
         break
       }
       default:

@@ -32,7 +32,18 @@ import { getAsciiSupport } from '@ascii-fx/gpu'
 import type { TiltSource } from '@ascii-fx/gpu/tilt'
 import { useAscii, usePrefersReducedMotion } from './hooks.js'
 
-export interface AsciiCommonProps {
+/**
+ * Everything a `<div>` takes that these components do not use for something of their own.
+ * It all goes on the wrapper element: `id`, `data-*`, `aria-*`, `role`, `title`, `tabIndex`,
+ * and event handlers. `color` and `onError` are left out because they mean something else
+ * here (the colour mode, and the renderer failing — not the DOM `error` event).
+ */
+type WrapperDomProps = Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  'children' | 'className' | 'style' | 'color' | 'onError'
+>
+
+export interface AsciiCommonProps extends WrapperDomProps {
   /** Omit for a runtime 'monospace' profile — precompiled profiles render faster and deterministically. */
   profile?: ProfileSource
   backend?: BackendChoice
@@ -106,6 +117,62 @@ export interface AsciiCommonProps {
   onError?: (error: Error) => void
   className?: string
   style?: CSSProperties
+}
+
+/**
+ * The props that are renderer options. Anything else left over after a component has taken
+ * its own props is for the wrapper element. A record rather than a list so the compiler
+ * holds it to the props type both ways: a renderer prop missing here would be sent to the
+ * DOM as an attribute, and one that is not a prop at all would never match.
+ */
+const RENDERER_PROPS: Record<
+  Exclude<
+    keyof AsciiCommonProps,
+    | keyof WrapperDomProps
+    | 'profile'
+    | 'backend'
+    | 'interaction'
+    | 'tilt'
+    | 'pauseWhenOffscreen'
+    | 'respectReducedMotion'
+    | 'onError'
+    | 'className'
+    | 'style'
+  >,
+  true
+> = {
+  workers: true,
+  compositor: true,
+  columns: true,
+  rows: true,
+  color: true,
+  alpha: true,
+  foreground: true,
+  background: true,
+  flatThreshold: true,
+  matcher: true,
+  hysteresis: true,
+  jitter: true,
+  jitterSeed: true,
+  fit: true,
+  clearColor: true,
+  temporal: true,
+  adaptiveResolution: true,
+  palette: true,
+  post: true,
+}
+
+type RendererProps = Pick<AsciiCommonProps, keyof typeof RENDERER_PROPS>
+
+/** Split what is left of a component's props into renderer options and wrapper attributes. */
+function splitProps(rest: object): { options: RendererProps; dom: WrapperDomProps } {
+  const options: Record<string, unknown> = {}
+  const dom: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(rest)) {
+    if (key in RENDERER_PROPS) options[key] = value
+    else dom[key] = value
+  }
+  return { options, dom }
 }
 
 /** Imperative surface (spec §31). */
@@ -544,8 +611,9 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
     respectReducedMotion = true,
     tilt,
     onError,
-    ...options
+    ...rest
   } = props
+  const { options, dom } = splitProps(rest)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -590,6 +658,12 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
     }
     const attachSource = (): void => {
       if (!live || img.naturalWidth === 0) return
+      // `load` can fire again for the same element (a responsive image picking another
+      // candidate), and each attach builds its own buffer and loop: drop the last one's.
+      if (raf) cancelAnimationFrame(raf)
+      raf = 0
+      stopGate?.()
+      stopGate = undefined
       const buffer = drawn ? document.createElement('canvas') : undefined
       if (buffer) {
         buffer.width = img.naturalWidth
@@ -670,7 +744,7 @@ export const AsciiImage = forwardRef<AsciiHandle, AsciiImageProps>(function Asci
   useHandle(ref, renderer, useTiltForward(renderer, tilt, respectReducedMotion))
 
   return (
-    <div ref={wrapperRef} className={className} style={wrapperStyle(style)}>
+    <div {...dom} ref={wrapperRef} className={className} style={wrapperStyle(style)}>
       <img
         ref={imgRef}
         src={src}
@@ -731,8 +805,9 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
     respectReducedMotion = true,
     tilt,
     onError,
-    ...options
+    ...rest
   } = props
+  const { options, dom } = splitProps(rest)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -796,7 +871,7 @@ export const AsciiVideo = forwardRef<AsciiHandle, AsciiVideoProps>(function Asci
   useHandle(ref, renderer, useTiltForward(renderer, tilt, respectReducedMotion))
 
   return (
-    <div ref={wrapperRef} className={className} style={wrapperStyle(style)}>
+    <div {...dom} ref={wrapperRef} className={className} style={wrapperStyle(style)}>
       <video
         ref={videoRef}
         src={src}
@@ -847,8 +922,9 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(
       respectReducedMotion = true,
       tilt,
       onError,
-      ...options
+      ...rest
     } = props
+    const { options, dom } = splitProps(rest)
     const wrapperRef = useRef<HTMLDivElement>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const { renderer, canvasKey, error } = useAscii(canvasRef, {
@@ -892,10 +968,11 @@ export const AsciiCanvas = forwardRef<AsciiHandle, AsciiCanvasProps>(
 
     return (
       <div
+        {...dom}
         ref={wrapperRef}
         className={className}
         style={wrapperStyle(style)}
-        role={ariaLabel || ariaLabelledBy ? 'img' : undefined}
+        role={dom.role ?? (ariaLabel || ariaLabelledBy ? 'img' : undefined)}
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledBy}
       >

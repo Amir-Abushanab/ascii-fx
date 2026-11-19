@@ -1,12 +1,4 @@
-import type {
-  AlphaMode,
-  AsciiProfile,
-  ColorMode,
-  MotionOptions,
-  PaletteOptions,
-  RGB,
-  ResolvedPalette,
-} from '@ascii-fx/core'
+import type { AsciiProfile, ColorMode, MotionOptions, ResolvedPalette } from '@ascii-fx/core'
 import {
   AsciiFrame,
   FLAG_TRANSPARENT,
@@ -27,7 +19,16 @@ import {
   REDUCE_WGSL,
 } from './shaders.js'
 import { MAX_GPU_GLYPHS } from './limits.js'
-import type { FitMode, InteractionOptions, InteractionType, PostOptions } from './types.js'
+import type {
+  InteractionType,
+  StreamFxState,
+  StreamMatchOptions,
+  StreamViewOptions,
+} from './types.js'
+
+// Declared in types.ts, so the main entry's declarations do not have to load this module's:
+// everything here is written in terms of WebGPU's global types, and the main entry's are not.
+export type { StreamFxState, StreamMatchOptions, StreamViewOptions }
 import { outputCanBeTransparent, resolvePost } from './types.js'
 
 /** §21 option (0..1) to the 0..255 the field is actually defined on. */
@@ -64,60 +65,8 @@ const FX_KIND: Record<InteractionType, number> = {
 const pack24 = (rgb: readonly [number, number, number]): number =>
   (rgb[0] | (rgb[1] << 8) | (rgb[2] << 16)) >>> 0
 
-export interface StreamMatchOptions {
-  columns?: number
-  rows?: number
-  color?: ColorMode
-  /** Default 'structural'. 'chromatic' implies colorMode 'glyph' (ALGORITHM.md §C). */
-  matcher?: 'structural' | 'chromatic'
-  alpha?: AlphaMode
-  foreground?: RGB
-  background?: RGB
-  flatThreshold?: number
-  /** Source texels are linear-light; encode to sRGB before quantization (§28, Three render targets). */
-  srgbEncode?: boolean
-  /** Exact temporal reuse (spec §21): unchanged cells skip matching. Costs one reduced-buffer copy per frame. */
-  temporal?: boolean
-  /**
-   * Compute the per-cell motion field (ALGORITHM.md §21) for the composite to
-   * drive an effect with. Absent means no field and no buffer for one.
-   */
-  motion?: MotionOptions
-  /**
-   * chromatic-v1 only (ALGORITHM.md §C5): keep the previous glyph unless a
-   * challenger beats it by this fraction. Default 0 (off). The previous frame
-   * is whatever the cells buffer already holds, so no extra state is needed.
-   */
-  hysteresis?: number
-  /** jitter-v1 (ALGORITHM.md §20): 0..255, default 0 (off). Structural matcher only. */
-  jitter?: number
-  /** jitter-v1 seed, default 0. */
-  jitterSeed?: number
-}
-
-export interface StreamViewOptions {
-  width: number
-  height: number
-  fit?: FitMode
-  clearColor?: readonly [number, number, number, number]
-  /** palette-v1 (ALGORITHM.md §22), applied between the matcher's cells and the composite. */
-  palette?: PaletteOptions | null
-  post?: PostOptions | null
-}
-
 /** QParams in QUANTIZE_WGSL: 8 u32, then 16 vec4<i32> of offsets and 64 vec4<u32> of colours. */
 const QPARAMS_BYTES = 32 + 16 * 16 + 64 * 16
-
-export interface StreamFxState {
-  interaction: InteractionOptions | null
-  /** Device pixels. */
-  pointerX: number
-  pointerY: number
-  velX: number
-  velY: number
-  /** Seconds. */
-  time: number
-}
 
 /**
  * Static per-(device, profile) GPU resources: pipelines, atlas + mips, glyph
@@ -448,7 +397,6 @@ export class AsciiStream {
   }
   private featuresBuf?: GPUBuffer
   private cellsBuf?: GPUBuffer
-  private stagingBuf?: GPUBuffer
   private temporalPrimed = false
   /**
    * §21 field, one u32 per cell: trail in bits 8..15, previous mean luma in
@@ -607,7 +555,6 @@ export class AsciiStream {
       this.prevReducedBuf = undefined
       this.featuresBuf?.destroy()
       this.cellsBuf?.destroy()
-      this.stagingBuf?.destroy()
       this.motionBuf?.destroy()
       this.motionBuf = undefined
       this.qcellsBuf?.destroy()
@@ -625,10 +572,6 @@ export class AsciiStream {
       this.cellsBuf = d.createBuffer({
         size: n * 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      })
-      this.stagingBuf = d.createBuffer({
-        size: n * 16,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       })
     }
     let temporalAllocated = false
@@ -1064,9 +1007,12 @@ export class AsciiStream {
     f(17, cellScreenH)
     f(18, lod)
     f(19, 0)
-    dv.setFloat32(80, clear[0], true)
-    dv.setFloat32(84, clear[1], true)
-    dv.setFloat32(88, clear[2], true)
+    // Premultiplied, like everything else the composite writes: `clearColor` is given as
+    // straight rgba, and passing it through raw made a see-through ground brighter than it
+    // was asked to be ([0.5, 0, 0, 0.5] came out as full red at half alpha).
+    dv.setFloat32(80, clear[0] * clear[3], true)
+    dv.setFloat32(84, clear[1] * clear[3], true)
+    dv.setFloat32(88, clear[2] * clear[3], true)
     dv.setFloat32(92, clear[3], true)
     const post = resolvePost(view.post)
     f(24, cw)
@@ -1152,10 +1098,22 @@ export class AsciiStream {
     // With a palette, the export is the snapped frame — what is on screen. Snapped here rather
     // than trusted from the last composite, which may predate a palette change.
     this.encodeQuantize(enc)
-    enc.copyBufferToBuffer(this.displayCells, 0, this.stagingBuf!, 0, n * 16)
+    // A buffer of its own per call. One shared buffer meant a second capture started while
+    // the first was still mapped — two awaits in a Promise.all, a capture during an export —
+    // failed on the copy, and a grid change mid-await destroyed the buffer under the first.
+    const staging = d.createBuffer({
+      size: n * 16,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    })
+    enc.copyBufferToBuffer(this.displayCells, 0, staging, 0, n * 16)
     d.queue.submit([enc.finish()])
-    await this.stagingBuf!.mapAsync(GPUMapMode.READ)
-    const words = new Uint32Array(this.stagingBuf!.getMappedRange())
+    try {
+      await staging.mapAsync(GPUMapMode.READ)
+    } catch (err) {
+      staging.destroy()
+      throw err
+    }
+    const words = new Uint32Array(staging.getMappedRange())
     const color = this.colorMode()
     const glyphIds = new Uint16Array(n)
     const flags = new Uint16Array(n)
@@ -1175,7 +1133,7 @@ export class AsciiStream {
       if (needFg) fg![i] = transparent ? 0 : ((words[i * 4 + 1] & 0xffffff) | 0xff000000) >>> 0
       if (needBg) bg![i] = transparent ? 0 : ((words[i * 4 + 2] & 0xffffff) | 0xff000000) >>> 0
     }
-    this.stagingBuf!.unmap()
+    staging.destroy()
     return new AsciiFrame({
       columns,
       rows,
@@ -1193,7 +1151,6 @@ export class AsciiStream {
     this.prevReducedBuf?.destroy()
     this.featuresBuf?.destroy()
     this.cellsBuf?.destroy()
-    this.stagingBuf?.destroy()
     this.paramsBuf.destroy()
     this.motionBuf?.destroy()
     this.motionPlaceholder.destroy()

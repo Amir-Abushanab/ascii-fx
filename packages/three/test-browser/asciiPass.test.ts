@@ -79,14 +79,40 @@ describe.runIf(gpuAvailable)('AsciiPass (three WebGPURenderer)', () => {
         { profile, columns: 12, color: 'full', alpha: 'ignore' },
       )
 
-    let cpuFrame = cpuOf(pixels)
-    if (!cpuFrame.glyphIds.every((v, i) => v === gpuFrame.glyphIds[i])) {
-      // readRenderTargetPixelsAsync row order differs across three versions; try flipped.
-      const flipped = new Uint8Array(pixels.length)
-      for (let y = 0; y < 64; y++) {
-        flipped.set(pixels.subarray(y * 96 * 4, (y + 1) * 96 * 4), (63 - y) * 96 * 4)
+    // The scene, rasterized by hand: axis-aligned quads under an orthographic camera cover
+    // a pixel exactly when its centre is inside, later quads over earlier ones. This is the
+    // reference when three cannot read its own target back (r170 returns zeros), and a
+    // check on the readback when it can.
+    const drawn = new Uint8Array(96 * 64 * 4)
+    for (let i = 3; i < drawn.length; i += 4) drawn[i] = 255
+    const rasterize = (x: number, y: number, w: number, h: number, rgb: number[]): void => {
+      for (let py = 0; py < 64; py++) {
+        for (let px = 0; px < 96; px++) {
+          const wx = ((px + 0.5) / 96) * 2 - 1
+          const wy = 1 - ((py + 0.5) / 64) * 2
+          if (wx < x - w / 2 || wx >= x + w / 2 || wy <= y - h / 2 || wy > y + h / 2) continue
+          drawn.set(rgb, (py * 96 + px) * 4)
+        }
       }
-      cpuFrame = cpuOf(flipped)
+    }
+    rasterize(-0.4, 0.3, 0.9, 0.8, [255, 255, 255])
+    rasterize(0.5, -0.2, 0.7, 1.0, [255, 0, 0])
+    rasterize(0.1, 0.6, 1.2, 0.4, [0, 255, 0])
+
+    let cpuFrame = cpuOf(drawn)
+    if (pixels.some((v, i) => i % 4 !== 3 && v !== 0)) {
+      let read = cpuOf(pixels)
+      if (!read.glyphIds.every((v, i) => v === gpuFrame.glyphIds[i])) {
+        // readRenderTargetPixelsAsync row order differs across three versions; try flipped.
+        const flipped = new Uint8Array(pixels.length)
+        for (let y = 0; y < 64; y++) {
+          flipped.set(pixels.subarray(y * 96 * 4, (y + 1) * 96 * 4), (63 - y) * 96 * 4)
+        }
+        read = cpuOf(flipped)
+      }
+      // The two references have to agree before either is worth comparing against.
+      expect(read.glyphIds).toEqual(cpuFrame.glyphIds)
+      cpuFrame = read
     }
 
     expect(gpuFrame.glyphIds).toEqual(cpuFrame.glyphIds)
@@ -132,10 +158,15 @@ describe.runIf(gpuAvailable)('AsciiPass (three WebGPURenderer)', () => {
     pass.render(scene, camera)
     const frame = await pass.captureFrame()
     // Reinhard maps white to 0.5 linear, which is 188 in sRGB. Without the output pass
-    // this is 255.
+    // this is 255 — which is what a three older than r178 gives, where the pass renders
+    // straight into its target. This suite runs against more than one three (see the README).
     const level = frame.foreground![0] & 0xff
-    expect(level).toBeGreaterThan(178)
-    expect(level).toBeLessThan(198)
+    if (Number(THREE.REVISION) >= 178) {
+      expect(level).toBeGreaterThan(178)
+      expect(level).toBeLessThan(198)
+    } else {
+      expect(level).toBe(255)
+    }
 
     expect([pass.renderTarget.width, pass.renderTarget.height]).toEqual([96, 64])
     renderer.setSize(128, 32, false)
@@ -149,6 +180,24 @@ describe.runIf(gpuAvailable)('AsciiPass (three WebGPURenderer)', () => {
 
     pass.dispose()
     renderer.dispose()
+  })
+
+  // The gpu renderer refuses these; the pass used to take them and do nothing.
+  it('refuses the options the renderer refuses', async () => {
+    const THREE = await import('three/webgpu')
+    const { AsciiPass } = await import('@ascii-fx/three')
+    const { makeProfile, STANDARD_SIX } = await import('../../core/test/synthetic.js')
+    const renderer = new THREE.WebGPURenderer({ canvas: document.createElement('canvas') })
+    const profile = makeProfile(STANDARD_SIX)
+    expect(
+      () => new AsciiPass({ profile, renderer, interaction: { type: 'wave', source: 'motion' } }),
+    ).toThrow(/single origin/)
+    const pass = new AsciiPass({ profile, renderer })
+    expect(() => pass.setInteraction({ type: 'push', source: 'motion' })).toThrow(/single origin/)
+    expect(() => pass.set({ jitter: 999 })).toThrow(/0\.\.255/)
+    pass.setInteraction({ type: 'reveal', source: 'motion' })
+    pass.dispose()
+    // The renderer was never initialized, and older three cannot dispose one that was not.
   })
 
   it('AsciiGlyphs builds an instanced grid from a frame', async () => {
