@@ -1,5 +1,13 @@
 # @ascii-fx/core
 
+## 0.11.0
+
+### Minor Changes
+
+- [#42](https://github.com/Amir-Abushanab/ascii-fx/pull/42) [`2fdbb1c`](https://github.com/Amir-Abushanab/ascii-fx/commit/2fdbb1cd1c071a2c68da4b1adf51683bfbb2fff7) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - **Breaking:** `decodeProfile` rejects a profile whose `fontFamily` or `fontWeight` metadata is the wrong type. Such a file used to load, and then made `frameToSVG` throw on a non-string `fontFamily`. Nothing `@ascii-fx/compiler` or `createAsciiProfile` writes is affected; a profile produced by other tooling may be.
+
+  `frameToSVG` also falls back to `monospace` for a profile built in memory with a non-string `fontFamily`, rather than throwing.
+
 ## 0.10.0
 
 ### Patch Changes

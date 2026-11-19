@@ -1,5 +1,13 @@
 # @ascii-fx/vite
 
+## 0.11.0
+
+### Patch Changes
+
+- Updated dependencies [[`2fdbb1c`](https://github.com/Amir-Abushanab/ascii-fx/commit/2fdbb1cd1c071a2c68da4b1adf51683bfbb2fff7)]:
+  - @ascii-fx/core@0.11.0
+  - @ascii-fx/compiler@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes
