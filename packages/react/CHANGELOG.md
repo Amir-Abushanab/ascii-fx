@@ -1,5 +1,18 @@
 # @ascii-fx/react
 
+## 0.11.0
+
+### Minor Changes
+
+- [#42](https://github.com/Amir-Abushanab/ascii-fx/pull/42) [`89144c7`](https://github.com/Amir-Abushanab/ascii-fx/commit/89144c7bbdf58cfeeeda9766242965be938a10ed) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - - **Breaking: props the components do not know go to the wrapper element.** `<AsciiImage>`, `<AsciiVideo>` and `<AsciiCanvas>` now pass anything a `<div>` takes — `id`, `data-*`, `aria-*`, `role`, `title`, `tabIndex`, event handlers — to their wrapper. They used to be handed to the renderer as options, where they did nothing. So a prop that was silently ignored now lands on a `<div>`: an `onClick` starts firing, and a misspelt or made-up prop becomes a DOM attribute (React warns about those it does not recognise). `onError` keeps its meaning (the renderer failing).
+  - **`<AsciiImage draw>`:** a second `load` event on the same element (a responsive image choosing another candidate) no longer leaves the first buffer and its animation loop running behind the new one.
+
+### Patch Changes
+
+- Updated dependencies [[`2fdbb1c`](https://github.com/Amir-Abushanab/ascii-fx/commit/2fdbb1cd1c071a2c68da4b1adf51683bfbb2fff7), [`89144c7`](https://github.com/Amir-Abushanab/ascii-fx/commit/89144c7bbdf58cfeeeda9766242965be938a10ed), [`2fdbb1c`](https://github.com/Amir-Abushanab/ascii-fx/commit/2fdbb1cd1c071a2c68da4b1adf51683bfbb2fff7), [`2fdbb1c`](https://github.com/Amir-Abushanab/ascii-fx/commit/2fdbb1cd1c071a2c68da4b1adf51683bfbb2fff7), [`89144c7`](https://github.com/Amir-Abushanab/ascii-fx/commit/89144c7bbdf58cfeeeda9766242965be938a10ed)]:
+  - @ascii-fx/core@0.11.0
+  - @ascii-fx/gpu@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes

@@ -1,5 +1,36 @@
 # @ascii-fx/gpu
 
+## 0.11.0
+
+### Minor Changes
+
+- [#42](https://github.com/Amir-Abushanab/ascii-fx/pull/42) [`2fdbb1c`](https://github.com/Amir-Abushanab/ascii-fx/commit/2fdbb1cd1c071a2c68da4b1adf51683bfbb2fff7) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - Every WebGPU renderer on a page shares one `GPUDevice`, and renderers with the same profile share one engine on it. Each renderer used to request a device of its own and build the same four compute pipelines and the same glyph atlas again: a gallery of thirty `<AsciiImage>` was thirty devices, and browsers budget devices and can refuse the next one. Now the pipelines and atlas are built once and each renderer adds only the buffers for its own canvas.
+
+  Nothing changes in what a renderer produces, and there is nothing to configure. The device is destroyed with the last renderer on it. A lost device is replaced once and every renderer moves to the replacement, where each used to request its own.
+
+  **Breaking: `onError` reports for the page, not for the renderer.** A GPU error that nothing caught is raised on the device, and a shared device cannot say whose work failed. Each such error is now reported once for the page: to each distinct `onError` handler, and once to the console if any renderer has none. So an `onError` can be told about an error another renderer caused, and renderers that share one `onError` function get one call between them rather than one each. Pass every renderer the same function to hear about each error exactly once. (`onError` on the React components is a different thing — it reports the render failing to appear — and is not affected.)
+
+  `AsciiEngine` and `AsciiStream` from `@ascii-fx/gpu/webgpu` are unchanged for code that drives them on a device of its own, as `@ascii-fx/three` does.
+
+### Patch Changes
+
+- [#42](https://github.com/Amir-Abushanab/ascii-fx/pull/42) [`89144c7`](https://github.com/Amir-Abushanab/ascii-fx/commit/89144c7bbdf58cfeeeda9766242965be938a10ed) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - - **`adaptiveResolution` tells a slow GPU from a slow display.** It judged pressure from frame intervals alone, so a display throttled to 30 Hz read as sustained pressure: the grid stepped down to a third of what was asked for and never came back, since a smaller grid cannot make the display faster. It now also times the GPU's work, and steps down only when that is what is late. It paces video too, which it never did.
+  - **A see-through `clearColor` presents at the strength it was given.** The shader compositors passed it through unpremultiplied, so `[0.5, 0, 0, 0.5]` came out as full red at half alpha. Canvas2D was already right; all three agree now.
+  - **`captureFrame()` calls can overlap** on WebGPU. They shared one staging buffer, so a second capture started before the first had been read back was rejected.
+  - **A pointer move uploads nothing** on the CPU backend's WebGL2 compositor. Every present repacked all the cells, pushed the bloom and motion textures up again, and with `reveal` or `original-mix` the whole source image too, on every move.
+  - **`setInteraction({ source: 'motion' })` on a still** takes effect on WebGPU; set after the first frame it stayed pointer-driven.
+
+- [#42](https://github.com/Amir-Abushanab/ascii-fx/pull/42) [`2fdbb1c`](https://github.com/Amir-Abushanab/ascii-fx/commit/2fdbb1cd1c071a2c68da4b1adf51683bfbb2fff7) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - The package's types compile on TypeScript 5 without `@webgpu/types`. The main entry's declarations named WebGPU's global types (`GPUDevice`, `GPUDeviceLostInfo`, …), which TypeScript only ships in its own DOM library from 6.0. A project on 5.x with `skipLibCheck: false` got 25 errors from inside `@ascii-fx/gpu` unless it had installed `@webgpu/types`, even if it never touched the GPU types; with `skipLibCheck` on, the same types quietly became `any`.
+
+  `onDeviceLost` and `onError` are now typed with two exported aliases, `DeviceLostInfo` and `GpuError`: the WebGPU types where they exist, their shape where they do not. `@ascii-fx/gpu/webgpu`, which is written in terms of a `GPUDevice` you pass it, still needs the WebGPU types, as before.
+
+- [#42](https://github.com/Amir-Abushanab/ascii-fx/pull/42) [`89144c7`](https://github.com/Amir-Abushanab/ascii-fx/commit/89144c7bbdf58cfeeeda9766242965be938a10ed) Thanks [@Amir-Abushanab](https://github.com/Amir-Abushanab)! - WebGPU: a video that has just loaded no longer fails its first render. A `<video>` reports `loadeddata` a moment before the browser has a decoded frame it can hand to the GPU, and the copy throws in that window. `<AsciiVideo>` renders at exactly that moment, so on an unlucky load the ASCII render never appeared (and since 0.10.0, `onError` reported it). The renderer now waits for the frame and renders when it arrives.
+
+  Found by a new suite that puts a real video in front of both backends: playing, paused, hovered while paused, resized, seeked and resumed. Until now every test fed the renderer stills and canvases.
+
+- Updated dependencies [[`2fdbb1c`](https://github.com/Amir-Abushanab/ascii-fx/commit/2fdbb1cd1c071a2c68da4b1adf51683bfbb2fff7)]:
+  - @ascii-fx/core@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes
