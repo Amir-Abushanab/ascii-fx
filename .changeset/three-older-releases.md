@@ -1,6 +1,6 @@
 ---
-'@ascii-fx/three': patch
-'@ascii-fx/react-three': patch
+'@ascii-fx/three': minor
+'@ascii-fx/react-three': minor
 ---
 
 Two fixes for three releases older than the one this package is developed on, both regressions in 0.10.0:
@@ -12,6 +12,6 @@ The suite now runs against r170, r174, r178 and r187 (`pnpm test:three-versions`
 
 Also:
 
-- `AsciiPass` refuses what the renderer refuses: a motion-driven `wave`, `push` or `resolution`, and `jitter` out of range. It used to accept them and do nothing.
+- **Breaking:** `AsciiPass` refuses what the renderer refuses: a motion-driven `wave`, `push` or `resolution`, and `jitter` out of range. It used to accept them and do nothing; the constructor, `set()` and `setInteraction()` now throw, so code passing one of these stops working until the option is removed.
 - `<AsciiEffect>` picks up a change to its `motion` option.
 - When the pass cannot reach the renderer's internals, the error names the three revision that is running and the ones it was tested on; three below r170 gets one warning.

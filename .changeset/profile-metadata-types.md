@@ -1,5 +1,7 @@
 ---
-'@ascii-fx/core': patch
+'@ascii-fx/core': minor
 ---
 
-`decodeProfile` rejects a profile whose `fontFamily` or `fontWeight` metadata is the wrong type, and `frameToSVG` falls back to `monospace` for one built in memory. A non-string `fontFamily` made `frameToSVG` throw.
+**Breaking:** `decodeProfile` rejects a profile whose `fontFamily` or `fontWeight` metadata is the wrong type. Such a file used to load, and then made `frameToSVG` throw on a non-string `fontFamily`. Nothing `@ascii-fx/compiler` or `createAsciiProfile` writes is affected; a profile produced by other tooling may be.
+
+`frameToSVG` also falls back to `monospace` for a profile built in memory with a non-string `fontFamily`, rather than throwing.
